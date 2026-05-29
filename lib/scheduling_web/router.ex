@@ -18,6 +18,10 @@ defmodule SchedulingWeb.Router do
     pipe_through :browser
 
     get "/", PageController, :home
+
+    live "/offices", OfficeLive.Index, :index
+    live "/offices/new", OfficeLive.Index, :new
+    live "/offices/:id/edit", OfficeLive.Index, :edit
   end
 
   # Other scopes may use custom stacks.
