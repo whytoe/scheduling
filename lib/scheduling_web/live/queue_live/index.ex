@@ -24,7 +24,8 @@ defmodule SchedulingWeb.QueueLive.Index do
          socket
          |> put_flash(
            :info,
-           "Accepted #{patient_name(assigned)} → #{assigned.assigned_office.name}. #{result.rationale}"
+           "Accepted #{patient_name(assigned)} → #{assigned.assigned_office.name}. " <>
+             "#{result.rationale}#{eligibility_detail(result)}"
          )
          |> stream_delete(:waiting, entry)
          |> assign_offices()}
@@ -64,6 +65,19 @@ defmodule SchedulingWeb.QueueLive.Index do
     end
   end
 
+  defp eligibility_detail(%Result{eligible: []}), do: ""
+
+  defp eligibility_detail(%Result{eligible: candidates}) do
+    detail =
+      candidates
+      |> Enum.map(fn c ->
+        "#{c.office.name} (#{c.free_capacity} free, #{c.surplus} surplus)"
+      end)
+      |> Enum.join("; ")
+
+    " Eligible: #{detail}."
+  end
+
   defp required_names(entry) do
     case entry.required_capabilities do
       caps when is_list(caps) and caps != [] ->
@@ -81,6 +95,11 @@ defmodule SchedulingWeb.QueueLive.Index do
       <.header>
         Waiting room
         <:subtitle>Accept a waiting patient to route them to the best-fit office.</:subtitle>
+        <:actions>
+          <.link navigate={~p"/decisions"} class="text-sm font-semibold">
+            Routing decisions
+          </.link>
+        </:actions>
       </.header>
 
       <section class="mb-8">

@@ -1,6 +1,8 @@
 defmodule Scheduling.QueueAcceptTest do
   use Scheduling.DataCase, async: true
 
+  alias Scheduling.Audit
+  alias Scheduling.Audit.RoutingDecision
   alias Scheduling.Catalog.Capability
   alias Scheduling.Matching.Result
   alias Scheduling.Offices
@@ -131,6 +133,59 @@ defmodule Scheduling.QueueAcceptTest do
       assert names == ["High", "Low"]
       assert hd(waiting).id == high.id
       refute "Done" in names
+    end
+  end
+
+  describe "accept/1 — routing decision audit log" do
+    test "records a decision capturing the chosen office on success" do
+      xray = capability_fixture("XRay")
+      mri = capability_fixture("MRI")
+
+      tight = office_fixture("Tight Room", 2, [xray.id])
+      _loose = office_fixture("Loose Room", 2, [xray.id, mri.id])
+
+      entry =
+        waiting_entry([xray], patient_name: "Jane Doe") |> Repo.preload(:patient)
+
+      {:ok, _assigned, _result} = Queue.accept(entry, accepted_by: "front-desk")
+
+      assert [%RoutingDecision{} = decision] = Audit.list_decisions()
+      assert decision.queue_entry_id == entry.id
+      assert decision.patient_id == entry.patient_id
+      assert decision.patient_name == "Jane Doe"
+      assert decision.chosen_office_id == tight.id
+      assert decision.chosen_office_name == "Tight Room"
+      assert decision.required_capabilities == ["XRay"]
+      assert decision.eligible_offices == ["Tight Room", "Loose Room"]
+      assert decision.accepted_by == "front-desk"
+      assert decision.rationale =~ "Tight Room"
+    end
+
+    test "records a no-eligible-office decision with no chosen office" do
+      capability_fixture("XRay") |> then(&office_fixture("XRay Room", 2, [&1.id]))
+      mri = capability_fixture("MRI")
+
+      entry = waiting_entry([mri], patient_name: "Sam Roe") |> Repo.preload(:patient)
+
+      assert {:no_eligible_office, %Result{}} = Queue.accept(entry)
+
+      assert [%RoutingDecision{} = decision] = Audit.list_decisions()
+      assert decision.queue_entry_id == entry.id
+      assert is_nil(decision.chosen_office_id)
+      assert is_nil(decision.chosen_office_name)
+      assert decision.required_capabilities == ["MRI"]
+      assert decision.eligible_offices == []
+      assert decision.rationale =~ "No eligible office"
+    end
+
+    test "records one decision per accept call" do
+      xray = capability_fixture("XRay")
+      _office = office_fixture("Room A", 5, [xray.id])
+
+      {:ok, _, _} = Queue.accept(waiting_entry([xray], patient_name: "A"))
+      {:ok, _, _} = Queue.accept(waiting_entry([xray], patient_name: "B"))
+
+      assert length(Audit.list_decisions()) == 2
     end
   end
 

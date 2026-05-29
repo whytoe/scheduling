@@ -23,6 +23,8 @@ defmodule SchedulingWeb.Router do
 
     live "/queue", QueueLive.Index, :index
 
+    live "/decisions", RoutingDecisionLive.Index, :index
+
     live "/offices", OfficeLive.Index, :index
     live "/offices/new", OfficeLive.Index, :new
     live "/offices/:id/edit", OfficeLive.Index, :edit

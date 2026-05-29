@@ -10,6 +10,7 @@ defmodule Scheduling.Queue do
   """
   import Ecto.Query, warn: false
 
+  alias Scheduling.Audit
   alias Scheduling.Matching
   alias Scheduling.Matching.Result
   alias Scheduling.Queue.QueueEntry
@@ -70,6 +71,9 @@ defmodule Scheduling.Queue do
   the best-fit matcher over the patient's required capabilities, and assigns
   the patient to the chosen office.
 
+  Every matcher run is recorded to the routing-decision audit log (both the
+  assigned and no-eligible-office outcomes). `opts` may carry `:accepted_by`.
+
   Returns:
 
     * `{:ok, entry, result}` — assigned; `entry` reloaded as `:assigned` with
@@ -79,15 +83,16 @@ defmodule Scheduling.Queue do
     * `{:error, changeset}` — the assignment write failed (e.g. the entry was
       no longer waiting).
   """
-  @spec accept(QueueEntry.t()) ::
+  @spec accept(QueueEntry.t(), keyword()) ::
           {:ok, QueueEntry.t(), Result.t()}
           | {:no_eligible_office, Result.t()}
           | {:error, Ecto.Changeset.t()}
-  def accept(%QueueEntry{} = entry) do
+  def accept(%QueueEntry{} = entry, opts \\ []) do
     result = Matching.match_queue_entry(entry, current_loads())
 
     case Result.chosen_office(result) do
       nil ->
+        Audit.record_decision(entry, result, opts)
         {:no_eligible_office, result}
 
       office ->
@@ -96,6 +101,7 @@ defmodule Scheduling.Queue do
         |> Repo.update()
         |> case do
           {:ok, assigned} ->
+            Audit.record_decision(entry, result, opts)
             broadcast_board_change({:accepted, assigned.id})
             {:ok, Repo.preload(assigned, [:patient, :assigned_office]), result}
 
