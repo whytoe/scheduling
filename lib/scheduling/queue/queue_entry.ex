@@ -70,6 +70,49 @@ defmodule Scheduling.Queue.QueueEntry do
   end
 
   @doc """
+  Marks service finished: transitions an active entry (`:assigned` or
+  `:in_service`) to `:completed`. The assigned office is preserved for the
+  audit trail, but because `:completed` is not an active status the office's
+  derived load drops immediately, freeing the intake slot.
+
+  Rejected from any non-active status so a waiting or already-completed entry
+  cannot be completed.
+  """
+  def completion_changeset(%__MODULE__{} = queue_entry) do
+    queue_entry
+    |> change(status: :completed)
+    |> validate_active()
+  end
+
+  @doc """
+  Re-queues an active entry for an additional service: transitions it back to
+  `:waiting`, releases its assigned office (freeing the slot), and replaces its
+  required capabilities with `capabilities` (the needs of the next service).
+
+  Rejected from any non-active status. Pass the loaded `Capability` structs the
+  next service requires; the existing join rows are replaced.
+  """
+  def requeue_changeset(%__MODULE__{} = queue_entry, capabilities)
+      when is_list(capabilities) do
+    queue_entry
+    |> change(status: :waiting, assigned_office_id: nil)
+    |> put_assoc(:required_capabilities, capabilities)
+    |> validate_active()
+  end
+
+  defp validate_active(changeset) do
+    if changeset.data.status in @active_statuses do
+      changeset
+    else
+      add_error(
+        changeset,
+        :status,
+        "must be assigned or in service, was #{changeset.data.status}"
+      )
+    end
+  end
+
+  @doc """
   Replaces the set of required capabilities on the entry. Pass the loaded
   `Capability` structs that should be required; the existing join rows are
   replaced.

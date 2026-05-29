@@ -50,6 +50,21 @@ defmodule Scheduling.Queue do
   end
 
   @doc """
+  Lists entries currently occupying an office's capacity (statuses in
+  `QueueEntry.active_statuses/0`), oldest assignment first, with the patient,
+  required capabilities, and assigned office preloaded for display.
+  """
+  def list_active_entries do
+    active = QueueEntry.active_statuses()
+
+    QueueEntry
+    |> where([e], e.status in ^active)
+    |> order_by([e], asc: e.updated_at, asc: e.id)
+    |> Repo.all()
+    |> Repo.preload([:patient, :required_capabilities, :assigned_office])
+  end
+
+  @doc """
   Current per-office load as a `%{office_id => count}` map, counting only
   entries whose status occupies capacity. Offices with no active assignments
   are absent from the map (the matcher treats them as zero load).
@@ -108,6 +123,58 @@ defmodule Scheduling.Queue do
           {:error, changeset} ->
             {:error, changeset}
         end
+    end
+  end
+
+  @doc """
+  Completes service for an active entry: transitions it to `:completed` and
+  frees the office's intake slot. Because load is derived from active statuses,
+  the freed capacity is immediately reflected by `current_loads/0`, the matcher,
+  and the board. Broadcasts a board change so connected boards update live.
+
+  Returns `{:ok, entry}` with the patient and (preserved) assigned office
+  preloaded, or `{:error, changeset}` if the entry was not active.
+  """
+  @spec complete(QueueEntry.t()) ::
+          {:ok, QueueEntry.t()} | {:error, Ecto.Changeset.t()}
+  def complete(%QueueEntry{} = entry) do
+    entry
+    |> QueueEntry.completion_changeset()
+    |> Repo.update()
+    |> case do
+      {:ok, completed} ->
+        broadcast_board_change({:completed, completed.id})
+        {:ok, Repo.preload(completed, [:patient, :assigned_office])}
+
+      {:error, changeset} ->
+        {:error, changeset}
+    end
+  end
+
+  @doc """
+  Re-queues an active entry for an additional service: releases its office
+  (freeing the slot) and returns it to `:waiting` with `capabilities` as its new
+  required capabilities. Used for multi-service visits where the patient needs a
+  further capability after the current service finishes. Broadcasts a board
+  change so the freed capacity and the re-queued patient appear live.
+
+  Returns `{:ok, entry}` with the patient and required capabilities preloaded,
+  or `{:error, changeset}` if the entry was not active.
+  """
+  @spec requeue(QueueEntry.t(), [Scheduling.Catalog.Capability.t()]) ::
+          {:ok, QueueEntry.t()} | {:error, Ecto.Changeset.t()}
+  def requeue(%QueueEntry{} = entry, capabilities) when is_list(capabilities) do
+    entry
+    |> Repo.preload(:required_capabilities)
+    |> QueueEntry.requeue_changeset(capabilities)
+    |> Repo.update()
+    |> case do
+      {:ok, requeued} ->
+        broadcast_board_change({:requeued, requeued.id})
+        {:ok, Repo.preload(requeued, [:patient, :required_capabilities])}
+
+      {:error, changeset} ->
+        {:error, changeset}
     end
   end
 end

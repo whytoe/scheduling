@@ -114,4 +114,60 @@ defmodule SchedulingWeb.QueueLiveTest do
       assert reloaded.status == :waiting
     end
   end
+
+  describe "complete action" do
+    test "completes service, frees capacity, and moves the patient off the board",
+         %{conn: conn} do
+      xray = capability_fixture("XRay")
+      office = office_fixture("Room A", 1, [xray.id])
+      entry = waiting_entry("Jane Doe", [xray])
+
+      {:ok, live, _html} = live(conn, ~p"/queue")
+
+      # Accept first so the patient is in service.
+      _ = live |> element("button", "Accept") |> render_click()
+      assert Scheduling.Queue.current_loads() == %{office.id => 1}
+      assert has_element?(live, "#active-#{entry.id}")
+
+      html = live |> element("#complete-#{entry.id}") |> render_click()
+
+      assert html =~ "Completed service for Jane Doe"
+      # Slot is freed and the entry leaves the in-service list.
+      assert Scheduling.Queue.current_loads() == %{}
+      refute has_element?(live, "#active-#{entry.id}")
+
+      reloaded = Repo.get!(QueueEntry, entry.id)
+      assert reloaded.status == :completed
+    end
+  end
+
+  describe "re-queue action" do
+    test "returns the patient to waiting with new requirements and frees the slot",
+         %{conn: conn} do
+      xray = capability_fixture("XRay")
+      lab = capability_fixture("Lab")
+      office = office_fixture("Room A", 2, [xray.id, lab.id])
+      entry = waiting_entry("Jane Doe", [xray])
+
+      {:ok, live, _html} = live(conn, ~p"/queue")
+
+      _ = live |> element("button", "Accept") |> render_click()
+      assert Scheduling.Queue.current_loads() == %{office.id => 1}
+
+      html =
+        live
+        |> form("#requeue-form-#{entry.id}", %{"capability_ids" => [to_string(lab.id)]})
+        |> render_submit()
+
+      assert html =~ "Re-queued Jane Doe"
+      # The slot is freed and the patient is back in the waiting list.
+      assert Scheduling.Queue.current_loads() == %{}
+      assert has_element?(live, "#waiting-#{entry.id}")
+
+      reloaded = Repo.get!(QueueEntry, entry.id) |> Repo.preload(:required_capabilities)
+      assert reloaded.status == :waiting
+      assert is_nil(reloaded.assigned_office_id)
+      assert Enum.map(reloaded.required_capabilities, & &1.name) == ["Lab"]
+    end
+  end
 end
