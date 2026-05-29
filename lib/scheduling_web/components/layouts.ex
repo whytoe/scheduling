@@ -45,6 +45,9 @@ defmodule SchedulingWeb.Layouts do
       <div class="flex-none">
         <ul class="flex flex-column px-1 space-x-4 items-center">
           <li>
+            <.link navigate={~p"/board"} class="btn btn-ghost">Board</.link>
+          </li>
+          <li>
             <.link navigate={~p"/queue"} class="btn btn-ghost">Queue</.link>
           </li>
           <li>

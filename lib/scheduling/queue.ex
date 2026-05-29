@@ -15,6 +15,20 @@ defmodule Scheduling.Queue do
   alias Scheduling.Queue.QueueEntry
   alias Scheduling.Repo
 
+  @board_topic "scheduling:board"
+
+  @doc "The PubSub topic carrying live board changes (queue + capacity)."
+  def board_topic, do: @board_topic
+
+  @doc "Subscribes the caller to live board changes. Call from a LiveView mount."
+  def subscribe_board do
+    Phoenix.PubSub.subscribe(Scheduling.PubSub, @board_topic)
+  end
+
+  defp broadcast_board_change(event) do
+    Phoenix.PubSub.broadcast(Scheduling.PubSub, @board_topic, {:board_changed, event})
+  end
+
   @doc """
   Lists waiting queue entries, highest priority first then oldest, with the
   patient and required capabilities preloaded for display.
@@ -82,6 +96,7 @@ defmodule Scheduling.Queue do
         |> Repo.update()
         |> case do
           {:ok, assigned} ->
+            broadcast_board_change({:accepted, assigned.id})
             {:ok, Repo.preload(assigned, [:patient, :assigned_office]), result}
 
           {:error, changeset} ->

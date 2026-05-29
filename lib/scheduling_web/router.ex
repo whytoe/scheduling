@@ -19,6 +19,8 @@ defmodule SchedulingWeb.Router do
 
     get "/", PageController, :home
 
+    live "/board", BoardLive.Index, :index
+
     live "/queue", QueueLive.Index, :index
 
     live "/offices", OfficeLive.Index, :index
