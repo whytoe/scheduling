@@ -3,17 +3,24 @@ defmodule SchedulingWeb.BoardLive.Index do
   The live shared board: the single source of truth front-desk and clinical
   staff watch. Shows the waiting-room queue (with required capabilities and time
   waiting) alongside every office's capabilities and real-time used/free intake
-  capacity. Subscribes to `Scheduling.Queue.board_topic/0` so acceptances and
-  capacity changes push to every connected board without a refresh.
+  capacity. It also surfaces incoming-patient handoffs — who is on their way to
+  each office and what they need — which clinical staff acknowledge once the
+  patient arrives. Subscribes to `Scheduling.Queue.board_topic/0` and
+  `Scheduling.Handoffs.handoffs_topic/0` so acceptances, capacity changes, and
+  handoffs push to every connected board without a refresh.
   """
   use SchedulingWeb, :live_view
 
+  alias Scheduling.Handoffs
   alias Scheduling.Offices
   alias Scheduling.Queue
 
   @impl true
   def mount(_params, _session, socket) do
-    if connected?(socket), do: Queue.subscribe_board()
+    if connected?(socket) do
+      Queue.subscribe_board()
+      Handoffs.subscribe_handoffs()
+    end
 
     {:ok,
      socket
@@ -23,6 +30,14 @@ defmodule SchedulingWeb.BoardLive.Index do
 
   @impl true
   def handle_info({:board_changed, _event}, socket) do
+    {:noreply, load_board(socket)}
+  end
+
+  def handle_info({:handoff_created, _handoff}, socket) do
+    {:noreply, load_board(socket)}
+  end
+
+  def handle_info({:handoff_acknowledged, _handoff}, socket) do
     {:noreply, load_board(socket)}
   end
 
@@ -62,8 +77,33 @@ defmodule SchedulingWeb.BoardLive.Index do
     end
   end
 
+  def handle_event("acknowledge_handoff", %{"id" => id}, socket) do
+    handoff = Handoffs.get_handoff!(id)
+
+    case Handoffs.acknowledge(handoff, acknowledged_by: "clinical") do
+      {:ok, acknowledged} ->
+        {:noreply,
+         socket
+         |> put_flash(
+           :info,
+           "Acknowledged #{handoff_patient(acknowledged)} — handoff cleared."
+         )
+         |> load_board()}
+
+      {:error, _changeset} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "Could not acknowledge this handoff — please refresh and retry."
+         )}
+    end
+  end
+
   defp load_board(socket) do
     loads = Queue.current_loads()
+    pending = Handoffs.list_pending()
+    incoming_by_office = Enum.group_by(pending, & &1.office_id)
     now = DateTime.utc_now()
 
     offices =
@@ -76,7 +116,18 @@ defmodule SchedulingWeb.BoardLive.Index do
           intake_capacity: office.intake_capacity,
           capabilities: capability_names(office.capabilities),
           load: load,
-          free: max(office.intake_capacity - load, 0)
+          free: max(office.intake_capacity - load, 0),
+          incoming: length(Map.get(incoming_by_office, office.id, []))
+        }
+      end)
+
+    incoming =
+      Enum.map(pending, fn handoff ->
+        %{
+          id: handoff.id,
+          patient: handoff_patient(handoff),
+          office: handoff.office_name || "office ##{handoff.office_id}",
+          required: format_caps(handoff.required_capabilities)
         }
       end)
 
@@ -104,6 +155,8 @@ defmodule SchedulingWeb.BoardLive.Index do
 
     socket
     |> assign(:offices, offices)
+    |> assign(:incoming, incoming)
+    |> assign(:incoming_count, length(incoming))
     |> assign(:waiting, waiting)
     |> assign(:waiting_count, length(waiting))
     |> assign(:active, active)
@@ -115,6 +168,16 @@ defmodule SchedulingWeb.BoardLive.Index do
   end
 
   defp capability_names(_), do: "—"
+
+  defp format_caps(caps) when is_list(caps) and caps != [] do
+    caps |> Enum.sort() |> Enum.join(", ")
+  end
+
+  defp format_caps(_), do: "—"
+
+  defp handoff_patient(handoff) do
+    handoff.patient_name || "patient ##{handoff.patient_id}"
+  end
 
   defp patient_name(entry) do
     case entry.patient do
@@ -164,8 +227,23 @@ defmodule SchedulingWeb.BoardLive.Index do
           <:col :let={office} label="Office">{office.name}</:col>
           <:col :let={office} label="Capabilities">{office.capabilities}</:col>
           <:col :let={office} label="In service">{office.load}</:col>
+          <:col :let={office} label="Incoming">{office.incoming}</:col>
           <:col :let={office} label="Capacity">{office.intake_capacity}</:col>
           <:col :let={office} label="Free">{office.free}</:col>
+        </.table>
+      </section>
+
+      <section class="mb-8">
+        <h2 class="text-sm font-semibold mb-2">Incoming patients ({@incoming_count})</h2>
+        <.table id="board-incoming" rows={@incoming}>
+          <:col :let={handoff} label="Office">{handoff.office}</:col>
+          <:col :let={handoff} label="Patient">{handoff.patient}</:col>
+          <:col :let={handoff} label="Required capabilities">{handoff.required}</:col>
+          <:action :let={handoff}>
+            <.button phx-click={JS.push("acknowledge_handoff", value: %{id: handoff.id})}>
+              Acknowledge
+            </.button>
+          </:action>
         </.table>
       </section>
 

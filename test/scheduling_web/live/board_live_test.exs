@@ -148,4 +148,43 @@ defmodule SchedulingWeb.BoardLiveTest do
       assert is_nil(reloaded.assigned_office_id)
     end
   end
+
+  describe "incoming-patient handoffs" do
+    test "an incoming handoff appears live when a patient is accepted", %{conn: conn} do
+      xray = capability_fixture("XRay")
+      _office = office_fixture("Room A", 2, [xray.id])
+      entry = waiting_entry("Jane Doe", [xray])
+
+      {:ok, live, html} = live(conn, ~p"/board")
+      assert html =~ "Incoming patients (0)"
+
+      # Accept out-of-band; the handoff broadcast should push to the board.
+      {:ok, _assigned, _} = Queue.accept(Queue.get_entry!(entry.id))
+
+      html = render(live)
+      assert html =~ "Incoming patients (1)"
+      assert html =~ "Jane Doe"
+      assert html =~ "Room A"
+    end
+
+    test "acknowledging an incoming handoff clears it live", %{conn: conn} do
+      xray = capability_fixture("XRay")
+      _office = office_fixture("Room A", 2, [xray.id])
+      entry = waiting_entry("Jane Doe", [xray])
+
+      {:ok, _assigned, _} = Queue.accept(Queue.get_entry!(entry.id))
+
+      {:ok, live, html} = live(conn, ~p"/board")
+      assert html =~ "Incoming patients (1)"
+      assert html =~ "Jane Doe"
+
+      html =
+        live
+        |> element("#board-incoming button", "Acknowledge")
+        |> render_click()
+
+      assert html =~ "Incoming patients (0)"
+      assert html =~ "handoff cleared"
+    end
+  end
 end

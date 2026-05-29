@@ -11,6 +11,7 @@ defmodule Scheduling.Queue do
   import Ecto.Query, warn: false
 
   alias Scheduling.Audit
+  alias Scheduling.Handoffs
   alias Scheduling.Matching
   alias Scheduling.Matching.Result
   alias Scheduling.Queue.QueueEntry
@@ -87,7 +88,9 @@ defmodule Scheduling.Queue do
   the patient to the chosen office.
 
   Every matcher run is recorded to the routing-decision audit log (both the
-  assigned and no-eligible-office outcomes). `opts` may carry `:accepted_by`.
+  assigned and no-eligible-office outcomes). On a successful assignment an
+  incoming-patient handoff is created and broadcast to the target office's
+  clinical staff (see `Scheduling.Handoffs`). `opts` may carry `:accepted_by`.
 
   Returns:
 
@@ -117,6 +120,7 @@ defmodule Scheduling.Queue do
         |> case do
           {:ok, assigned} ->
             Audit.record_decision(entry, result, opts)
+            Handoffs.create_handoff(assigned, office)
             broadcast_board_change({:accepted, assigned.id})
             {:ok, Repo.preload(assigned, [:patient, :assigned_office]), result}
 
