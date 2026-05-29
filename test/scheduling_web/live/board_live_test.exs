@@ -75,9 +75,11 @@ defmodule SchedulingWeb.BoardLiveTest do
 
       html = render(live)
 
-      # Patient has left the waiting room and the office now shows load.
-      refute html =~ "Jane Doe"
+      # Patient has left the waiting room, now appears in service, and the
+      # office shows load.
       assert html =~ "Waiting room (0)"
+      assert html =~ "In service (1)"
+      assert html =~ "Jane Doe"
       assert Queue.current_loads() == %{office.id => 1}
     end
 
@@ -93,6 +95,57 @@ defmodule SchedulingWeb.BoardLiveTest do
       html = render(live)
       assert html =~ "Late Arrival"
       assert html =~ "Waiting room (1)"
+    end
+  end
+
+  describe "completion + re-queue actions" do
+    test "completing an in-service patient frees capacity live", %{conn: conn} do
+      xray = capability_fixture("XRay")
+      office = office_fixture("Room A", 1, [xray.id])
+      entry = waiting_entry("Jane Doe", [xray])
+
+      {:ok, assigned, _} = Queue.accept(Queue.get_entry!(entry.id))
+
+      {:ok, live, html} = live(conn, ~p"/board")
+      assert html =~ "In service (1)"
+      assert html =~ "Jane Doe"
+      assert Queue.current_loads() == %{office.id => 1}
+
+      html =
+        live
+        |> element("#board-active button", "Complete")
+        |> render_click()
+
+      assert html =~ "In service (0)"
+      assert html =~ "capacity freed"
+      assert Queue.current_loads() == %{}
+
+      reloaded = Repo.get!(QueueEntry, assigned.id)
+      assert reloaded.status == :completed
+    end
+
+    test "re-queuing an in-service patient returns them to the waiting room", %{conn: conn} do
+      xray = capability_fixture("XRay")
+      office = office_fixture("Room A", 1, [xray.id])
+      entry = waiting_entry("Jane Doe", [xray])
+
+      {:ok, _assigned, _} = Queue.accept(Queue.get_entry!(entry.id))
+
+      {:ok, live, _html} = live(conn, ~p"/board")
+
+      html =
+        live
+        |> element("#board-active button", "Re-queue")
+        |> render_click()
+
+      assert html =~ "In service (0)"
+      assert html =~ "Waiting room (1)"
+      assert Queue.current_loads() == %{}
+      refute office.id in Map.keys(Queue.current_loads())
+
+      reloaded = Repo.get!(QueueEntry, entry.id)
+      assert reloaded.status == :waiting
+      assert is_nil(reloaded.assigned_office_id)
     end
   end
 end

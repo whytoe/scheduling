@@ -70,6 +70,54 @@ defmodule Scheduling.Queue.QueueEntry do
   end
 
   @doc """
+  Transitions an in-progress entry to `:completed`. Valid only from a status
+  that occupies capacity (`assigned`/`in_service`); completing frees the
+  office's slot because `:completed` is not an active status. The
+  `assigned_office_id` is retained as a record of where the patient was served.
+  """
+  def completion_changeset(%__MODULE__{} = queue_entry) do
+    queue_entry
+    |> change(status: :completed)
+    |> validate_active("complete")
+  end
+
+  @doc """
+  Returns an in-progress entry to the `:waiting` queue so the patient can be
+  routed again for an additional service. Clears the office assignment (freeing
+  its capacity) and, when `:required_capabilities` is given in `opts`, replaces
+  the required-capability set with the new requirements. Valid only from an
+  active status (`assigned`/`in_service`).
+
+  Pass loaded `Capability` structs in `opts[:required_capabilities]`; the entry
+  must have `:required_capabilities` preloaded for the replacement to apply.
+  """
+  def requeue_changeset(%__MODULE__{} = queue_entry, opts \\ []) do
+    queue_entry
+    |> change(status: :waiting, assigned_office_id: nil)
+    |> validate_active("re-queue")
+    |> maybe_put_required_capabilities(opts)
+  end
+
+  defp validate_active(changeset, action) do
+    if changeset.data.status in @active_statuses do
+      changeset
+    else
+      add_error(
+        changeset,
+        :status,
+        "must be assigned or in_service to #{action}, was #{changeset.data.status}"
+      )
+    end
+  end
+
+  defp maybe_put_required_capabilities(changeset, opts) do
+    case Keyword.fetch(opts, :required_capabilities) do
+      {:ok, caps} when is_list(caps) -> put_assoc(changeset, :required_capabilities, caps)
+      _ -> changeset
+    end
+  end
+
+  @doc """
   Replaces the set of required capabilities on the entry. Pass the loaded
   `Capability` structs that should be required; the existing join rows are
   replaced.

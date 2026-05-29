@@ -26,6 +26,42 @@ defmodule SchedulingWeb.BoardLive.Index do
     {:noreply, load_board(socket)}
   end
 
+  @impl true
+  def handle_event("complete", %{"id" => id}, socket) do
+    entry = Queue.get_entry!(id)
+
+    case Queue.complete(entry) do
+      {:ok, completed} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Completed #{patient_name(completed)} — office capacity freed.")
+         |> load_board()}
+
+      {:error, _changeset} ->
+        {:noreply,
+         put_flash(socket, :error, "Could not complete this patient — please refresh and retry.")}
+    end
+  end
+
+  def handle_event("requeue", %{"id" => id}, socket) do
+    entry = Queue.get_entry!(id)
+
+    case Queue.requeue(entry) do
+      {:ok, requeued} ->
+        {:noreply,
+         socket
+         |> put_flash(
+           :info,
+           "Re-queued #{patient_name(requeued)} for another service — office capacity freed."
+         )
+         |> load_board()}
+
+      {:error, _changeset} ->
+        {:noreply,
+         put_flash(socket, :error, "Could not re-queue this patient — please refresh and retry.")}
+    end
+  end
+
   defp load_board(socket) do
     loads = Queue.current_loads()
     now = DateTime.utc_now()
@@ -55,10 +91,23 @@ defmodule SchedulingWeb.BoardLive.Index do
         }
       end)
 
+    active =
+      Enum.map(Queue.list_active_entries(), fn entry ->
+        %{
+          id: entry.id,
+          patient: patient_name(entry),
+          office: office_name(entry),
+          required: capability_names(entry.required_capabilities),
+          status: humanize_status(entry.status)
+        }
+      end)
+
     socket
     |> assign(:offices, offices)
     |> assign(:waiting, waiting)
     |> assign(:waiting_count, length(waiting))
+    |> assign(:active, active)
+    |> assign(:active_count, length(active))
   end
 
   defp capability_names(caps) when is_list(caps) and caps != [] do
@@ -73,6 +122,17 @@ defmodule SchedulingWeb.BoardLive.Index do
       _ -> "patient ##{entry.patient_id}"
     end
   end
+
+  defp office_name(entry) do
+    case entry.assigned_office do
+      %{name: name} when is_binary(name) -> name
+      _ -> "—"
+    end
+  end
+
+  defp humanize_status(:assigned), do: "Assigned"
+  defp humanize_status(:in_service), do: "In service"
+  defp humanize_status(status), do: status |> to_string() |> String.capitalize()
 
   defp format_wait(_now, nil), do: "—"
 
@@ -106,6 +166,22 @@ defmodule SchedulingWeb.BoardLive.Index do
           <:col :let={office} label="In service">{office.load}</:col>
           <:col :let={office} label="Capacity">{office.intake_capacity}</:col>
           <:col :let={office} label="Free">{office.free}</:col>
+        </.table>
+      </section>
+
+      <section class="mb-8">
+        <h2 class="text-sm font-semibold mb-2">In service ({@active_count})</h2>
+        <.table id="board-active" rows={@active}>
+          <:col :let={entry} label="Patient">{entry.patient}</:col>
+          <:col :let={entry} label="Office">{entry.office}</:col>
+          <:col :let={entry} label="Required capabilities">{entry.required}</:col>
+          <:col :let={entry} label="Status">{entry.status}</:col>
+          <:action :let={entry}>
+            <.button phx-click={JS.push("complete", value: %{id: entry.id})}>Complete</.button>
+          </:action>
+          <:action :let={entry}>
+            <.button phx-click={JS.push("requeue", value: %{id: entry.id})}>Re-queue</.button>
+          </:action>
         </.table>
       </section>
 
