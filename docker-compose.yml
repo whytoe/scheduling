@@ -1,0 +1,44 @@
+# Local-first quickstart for the scheduling Phoenix app.
+#
+#   1. Generate a secret key base (only needs doing once):
+#        export SECRET_KEY_BASE=$(openssl rand -base64 48)
+#   2. Boot it:
+#        docker compose up --build
+#   3. Visit http://localhost:4000
+#
+# The `db` service is wiped by `docker compose down -v` (volume removal).
+# See DEPLOYMENT.md for portable platform notes.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: scheduling
+      POSTGRES_PASSWORD: scheduling
+      POSTGRES_DB: scheduling_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scheduling -d scheduling_dev"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ecto://scheduling:scheduling@db:5432/scheduling_dev
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?run `openssl rand -base64 48` and export SECRET_KEY_BASE before `docker compose up`}
+      PHX_HOST: localhost
+      PHX_SERVER: "true"
+      PORT: "4000"
+    ports:
+      - "4000:4000"
+
+volumes:
+  pgdata:

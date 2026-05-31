@@ -30,10 +30,11 @@ defmodule SchedulingWeb.Router do
     live "/offices/:id/edit", OfficeLive.Index, :edit
   end
 
-  # Other scopes may use custom stacks.
-  # scope "/api", SchedulingWeb do
-  #   pipe_through :api
-  # end
+  scope "/api", SchedulingWeb do
+    pipe_through :api
+
+    get "/health", HealthController, :index
+  end
 
   # Enable LiveDashboard and Swoosh mailbox preview in development
   if Application.compile_env(:scheduling, :dev_routes) do
