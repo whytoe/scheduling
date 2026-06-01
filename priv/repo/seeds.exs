@@ -20,11 +20,11 @@ alias Scheduling.Catalog.{Capability, Diagnosis}
 # "Urinalysis". The catalog UI at /capabilities lets staff add more.
 capability_names = [
   "XRay",
-  "CT Scan",
-  "MRI",
+  "Computed Tomography",
+  "Magnetic Resonance Imaging",
   "Ultrasound",
   "Mammography",
-  "EKG",
+  "Electrocardiogram",
   "Echocardiogram",
   "Stress Test",
   "Pulmonary Function Test",
@@ -32,7 +32,7 @@ capability_names = [
   "Dialysis",
   "Blood Draw",
   "Urinalysis",
-  "IV Infusion"
+  "Intravenous Infusion"
 ]
 
 for name <- capability_names do
@@ -51,7 +51,7 @@ capabilities =
 # Example Diagnosis -> default required capabilities mappings.
 diagnosis_defaults = [
   {"Fractured Wrist", "DX-FRAC", ["XRay"]},
-  {"Stroke Workup", "DX-STRK", ["CT Scan", "Blood Draw"]},
+  {"Stroke Workup", "DX-STRK", ["Computed Tomography", "Blood Draw"]},
   {"Abdominal Pain", "DX-ABDP", ["Ultrasound", "Blood Draw"]}
 ]
 
