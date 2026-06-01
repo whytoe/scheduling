@@ -1,6 +1,7 @@
 defmodule SchedulingWeb.OfficeLive.Index do
   use SchedulingWeb, :live_view
 
+  alias Scheduling.Catalog
   alias Scheduling.Offices
   alias Scheduling.Offices.Office
 
@@ -8,7 +9,7 @@ defmodule SchedulingWeb.OfficeLive.Index do
   def mount(_params, _session, socket) do
     {:ok,
      socket
-     |> assign(:capabilities, Offices.list_capabilities())
+     |> assign(:capabilities, Catalog.list_capabilities())
      |> stream(:offices, Offices.list_offices())}
   end
 

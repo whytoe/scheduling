@@ -27,6 +27,10 @@ defmodule SchedulingWeb.Router do
     live "/offices", OfficeLive.Index, :index
     live "/offices/new", OfficeLive.Index, :new
     live "/offices/:id/edit", OfficeLive.Index, :edit
+
+    live "/capabilities", CapabilityLive.Index, :index
+    live "/capabilities/new", CapabilityLive.Index, :new
+    live "/capabilities/:id/edit", CapabilityLive.Index, :edit
   end
 
   scope "/api", SchedulingWeb do

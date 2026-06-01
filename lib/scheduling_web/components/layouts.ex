@@ -57,6 +57,9 @@ defmodule SchedulingWeb.Layouts do
             <.link navigate={~p"/offices"} class="btn btn-ghost">Offices</.link>
           </li>
           <li>
+            <.link navigate={~p"/capabilities"} class="btn btn-ghost">Capabilities</.link>
+          </li>
+          <li>
             <.theme_toggle />
           </li>
         </ul>

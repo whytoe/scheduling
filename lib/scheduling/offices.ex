@@ -10,6 +10,10 @@ defmodule Scheduling.Offices do
   alias Scheduling.Catalog.Capability
   alias Scheduling.Offices.Office
 
+  # NOTE: capability CRUD (including `list_capabilities/0`) now lives in
+  # `Scheduling.Catalog`. This module only consumes capabilities to attach
+  # them to offices via the office_capabilities join.
+
   @doc "Lists all offices ordered by name, with capabilities preloaded."
   def list_offices do
     Office
@@ -50,13 +54,6 @@ defmodule Scheduling.Offices do
     office
     |> Repo.preload(:capabilities)
     |> office_changeset(attrs)
-  end
-
-  @doc "Lists the capability catalog ordered by name."
-  def list_capabilities do
-    Capability
-    |> order_by(asc: :name)
-    |> Repo.all()
   end
 
   defp office_changeset(office, attrs) do
