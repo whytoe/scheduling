@@ -22,6 +22,24 @@ defmodule Scheduling.Release do
     {:ok, _, _} = Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :down, to: version))
   end
 
+  @doc """
+  Loads catalog seed data (capabilities, diagnoses, diagnosis→capability defaults).
+  Idempotent — seeds.exs upserts with `on_conflict: :nothing`, so it's safe to
+  re-run on every boot.
+  """
+  def seed do
+    load_app()
+
+    for repo <- repos() do
+      {:ok, _, _} = Ecto.Migrator.with_repo(repo, &run_seeds/1)
+    end
+  end
+
+  defp run_seeds(_repo) do
+    seed_script = Application.app_dir(@app, "priv/repo/seeds.exs")
+    if File.exists?(seed_script), do: Code.eval_file(seed_script)
+  end
+
   defp repos do
     Application.fetch_env!(@app, :ecto_repos)
   end

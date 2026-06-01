@@ -86,5 +86,5 @@ EXPOSE 4000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD curl -fsS http://localhost:4000/api/health || exit 1
 
-# Migrate then start the release.
-CMD ["sh", "-c", "/app/bin/scheduling eval 'Scheduling.Release.migrate()' && /app/bin/scheduling start"]
+# Migrate, seed (idempotent catalog data), then start the release.
+CMD ["sh", "-c", "/app/bin/scheduling eval 'Scheduling.Release.migrate(); Scheduling.Release.seed()' && /app/bin/scheduling start"]
