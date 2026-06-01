@@ -4,7 +4,7 @@
 
 ARG ELIXIR_VERSION=1.18.4
 ARG OTP_VERSION=27.3
-ARG DEBIAN_VERSION=bookworm-20250520-slim
+ARG DEBIAN_VERSION=bookworm-20260518-slim
 
 ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
 ARG RUNNER_IMAGE="debian:${DEBIAN_VERSION}"
@@ -35,13 +35,29 @@ COPY priv priv
 COPY lib lib
 COPY assets assets
 
-# Asset binaries (tailwind, esbuild) + minified bundle + phx.digest
-RUN mix assets.setup && mix assets.deploy
+# Optional: vendored tailwind/esbuild binaries. When present, they short-circuit
+# the github-release download in `mix assets.setup`. Useful when buildkit egress
+# is flaky for large TLS streams (e.g. Apple's `container` runtime); harmless
+# otherwise. Place them at assets/vendor/{tailwind,esbuild}-linux-${arch}.
+RUN mkdir -p _build && for tool in tailwind esbuild; do \
+      for arch in arm64 amd64 x64; do \
+        src="assets/vendor/${tool}-linux-${arch}"; \
+        if [ -f "$src" ]; then \
+          cp "$src" "_build/$(basename $src)" && chmod +x "_build/$(basename $src)"; \
+        fi; \
+      done; \
+    done
+
+# Asset binaries (tailwind, esbuild) + minified bundle + phx.digest.
+# `mix compile` runs first so the phoenix_live_view compiler can generate
+# colocated-hooks files (_build/.../phoenix-colocated/scheduling/) that
+# `js/app.js` imports — otherwise `mix esbuild --minify` fails to resolve them.
+RUN mix assets.setup && mix compile && mix assets.deploy
 
 # Runtime config is read at boot, but must be copied before release
 COPY config/runtime.exs config/
 
-RUN mix compile && mix release
+RUN mix release
 
 # ---- runner: minimal runtime image with just the release ----
 FROM ${RUNNER_IMAGE} AS runner

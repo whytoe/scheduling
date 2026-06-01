@@ -35,6 +35,10 @@ scheduling-*.tar
 npm-debug.log
 /assets/node_modules/
 
+# Optional vendored tailwind/esbuild release binaries (see Dockerfile).
+/assets/vendor/tailwind-*
+/assets/vendor/esbuild-*
+
 
 # Gas Town tooling artifacts (local runtime state, not part of the app)
 /.beads/
