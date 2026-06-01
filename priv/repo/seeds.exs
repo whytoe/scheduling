@@ -16,7 +16,24 @@ alias Scheduling.Repo
 alias Scheduling.Catalog.{Capability, Diagnosis}
 
 # Capability catalog. Idempotent: upsert by unique name.
-capability_names = ["XRay", "CT Scan", "Lab", "MRI", "Ultrasound"]
+# "Lab" was previously here but was too coarse — broken into "Blood Draw" and
+# "Urinalysis". The catalog UI at /capabilities lets staff add more.
+capability_names = [
+  "XRay",
+  "CT Scan",
+  "MRI",
+  "Ultrasound",
+  "Mammography",
+  "EKG",
+  "Echocardiogram",
+  "Stress Test",
+  "Pulmonary Function Test",
+  "Endoscopy",
+  "Dialysis",
+  "Blood Draw",
+  "Urinalysis",
+  "IV Infusion"
+]
 
 for name <- capability_names do
   Repo.insert!(
@@ -34,8 +51,8 @@ capabilities =
 # Example Diagnosis -> default required capabilities mappings.
 diagnosis_defaults = [
   {"Fractured Wrist", "DX-FRAC", ["XRay"]},
-  {"Stroke Workup", "DX-STRK", ["CT Scan", "Lab"]},
-  {"Abdominal Pain", "DX-ABDP", ["Ultrasound", "Lab"]}
+  {"Stroke Workup", "DX-STRK", ["CT Scan", "Blood Draw"]},
+  {"Abdominal Pain", "DX-ABDP", ["Ultrasound", "Blood Draw"]}
 ]
 
 for {name, code, required} <- diagnosis_defaults do
