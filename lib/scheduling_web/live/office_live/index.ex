@@ -126,6 +126,14 @@ defmodule SchedulingWeb.OfficeLive.Index do
         </:actions>
       </.header>
 
+      <.office_form
+        :if={@live_action in [:new, :edit]}
+        form={@form}
+        page_title={@page_title}
+        capabilities={@capabilities}
+        selected_capability_ids={@selected_capability_ids}
+      />
+
       <.table id="offices" rows={@streams.offices}>
         <:col :let={{_id, office}} label="Name">{office.name}</:col>
         <:col :let={{_id, office}} label="Intake capacity">{office.intake_capacity}</:col>
@@ -144,14 +152,6 @@ defmodule SchedulingWeb.OfficeLive.Index do
           </.link>
         </:action>
       </.table>
-
-      <.office_form
-        :if={@live_action in [:new, :edit]}
-        form={@form}
-        page_title={@page_title}
-        capabilities={@capabilities}
-        selected_capability_ids={@selected_capability_ids}
-      />
     </Layouts.app>
     """
   end
@@ -163,7 +163,7 @@ defmodule SchedulingWeb.OfficeLive.Index do
 
   defp office_form(assigns) do
     ~H"""
-    <div class="mt-8 border-t pt-6">
+    <div class="mt-4 mb-8 border-b pb-6">
       <.header>{@page_title}</.header>
 
       <.form for={@form} id="office-form" phx-change="validate" phx-submit="save">

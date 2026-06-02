@@ -110,6 +110,12 @@ defmodule SchedulingWeb.CapabilityLive.Index do
         </:actions>
       </.header>
 
+      <.capability_form
+        :if={@live_action in [:new, :edit]}
+        form={@form}
+        page_title={@page_title}
+      />
+
       <.table id="capabilities" rows={@streams.capabilities}>
         <:col :let={{_id, capability}} label="Name">{capability.name}</:col>
         <:col :let={{_id, capability}} label="Description">
@@ -127,12 +133,6 @@ defmodule SchedulingWeb.CapabilityLive.Index do
           </.link>
         </:action>
       </.table>
-
-      <.capability_form
-        :if={@live_action in [:new, :edit]}
-        form={@form}
-        page_title={@page_title}
-      />
     </Layouts.app>
     """
   end
@@ -142,7 +142,7 @@ defmodule SchedulingWeb.CapabilityLive.Index do
 
   defp capability_form(assigns) do
     ~H"""
-    <div class="mt-8 border-t pt-6">
+    <div class="mt-4 mb-8 border-b pb-6">
       <.header>{@page_title}</.header>
 
       <.form for={@form} id="capability-form" phx-change="validate" phx-submit="save">
