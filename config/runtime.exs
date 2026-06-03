@@ -23,6 +23,16 @@ end
 config :scheduling, SchedulingWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
+# Intake-form-system compliance gate. When `api_key` is set, the accept flow
+# checks that every form type required by the queue entry's diagnosis has a
+# completed-and-not-flagged response on file for the patient's
+# `intake_patient_id`. When `api_key` is nil (default), the check is skipped
+# entirely — useful for local dev or when intake isn't reachable.
+config :scheduling, Scheduling.Compliance,
+  base_url: System.get_env("INTAKE_API_URL", "http://localhost:3001/api/v1"),
+  api_key: System.get_env("INTAKE_API_KEY"),
+  http_timeout_ms: String.to_integer(System.get_env("INTAKE_HTTP_TIMEOUT_MS", "5000"))
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||
