@@ -451,6 +451,37 @@ defmodule SchedulingWeb.Schemas do
     })
   end
 
+  defmodule RoutingDecision do
+    @moduledoc "An audit record of one matcher run during the accept flow."
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "RoutingDecision",
+      type: :object,
+      properties: %{
+        id: %Schema{type: :integer},
+        patient_name: %Schema{type: :string, nullable: true, description: "Snapshotted patient name"},
+        chosen_office_name: %Schema{type: :string, nullable: true, description: "Snapshotted office name; nil when no office was eligible"},
+        required_capabilities: %Schema{type: :array, items: %Schema{type: :string}},
+        eligible_offices: %Schema{type: :array, items: %Schema{type: :string}, description: "Names of offices that provided every required capability"},
+        rationale: %Schema{type: :string, nullable: true, description: "Human-readable explanation of why this office was chosen (or none)"},
+        accepted_by: %Schema{type: :string, nullable: true},
+        patient_id: %Schema{type: :integer, nullable: true},
+        chosen_office_id: %Schema{type: :integer, nullable: true},
+        queue_entry_id: %Schema{type: :integer, nullable: true},
+        inserted_at: %Schema{type: :string, format: :"date-time"},
+        updated_at: %Schema{type: :string, format: :"date-time"}
+      },
+      required: [:id, :required_capabilities, :eligible_offices, :inserted_at, :updated_at]
+    })
+  end
+
+  defmodule RoutingDecisionList do
+    require OpenApiSpex
+    OpenApiSpex.schema(%{title: "RoutingDecisionList", type: :array, items: SchedulingWeb.Schemas.RoutingDecision})
+  end
+
   defmodule HealthResponse do
     @moduledoc "Health probe response body."
     require OpenApiSpex

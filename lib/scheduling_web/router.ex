@@ -89,6 +89,11 @@ defmodule SchedulingWeb.Router do
       get "/:id", HandoffController, :show
       post "/:id/acknowledge", HandoffController, :acknowledge
     end
+
+    scope "/routing_decisions", Api do
+      get "/", RoutingDecisionController, :index
+      get "/:id", RoutingDecisionController, :show
+    end
   end
 
   scope "/api" do

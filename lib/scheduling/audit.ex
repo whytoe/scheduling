@@ -46,6 +46,14 @@ defmodule Scheduling.Audit do
     |> Repo.preload([:patient, :chosen_office, :queue_entry])
   end
 
+  @doc "Fetches one routing decision by id, with associations preloaded. Raises if missing."
+  @spec get_decision!(integer()) :: RoutingDecision.t()
+  def get_decision!(id) do
+    RoutingDecision
+    |> Repo.get!(id)
+    |> Repo.preload([:patient, :chosen_office, :queue_entry])
+  end
+
   defp patient_name(%QueueEntry{patient: %{name: name}}) when is_binary(name), do: name
   defp patient_name(_entry), do: nil
 
