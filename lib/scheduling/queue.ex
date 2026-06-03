@@ -12,6 +12,7 @@ defmodule Scheduling.Queue do
 
   alias Scheduling.Audit
   alias Scheduling.Catalog.Capability
+  alias Scheduling.Compliance
   alias Scheduling.Handoffs
   alias Scheduling.Matching
   alias Scheduling.Matching.Result
@@ -170,8 +171,24 @@ defmodule Scheduling.Queue do
   @spec accept(QueueEntry.t(), keyword()) ::
           {:ok, QueueEntry.t(), Result.t()}
           | {:no_eligible_office, Result.t()}
+          | {:compliance_failed, [String.t()]}
+          | {:compliance_unavailable, term()}
           | {:error, Ecto.Changeset.t()}
   def accept(%QueueEntry{} = entry, opts \\ []) do
+    # Compliance.verify needs the diagnosis (for required_form_types) and the
+    # patient (for intake_patient_id). get_entry!/1 preloads patient already;
+    # we add diagnosis here so the gate has what it needs.
+    entry = Repo.preload(entry, [:diagnosis])
+
+    case Compliance.verify(entry) do
+      :ok -> do_accept(entry, opts)
+      :not_configured -> do_accept(entry, opts)
+      {:missing, missing_types} -> record_compliance_block(entry, missing_types, opts)
+      {:error, reason} -> record_compliance_unavailable(entry, reason, opts)
+    end
+  end
+
+  defp do_accept(entry, opts) do
     result = Matching.match_queue_entry(entry, current_loads())
 
     case Result.chosen_office(result) do
@@ -194,6 +211,36 @@ defmodule Scheduling.Queue do
             {:error, changeset}
         end
     end
+  end
+
+  defp record_compliance_block(entry, missing_types, opts) do
+    rationale =
+      "Compliance check failed: missing required form types [" <>
+        Enum.join(missing_types, ", ") <> "]"
+
+    result = %Result{
+      required: entry.required_capabilities,
+      eligible: [],
+      chosen: nil,
+      rationale: rationale
+    }
+
+    Audit.record_decision(entry, result, opts)
+    {:compliance_failed, missing_types}
+  end
+
+  defp record_compliance_unavailable(entry, reason, opts) do
+    rationale = "Compliance check unavailable: " <> inspect(reason)
+
+    result = %Result{
+      required: entry.required_capabilities,
+      eligible: [],
+      chosen: nil,
+      rationale: rationale
+    }
+
+    Audit.record_decision(entry, result, opts)
+    {:compliance_unavailable, reason}
   end
 
   @doc """

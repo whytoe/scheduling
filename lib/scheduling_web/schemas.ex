@@ -403,6 +403,44 @@ defmodule SchedulingWeb.Schemas do
     })
   end
 
+  defmodule ComplianceFailedError do
+    @moduledoc "Returned when the patient hasn't completed every required intake form."
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "ComplianceFailedError",
+      type: :object,
+      properties: %{
+        error: %Schema{type: :string, enum: ["compliance_failed"]},
+        missing_form_types: %Schema{
+          type: :array,
+          items: %Schema{type: :string},
+          description: "Form types the patient is missing a completed-and-not-flagged response for"
+        }
+      },
+      required: [:error, :missing_form_types],
+      example: %{"error" => "compliance_failed", "missing_form_types" => ["stroke-consent"]}
+    })
+  end
+
+  defmodule ComplianceUnavailableError do
+    @moduledoc "Returned when the intake-form system can't be reached to verify compliance. Fail-closed by design."
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "ComplianceUnavailableError",
+      type: :object,
+      properties: %{
+        error: %Schema{type: :string, enum: ["compliance_unavailable"]},
+        reason: %Schema{type: :string, description: "Inspect of the underlying transport error"}
+      },
+      required: [:error],
+      example: %{"error" => "compliance_unavailable", "reason" => "{:http_status, 401, %{...}}"}
+    })
+  end
+
   defmodule NoEligibleOfficeError do
     @moduledoc "Returned when accept finds no office that provides the required capabilities AND has free capacity."
     require OpenApiSpex

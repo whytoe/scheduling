@@ -76,10 +76,18 @@ defmodule SchedulingWeb.Api.QueueEntryController do
   operation :accept,
     summary: "Accept a waiting entry into an office",
     description:
-      "Runs the best-fit matcher over the entry's required capabilities and " <>
+      "Runs the compliance check (intake forms required by the diagnosis), " <>
+        "then the best-fit matcher over the entry's required capabilities and " <>
         "current office loads. On success the entry is assigned, the audit log " <>
         "records the decision, and a handoff is created for the office's " <>
-        "clinical staff. Returns 409 when no eligible office has free capacity.",
+        "clinical staff.\n\n" <>
+        "Failure modes:\n" <>
+        "  * 409 `no_eligible_office` — no office both provides the required " <>
+        "capabilities and has free capacity.\n" <>
+        "  * 422 `compliance_failed` — the patient hasn't completed every required " <>
+        "form (response body lists the missing form types). The entry stays waiting.\n" <>
+        "  * 503 `compliance_unavailable` — intake-form system unreachable. " <>
+        "Fail-closed: the booking is blocked until intake recovers.",
     parameters: [id: [in: :path, description: "Queue entry id", type: :integer]],
     request_body:
       {"Accept attrs (optional)", "application/json", Schemas.QueueEntryAcceptRequest,
@@ -88,7 +96,10 @@ defmodule SchedulingWeb.Api.QueueEntryController do
       ok: {"Assigned", "application/json", Schemas.QueueEntry},
       not_found: {"Not found", "application/json", Schemas.NotFoundError},
       conflict: {"No eligible office", "application/json", Schemas.NoEligibleOfficeError},
-      unprocessable_entity: {"Validation failed", "application/json", Schemas.ValidationError}
+      unprocessable_entity:
+        {"Compliance failed or validation error", "application/json", Schemas.ComplianceFailedError},
+      service_unavailable:
+        {"Intake-form system unreachable", "application/json", Schemas.ComplianceUnavailableError}
     ]
 
   def accept(conn, %{"id" => id} = params) do
@@ -105,6 +116,16 @@ defmodule SchedulingWeb.Api.QueueEntryController do
 
         {:no_eligible_office, _result} ->
           conn |> put_status(:conflict) |> json(%{error: "no_eligible_office"})
+
+        {:compliance_failed, missing_types} ->
+          conn
+          |> put_status(:unprocessable_entity)
+          |> json(%{error: "compliance_failed", missing_form_types: missing_types})
+
+        {:compliance_unavailable, reason} ->
+          conn
+          |> put_status(:service_unavailable)
+          |> json(%{error: "compliance_unavailable", reason: inspect(reason)})
 
         {:error, %Ecto.Changeset{} = changeset} ->
           {:error, changeset}
