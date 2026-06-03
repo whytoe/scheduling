@@ -60,6 +60,9 @@ defmodule SchedulingWeb.Layouts do
             <.link navigate={~p"/capabilities"} class="btn btn-ghost">Capabilities</.link>
           </li>
           <li>
+            <a href="/api/swagger" class="btn btn-ghost">API</a>
+          </li>
+          <li>
             <.theme_toggle />
           </li>
         </ul>

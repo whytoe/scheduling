@@ -12,6 +12,7 @@ defmodule SchedulingWeb.Router do
 
   pipeline :api do
     plug :accepts, ["json"]
+    plug OpenApiSpex.Plug.PutApiSpec, module: SchedulingWeb.ApiSpec
   end
 
   scope "/", SchedulingWeb do
@@ -37,6 +38,20 @@ defmodule SchedulingWeb.Router do
     pipe_through :api
 
     get "/health", HealthController, :index
+  end
+
+  scope "/api" do
+    pipe_through :api
+
+    # Serves the rendered OpenAPI document. Consumers point clients at this URL.
+    get "/openapi.json", OpenApiSpex.Plug.RenderSpec, :show
+  end
+
+  scope "/" do
+    pipe_through :browser
+
+    # Interactive Swagger UI for exploring the API in a browser.
+    get "/api/swagger", OpenApiSpex.Plug.SwaggerUI, path: "/api/openapi.json"
   end
 
   # Enable LiveDashboard and Swoosh mailbox preview in development
