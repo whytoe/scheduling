@@ -482,6 +482,47 @@ defmodule SchedulingWeb.Schemas do
     OpenApiSpex.schema(%{title: "RoutingDecisionList", type: :array, items: SchedulingWeb.Schemas.RoutingDecision})
   end
 
+  defmodule OfficeWithLoad do
+    @moduledoc "An office plus its current load (count of active queue entries)."
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "OfficeWithLoad",
+      type: :object,
+      properties: %{
+        id: %Schema{type: :integer},
+        name: %Schema{type: :string},
+        intake_capacity: %Schema{type: :integer},
+        capabilities: %Schema{type: :array, items: SchedulingWeb.Schemas.Capability},
+        load: %Schema{type: :integer, description: "Count of active queue entries currently consuming this office's capacity"},
+        free: %Schema{type: :integer, description: "intake_capacity - load (never negative)"},
+        inserted_at: %Schema{type: :string, format: :"date-time"},
+        updated_at: %Schema{type: :string, format: :"date-time"}
+      },
+      required: [:id, :name, :intake_capacity, :capabilities, :load, :free, :inserted_at, :updated_at]
+    })
+  end
+
+  defmodule BoardSnapshot do
+    @moduledoc "Single-shot snapshot of the live board: queue + capacity + pending handoffs."
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "BoardSnapshot",
+      type: :object,
+      properties: %{
+        waiting: %Schema{type: :array, items: SchedulingWeb.Schemas.QueueEntry, description: "Waiting queue, highest priority first"},
+        active: %Schema{type: :array, items: SchedulingWeb.Schemas.QueueEntry, description: "Entries currently consuming office capacity"},
+        offices: %Schema{type: :array, items: SchedulingWeb.Schemas.OfficeWithLoad},
+        pending_handoffs: %Schema{type: :array, items: SchedulingWeb.Schemas.Handoff},
+        generated_at: %Schema{type: :string, format: :"date-time"}
+      },
+      required: [:waiting, :active, :offices, :pending_handoffs, :generated_at]
+    })
+  end
+
   defmodule HealthResponse do
     @moduledoc "Health probe response body."
     require OpenApiSpex

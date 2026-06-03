@@ -94,6 +94,8 @@ defmodule SchedulingWeb.Router do
       get "/", RoutingDecisionController, :index
       get "/:id", RoutingDecisionController, :show
     end
+
+    get "/board", Api.BoardController, :show
   end
 
   scope "/api" do
