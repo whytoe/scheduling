@@ -65,6 +65,15 @@ defmodule SchedulingWeb.Router do
       patch "/:id", PatientController, :update
       delete "/:id", PatientController, :delete
     end
+
+    scope "/offices", Api do
+      get "/", OfficeController, :index
+      post "/", OfficeController, :create
+      get "/:id", OfficeController, :show
+      put "/:id", OfficeController, :update
+      patch "/:id", OfficeController, :update
+      delete "/:id", OfficeController, :delete
+    end
   end
 
   scope "/api" do

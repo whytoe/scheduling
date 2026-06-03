@@ -230,6 +230,72 @@ defmodule SchedulingWeb.Schemas do
     })
   end
 
+  defmodule Office do
+    @moduledoc "A single office with its current capabilities."
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "Office",
+      type: :object,
+      properties: %{
+        id: %Schema{type: :integer},
+        name: %Schema{type: :string, description: "Unique display name"},
+        intake_capacity: %Schema{type: :integer, minimum: 0, description: "Concurrent patient capacity"},
+        capabilities: %Schema{
+          type: :array,
+          items: SchedulingWeb.Schemas.Capability,
+          description: "Capabilities this office provides"
+        },
+        inserted_at: %Schema{type: :string, format: :"date-time"},
+        updated_at: %Schema{type: :string, format: :"date-time"}
+      },
+      required: [:id, :name, :intake_capacity, :capabilities, :inserted_at, :updated_at],
+      example: %{
+        "id" => 1,
+        "name" => "Room 101",
+        "intake_capacity" => 2,
+        "capabilities" => [],
+        "inserted_at" => "2026-06-01T12:34:56Z",
+        "updated_at" => "2026-06-01T12:34:56Z"
+      }
+    })
+  end
+
+  defmodule OfficeList do
+    @moduledoc "A list of offices."
+    require OpenApiSpex
+    OpenApiSpex.schema(%{title: "OfficeList", type: :array, items: SchedulingWeb.Schemas.Office})
+  end
+
+  defmodule OfficeRequest do
+    @moduledoc "Request body for creating or updating an office."
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "OfficeRequest",
+      type: :object,
+      properties: %{
+        office: %Schema{
+          type: :object,
+          properties: %{
+            name: %Schema{type: :string, description: "Unique display name (1–255 chars)"},
+            intake_capacity: %Schema{type: :integer, minimum: 0},
+            capability_ids: %Schema{
+              type: :array,
+              items: %Schema{type: :integer},
+              description: "Capability ids this office provides. Omit to leave associations unchanged; pass [] to clear them."
+            }
+          },
+          required: [:name, :intake_capacity]
+        }
+      },
+      required: [:office],
+      example: %{"office" => %{"name" => "Room 101", "intake_capacity" => 2, "capability_ids" => [1, 2]}}
+    })
+  end
+
   defmodule HealthResponse do
     @moduledoc "Health probe response body."
     require OpenApiSpex
