@@ -403,6 +403,54 @@ defmodule SchedulingWeb.Schemas do
     })
   end
 
+  defmodule Handoff do
+    @moduledoc "An incoming-patient handoff record carried to the office that received the assignment."
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "Handoff",
+      type: :object,
+      properties: %{
+        id: %Schema{type: :integer},
+        status: %Schema{type: :string, enum: ["pending", "acknowledged"]},
+        patient_name: %Schema{type: :string, nullable: true, description: "Snapshotted at handoff time"},
+        office_name: %Schema{type: :string, nullable: true, description: "Snapshotted at handoff time"},
+        required_capabilities: %Schema{
+          type: :array,
+          items: %Schema{type: :string},
+          description: "Capability names the patient requires, snapshotted as strings"
+        },
+        acknowledged_at: %Schema{type: :string, format: :"date-time", nullable: true},
+        acknowledged_by: %Schema{type: :string, nullable: true},
+        office_id: %Schema{type: :integer, nullable: true},
+        patient_id: %Schema{type: :integer, nullable: true},
+        queue_entry_id: %Schema{type: :integer, nullable: true},
+        inserted_at: %Schema{type: :string, format: :"date-time"},
+        updated_at: %Schema{type: :string, format: :"date-time"}
+      },
+      required: [:id, :status, :required_capabilities, :inserted_at, :updated_at]
+    })
+  end
+
+  defmodule HandoffList do
+    require OpenApiSpex
+    OpenApiSpex.schema(%{title: "HandoffList", type: :array, items: SchedulingWeb.Schemas.Handoff})
+  end
+
+  defmodule HandoffAcknowledgeRequest do
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "HandoffAcknowledgeRequest",
+      type: :object,
+      properties: %{
+        acknowledged_by: %Schema{type: :string, nullable: true, description: "User attribution stamped on the handoff"}
+      }
+    })
+  end
+
   defmodule HealthResponse do
     @moduledoc "Health probe response body."
     require OpenApiSpex

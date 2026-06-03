@@ -83,6 +83,12 @@ defmodule SchedulingWeb.Router do
       post "/:id/complete", QueueEntryController, :complete
       post "/:id/requeue", QueueEntryController, :requeue
     end
+
+    scope "/handoffs", Api do
+      get "/", HandoffController, :index
+      get "/:id", HandoffController, :show
+      post "/:id/acknowledge", HandoffController, :acknowledge
+    end
   end
 
   scope "/api" do
