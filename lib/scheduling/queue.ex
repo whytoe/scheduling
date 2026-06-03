@@ -11,6 +11,7 @@ defmodule Scheduling.Queue do
   import Ecto.Query, warn: false
 
   alias Scheduling.Audit
+  alias Scheduling.Catalog.Capability
   alias Scheduling.Handoffs
   alias Scheduling.Matching
   alias Scheduling.Matching.Result
@@ -80,6 +81,71 @@ defmodule Scheduling.Queue do
     |> select([e], {e.assigned_office_id, count(e.id)})
     |> Repo.all()
     |> Map.new()
+  end
+
+  @doc """
+  Creates a new queue entry. Accepts `patient_id` (required), optional
+  `diagnosis_id` and `priority`, and `required_capability_ids` to set the
+  patient's required capabilities. Defaults to `status: :waiting`.
+
+  Returns `{:ok, entry}` with `:patient` and `:required_capabilities`
+  preloaded, or `{:error, changeset}`.
+  """
+  @spec create_entry(map()) :: {:ok, QueueEntry.t()} | {:error, Ecto.Changeset.t()}
+  def create_entry(attrs) do
+    attrs =
+      attrs
+      |> stringify_keys()
+      |> Map.put_new("status", "waiting")
+      |> Map.put_new("priority", 0)
+
+    %QueueEntry{required_capabilities: []}
+    |> QueueEntry.changeset(attrs)
+    |> put_required_capabilities(attrs)
+    |> Repo.insert()
+    |> case do
+      {:ok, entry} ->
+        {:ok, Repo.preload(entry, [:patient, :required_capabilities, :assigned_office])}
+
+      {:error, changeset} ->
+        {:error, changeset}
+    end
+  end
+
+  defp put_required_capabilities(changeset, attrs) do
+    case Map.fetch(attrs, "required_capability_ids") do
+      {:ok, ids} ->
+        caps = load_capabilities(ids)
+        Ecto.Changeset.put_assoc(changeset, :required_capabilities, caps)
+
+      :error ->
+        changeset
+    end
+  end
+
+  defp load_capabilities(nil), do: []
+
+  defp load_capabilities(ids) do
+    parsed =
+      ids
+      |> List.wrap()
+      |> Enum.reject(&(&1 in [nil, ""]))
+      |> Enum.map(&to_id/1)
+
+    case parsed do
+      [] -> []
+      ids -> Capability |> where([c], c.id in ^ids) |> Repo.all()
+    end
+  end
+
+  defp to_id(id) when is_integer(id), do: id
+  defp to_id(id) when is_binary(id), do: String.to_integer(id)
+
+  defp stringify_keys(map) do
+    Map.new(map, fn
+      {k, v} when is_atom(k) -> {Atom.to_string(k), v}
+      {k, v} -> {k, v}
+    end)
   end
 
   @doc """

@@ -296,6 +296,113 @@ defmodule SchedulingWeb.Schemas do
     })
   end
 
+  defmodule QueueEntry do
+    @moduledoc "A queue entry — a patient waiting for, or currently receiving, service."
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "QueueEntry",
+      type: :object,
+      properties: %{
+        id: %Schema{type: :integer},
+        status: %Schema{
+          type: :string,
+          enum: ["waiting", "assigned", "in_service", "completed"],
+          description: "Lifecycle status; entries in `assigned` and `in_service` consume office capacity"
+        },
+        priority: %Schema{type: :integer, minimum: 0, description: "Higher = served sooner"},
+        patient: %Schema{nullable: true, allOf: [SchedulingWeb.Schemas.Patient]},
+        patient_id: %Schema{type: :integer},
+        diagnosis_id: %Schema{type: :integer, nullable: true},
+        assigned_office_id: %Schema{type: :integer, nullable: true},
+        required_capabilities: %Schema{type: :array, items: SchedulingWeb.Schemas.Capability},
+        inserted_at: %Schema{type: :string, format: :"date-time"},
+        updated_at: %Schema{type: :string, format: :"date-time"}
+      },
+      required: [:id, :status, :priority, :patient_id, :required_capabilities, :inserted_at, :updated_at]
+    })
+  end
+
+  defmodule QueueEntryList do
+    require OpenApiSpex
+    OpenApiSpex.schema(%{title: "QueueEntryList", type: :array, items: SchedulingWeb.Schemas.QueueEntry})
+  end
+
+  defmodule QueueEntryCreateRequest do
+    @moduledoc "Request body for creating a queue entry."
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "QueueEntryCreateRequest",
+      type: :object,
+      properties: %{
+        queue_entry: %Schema{
+          type: :object,
+          properties: %{
+            patient_id: %Schema{type: :integer, description: "Patient this entry represents"},
+            diagnosis_id: %Schema{type: :integer, nullable: true, description: "Optional diagnosis"},
+            priority: %Schema{type: :integer, minimum: 0, description: "Defaults to 0"},
+            required_capability_ids: %Schema{
+              type: :array,
+              items: %Schema{type: :integer},
+              description: "Capability ids this patient requires. Set explicitly; the diagnosis default isn't auto-applied yet."
+            }
+          },
+          required: [:patient_id]
+        }
+      },
+      required: [:queue_entry]
+    })
+  end
+
+  defmodule QueueEntryAcceptRequest do
+    @moduledoc "Optional body for accept; carries audit metadata."
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "QueueEntryAcceptRequest",
+      type: :object,
+      properties: %{
+        accepted_by: %Schema{type: :string, nullable: true, description: "User attribution recorded in the routing decision audit log"}
+      }
+    })
+  end
+
+  defmodule QueueEntryRequeueRequest do
+    @moduledoc "Optional body for requeue; lets you swap the required capabilities."
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "QueueEntryRequeueRequest",
+      type: :object,
+      properties: %{
+        required_capability_ids: %Schema{
+          type: :array,
+          items: %Schema{type: :integer},
+          description: "Capabilities the new service requires. Omit to keep the current set; pass [] to clear."
+        }
+      }
+    })
+  end
+
+  defmodule NoEligibleOfficeError do
+    @moduledoc "Returned when accept finds no office that provides the required capabilities AND has free capacity."
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "NoEligibleOfficeError",
+      type: :object,
+      properties: %{error: %Schema{type: :string, enum: ["no_eligible_office"]}},
+      required: [:error],
+      example: %{"error" => "no_eligible_office"}
+    })
+  end
+
   defmodule HealthResponse do
     @moduledoc "Health probe response body."
     require OpenApiSpex

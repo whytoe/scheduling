@@ -74,6 +74,15 @@ defmodule SchedulingWeb.Router do
       patch "/:id", OfficeController, :update
       delete "/:id", OfficeController, :delete
     end
+
+    scope "/queue_entries", Api do
+      get "/", QueueEntryController, :index
+      post "/", QueueEntryController, :create
+      get "/:id", QueueEntryController, :show
+      post "/:id/accept", QueueEntryController, :accept
+      post "/:id/complete", QueueEntryController, :complete
+      post "/:id/requeue", QueueEntryController, :requeue
+    end
   end
 
   scope "/api" do
