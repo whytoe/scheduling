@@ -175,6 +175,61 @@ defmodule SchedulingWeb.Schemas do
     })
   end
 
+  defmodule Patient do
+    @moduledoc "A single patient row."
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "Patient",
+      type: :object,
+      properties: %{
+        id: %Schema{type: :integer},
+        name: %Schema{type: :string, description: "Display name"},
+        external_id: %Schema{type: :string, nullable: true, description: "Optional id assigned by the upstream check-in app"},
+        inserted_at: %Schema{type: :string, format: :"date-time"},
+        updated_at: %Schema{type: :string, format: :"date-time"}
+      },
+      required: [:id, :name, :inserted_at, :updated_at],
+      example: %{
+        "id" => 1,
+        "name" => "Jane Doe",
+        "external_id" => "checkin-7a3f",
+        "inserted_at" => "2026-06-01T12:34:56Z",
+        "updated_at" => "2026-06-01T12:34:56Z"
+      }
+    })
+  end
+
+  defmodule PatientList do
+    @moduledoc "A list of patients."
+    require OpenApiSpex
+    OpenApiSpex.schema(%{title: "PatientList", type: :array, items: SchedulingWeb.Schemas.Patient})
+  end
+
+  defmodule PatientRequest do
+    @moduledoc "Request body for creating or updating a patient."
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "PatientRequest",
+      type: :object,
+      properties: %{
+        patient: %Schema{
+          type: :object,
+          properties: %{
+            name: %Schema{type: :string, description: "Display name (1–255 chars)"},
+            external_id: %Schema{type: :string, nullable: true, description: "Optional unique check-in id"}
+          },
+          required: [:name]
+        }
+      },
+      required: [:patient],
+      example: %{"patient" => %{"name" => "Jane Doe", "external_id" => "checkin-7a3f"}}
+    })
+  end
+
   defmodule HealthResponse do
     @moduledoc "Health probe response body."
     require OpenApiSpex
