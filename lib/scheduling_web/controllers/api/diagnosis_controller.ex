@@ -103,6 +103,7 @@ defmodule SchedulingWeb.Api.DiagnosisController do
       name: diagnosis.name,
       code: diagnosis.code,
       capabilities: Enum.map(diagnosis.capabilities, &serialize_capability/1),
+      required_form_types: diagnosis.required_form_types || [],
       inserted_at: diagnosis.inserted_at,
       updated_at: diagnosis.updated_at
     }

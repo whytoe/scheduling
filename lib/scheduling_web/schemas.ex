@@ -122,15 +122,21 @@ defmodule SchedulingWeb.Schemas do
           items: SchedulingWeb.Schemas.Capability,
           description: "Default required capabilities for this diagnosis"
         },
+        required_form_types: %Schema{
+          type: :array,
+          items: %Schema{type: :string},
+          description: "Intake form types that must be completed (status=completed AND not flagged) before a patient with this diagnosis can be assigned to an office."
+        },
         inserted_at: %Schema{type: :string, format: :"date-time"},
         updated_at: %Schema{type: :string, format: :"date-time"}
       },
-      required: [:id, :name, :capabilities, :inserted_at, :updated_at],
+      required: [:id, :name, :capabilities, :required_form_types, :inserted_at, :updated_at],
       example: %{
         "id" => 1,
         "name" => "Stroke Workup",
         "code" => "DX-STRK",
         "capabilities" => [],
+        "required_form_types" => ["stroke-consent"],
         "inserted_at" => "2026-06-01T12:34:56Z",
         "updated_at" => "2026-06-01T12:34:56Z"
       }
@@ -165,13 +171,18 @@ defmodule SchedulingWeb.Schemas do
               type: :array,
               items: %Schema{type: :integer},
               description: "Capability ids that become this diagnosis's default required capabilities. Omit to leave existing associations unchanged; pass [] to clear them."
+            },
+            required_form_types: %Schema{
+              type: :array,
+              items: %Schema{type: :string},
+              description: "Intake form types required for compliance. Pass [] to clear."
             }
           },
           required: [:name]
         }
       },
       required: [:diagnosis],
-      example: %{"diagnosis" => %{"name" => "Stroke Workup", "code" => "DX-STRK", "capability_ids" => [1, 2]}}
+      example: %{"diagnosis" => %{"name" => "Stroke Workup", "code" => "DX-STRK", "capability_ids" => [1, 2], "required_form_types" => ["stroke-consent"]}}
     })
   end
 
@@ -187,6 +198,7 @@ defmodule SchedulingWeb.Schemas do
         id: %Schema{type: :integer},
         name: %Schema{type: :string, description: "Display name"},
         external_id: %Schema{type: :string, nullable: true, description: "Optional id assigned by the upstream check-in app"},
+        intake_patient_id: %Schema{type: :string, format: :uuid, nullable: true, description: "UUID this patient has in the intake-form system. Used at accept time to look up their completed forms."},
         inserted_at: %Schema{type: :string, format: :"date-time"},
         updated_at: %Schema{type: :string, format: :"date-time"}
       },
@@ -195,6 +207,7 @@ defmodule SchedulingWeb.Schemas do
         "id" => 1,
         "name" => "Jane Doe",
         "external_id" => "checkin-7a3f",
+        "intake_patient_id" => "5e1f2c8a-1d3b-4ee9-9a64-8e3b6cf21e10",
         "inserted_at" => "2026-06-01T12:34:56Z",
         "updated_at" => "2026-06-01T12:34:56Z"
       }
@@ -220,13 +233,14 @@ defmodule SchedulingWeb.Schemas do
           type: :object,
           properties: %{
             name: %Schema{type: :string, description: "Display name (1–255 chars)"},
-            external_id: %Schema{type: :string, nullable: true, description: "Optional unique check-in id"}
+            external_id: %Schema{type: :string, nullable: true, description: "Optional unique check-in id"},
+            intake_patient_id: %Schema{type: :string, format: :uuid, nullable: true, description: "Optional unique intake-form-system UUID"}
           },
           required: [:name]
         }
       },
       required: [:patient],
-      example: %{"patient" => %{"name" => "Jane Doe", "external_id" => "checkin-7a3f"}}
+      example: %{"patient" => %{"name" => "Jane Doe", "external_id" => "checkin-7a3f", "intake_patient_id" => "5e1f2c8a-1d3b-4ee9-9a64-8e3b6cf21e10"}}
     })
   end
 

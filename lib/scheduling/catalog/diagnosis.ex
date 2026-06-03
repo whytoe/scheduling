@@ -12,6 +12,7 @@ defmodule Scheduling.Catalog.Diagnosis do
   schema "diagnoses" do
     field :name, :string
     field :code, :string
+    field :required_form_types, {:array, :string}, default: []
 
     many_to_many :capabilities, Capability,
       join_through: Scheduling.Catalog.DiagnosisCapability,
@@ -23,7 +24,7 @@ defmodule Scheduling.Catalog.Diagnosis do
   @doc false
   def changeset(diagnosis, attrs) do
     diagnosis
-    |> cast(attrs, [:name, :code])
+    |> cast(attrs, [:name, :code, :required_form_types])
     |> validate_required([:name])
     |> validate_length(:name, min: 1, max: 255)
     |> unique_constraint(:name)

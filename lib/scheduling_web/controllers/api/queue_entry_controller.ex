@@ -207,6 +207,7 @@ defmodule SchedulingWeb.Api.QueueEntryController do
       id: p.id,
       name: p.name,
       external_id: p.external_id,
+      intake_patient_id: p.intake_patient_id,
       inserted_at: p.inserted_at,
       updated_at: p.updated_at
     }
