@@ -38,6 +38,15 @@ defmodule SchedulingWeb.Router do
     pipe_through :api
 
     get "/health", HealthController, :index
+
+    scope "/capabilities", Api do
+      get "/", CapabilityController, :index
+      post "/", CapabilityController, :create
+      get "/:id", CapabilityController, :show
+      put "/:id", CapabilityController, :update
+      patch "/:id", CapabilityController, :update
+      delete "/:id", CapabilityController, :delete
+    end
   end
 
   scope "/api" do
