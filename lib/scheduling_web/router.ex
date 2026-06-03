@@ -47,6 +47,15 @@ defmodule SchedulingWeb.Router do
       patch "/:id", CapabilityController, :update
       delete "/:id", CapabilityController, :delete
     end
+
+    scope "/diagnoses", Api do
+      get "/", DiagnosisController, :index
+      post "/", DiagnosisController, :create
+      get "/:id", DiagnosisController, :show
+      put "/:id", DiagnosisController, :update
+      patch "/:id", DiagnosisController, :update
+      delete "/:id", DiagnosisController, :delete
+    end
   end
 
   scope "/api" do

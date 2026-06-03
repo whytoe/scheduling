@@ -105,6 +105,76 @@ defmodule SchedulingWeb.Schemas do
     })
   end
 
+  defmodule Diagnosis do
+    @moduledoc "A single diagnosis row with its default required capabilities."
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "Diagnosis",
+      type: :object,
+      properties: %{
+        id: %Schema{type: :integer},
+        name: %Schema{type: :string, description: "Unique display name"},
+        code: %Schema{type: :string, nullable: true, description: "Optional unique short code (e.g. \"DX-FRAC\")"},
+        capabilities: %Schema{
+          type: :array,
+          items: SchedulingWeb.Schemas.Capability,
+          description: "Default required capabilities for this diagnosis"
+        },
+        inserted_at: %Schema{type: :string, format: :"date-time"},
+        updated_at: %Schema{type: :string, format: :"date-time"}
+      },
+      required: [:id, :name, :capabilities, :inserted_at, :updated_at],
+      example: %{
+        "id" => 1,
+        "name" => "Stroke Workup",
+        "code" => "DX-STRK",
+        "capabilities" => [],
+        "inserted_at" => "2026-06-01T12:34:56Z",
+        "updated_at" => "2026-06-01T12:34:56Z"
+      }
+    })
+  end
+
+  defmodule DiagnosisList do
+    @moduledoc "A list of diagnoses."
+    require OpenApiSpex
+    OpenApiSpex.schema(%{
+      title: "DiagnosisList",
+      type: :array,
+      items: SchedulingWeb.Schemas.Diagnosis
+    })
+  end
+
+  defmodule DiagnosisRequest do
+    @moduledoc "Request body for creating or updating a diagnosis."
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "DiagnosisRequest",
+      type: :object,
+      properties: %{
+        diagnosis: %Schema{
+          type: :object,
+          properties: %{
+            name: %Schema{type: :string, description: "Unique display name (1–255 chars)"},
+            code: %Schema{type: :string, nullable: true, description: "Optional unique short code"},
+            capability_ids: %Schema{
+              type: :array,
+              items: %Schema{type: :integer},
+              description: "Capability ids that become this diagnosis's default required capabilities. Omit to leave existing associations unchanged; pass [] to clear them."
+            }
+          },
+          required: [:name]
+        }
+      },
+      required: [:diagnosis],
+      example: %{"diagnosis" => %{"name" => "Stroke Workup", "code" => "DX-STRK", "capability_ids" => [1, 2]}}
+    })
+  end
+
   defmodule HealthResponse do
     @moduledoc "Health probe response body."
     require OpenApiSpex
