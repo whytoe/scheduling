@@ -118,6 +118,38 @@ defmodule SchedulingWeb.Api.VisitEventControllerTest do
       conn = get(conn, ~p"/api/v1/visit_events?visit_id=not_a_number")
       assert is_list(json_response(conn, 200))
     end
+
+    test "?limit=N caps the page size and emits X-Next-Cursor when more rows exist", %{conn: conn} do
+      for _ <- 1..5 do
+        {:ok, _} = Scheduling.Audit.record_event(%{type: "queue_entry.completed"})
+      end
+
+      conn = get(conn, ~p"/api/v1/visit_events?limit=2")
+      body = json_response(conn, 200)
+      assert length(body) == 2
+      assert [cursor] = Plug.Conn.get_resp_header(conn, "x-next-cursor")
+      assert {_int, ""} = Integer.parse(cursor)
+    end
+
+    test "?after=cursor walks to the next page", %{conn: conn} do
+      events = for _ <- 1..3 do
+        {:ok, e} = Scheduling.Audit.record_event(%{type: "queue_entry.completed"})
+        e
+      end
+
+      first = get(conn, ~p"/api/v1/visit_events?limit=2")
+      assert length(json_response(first, 200)) == 2
+      assert [cursor] = Plug.Conn.get_resp_header(first, "x-next-cursor")
+
+      second = get(build_conn(), ~p"/api/v1/visit_events?limit=2&after=#{cursor}")
+      page2 = json_response(second, 200)
+      assert length(page2) <= 2
+      page1_ids = first |> json_response(200) |> Enum.map(& &1["id"])
+      page2_ids = Enum.map(page2, & &1["id"])
+      assert MapSet.disjoint?(MapSet.new(page1_ids), MapSet.new(page2_ids))
+
+      _ = events
+    end
   end
 
   describe "GET /api/visit_events/:id" do

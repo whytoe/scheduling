@@ -8,6 +8,7 @@ defmodule SchedulingWeb.Api.RoutingDecisionController do
   use OpenApiSpex.ControllerSpecs
 
   alias Scheduling.Audit
+  alias SchedulingWeb.Pagination
   alias SchedulingWeb.Schemas
 
   action_fallback SchedulingWeb.Api.FallbackController
@@ -19,14 +20,29 @@ defmodule SchedulingWeb.Api.RoutingDecisionController do
     description:
       "Most recent first. Each row captures the matcher inputs (required " <>
         "capabilities, eligible offices), the chosen office (or none), and " <>
-        "the human-readable rationale. Use `since=<iso8601>` for incremental " <>
-        "polling (filter is `inserted_at >= since`, inclusive).",
+        "the human-readable rationale.\n\n" <>
+        "**Incremental polling**: `?since=<iso8601>` returns rows with " <>
+        "`inserted_at >= since`, inclusive.\n\n" <>
+        "**Pagination**: `?limit=N&after=<id>`. Default 100, max 500. " <>
+        "Response carries `X-Next-Cursor` until the listing is exhausted.",
     parameters: [
       since: [
         in: :query,
         type: :string,
         required: false,
-        description: "ISO-8601 timestamp (e.g. 2026-06-01T12:00:00Z); returns decisions with inserted_at >= since"
+        description: "ISO-8601 timestamp; returns decisions with inserted_at >= since"
+      ],
+      limit: [
+        in: :query,
+        type: :integer,
+        required: false,
+        description: "Page size, default 100, max 500"
+      ],
+      after: [
+        in: :query,
+        type: :integer,
+        required: false,
+        description: "Cursor: id of the last row from the previous page"
       ]
     ],
     responses: [ok: {"Routing decisions", "application/json", Schemas.RoutingDecisionList}]
@@ -44,7 +60,19 @@ defmodule SchedulingWeb.Api.RoutingDecisionController do
           end
       end
 
-    json(conn, Enum.map(Audit.list_decisions(filters), &serialize/1))
+    pagination = Pagination.parse(params)
+
+    {page, next_cursor} =
+      filters
+      |> Audit.decisions_query()
+      |> Pagination.apply(pagination)
+      |> Scheduling.Repo.all()
+      |> Scheduling.Repo.preload([:patient, :chosen_office, :queue_entry])
+      |> Pagination.slice(pagination.limit)
+
+    conn
+    |> Pagination.put_next_cursor(next_cursor)
+    |> json(Enum.map(page, &serialize/1))
   end
 
   operation :show,

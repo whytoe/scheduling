@@ -52,13 +52,20 @@ defmodule Scheduling.Audit do
   """
   @spec list_decisions(map() | keyword()) :: [RoutingDecision.t()]
   def list_decisions(filters \\ %{}) do
+    filters
+    |> decisions_query()
+    |> order_by([d], desc: d.inserted_at, desc: d.id)
+    |> Repo.all()
+    |> Repo.preload([:patient, :chosen_office, :queue_entry])
+  end
+
+  @doc "Composable routing-decisions query — for paginated reads."
+  @spec decisions_query(map() | keyword()) :: Ecto.Queryable.t()
+  def decisions_query(filters \\ %{}) do
     filters = Map.new(filters)
 
     RoutingDecision
     |> apply_decision_filters(filters)
-    |> order_by([d], desc: d.inserted_at, desc: d.id)
-    |> Repo.all()
-    |> Repo.preload([:patient, :chosen_office, :queue_entry])
   end
 
   defp apply_decision_filters(query, filters) do
@@ -95,17 +102,31 @@ defmodule Scheduling.Audit do
   end
 
   @doc """
-  Lists visit events most-recent-first. Optional filters: `:visit_id,
-  :queue_entry_id, :patient_id, :handoff_id, :type, :actor_type, :actor_id`.
+  Lists visit events newest-first. Optional filters: `:visit_id,
+  :queue_entry_id, :patient_id, :handoff_id, :type, :actor_type, :actor_id,
+  :since`. Used by callers that want all matching rows (e.g. tests, the
+  internal LiveView board). Paginated callers should use `events_query/1`
+  + `SchedulingWeb.Pagination` instead.
   """
   @spec list_events(map() | keyword()) :: [VisitEvent.t()]
   def list_events(filters \\ %{}) do
+    filters
+    |> events_query()
+    |> order_by([e], desc: e.occurred_at, desc: e.id)
+    |> Repo.all()
+  end
+
+  @doc """
+  Returns the events query with filters applied — composable, no ordering
+  or limit. Controllers compose this with `SchedulingWeb.Pagination` for
+  paginated reads.
+  """
+  @spec events_query(map() | keyword()) :: Ecto.Queryable.t()
+  def events_query(filters \\ %{}) do
     filters = Map.new(filters)
 
     VisitEvent
     |> apply_event_filters(filters)
-    |> order_by([e], desc: e.occurred_at, desc: e.id)
-    |> Repo.all()
   end
 
   defp apply_event_filters(query, filters) do

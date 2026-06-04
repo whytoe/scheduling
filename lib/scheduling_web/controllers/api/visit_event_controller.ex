@@ -8,6 +8,7 @@ defmodule SchedulingWeb.Api.VisitEventController do
   use OpenApiSpex.ControllerSpecs
 
   alias Scheduling.Audit
+  alias SchedulingWeb.Pagination
   alias SchedulingWeb.Schemas
 
   action_fallback SchedulingWeb.Api.FallbackController
@@ -17,10 +18,16 @@ defmodule SchedulingWeb.Api.VisitEventController do
   operation :index,
     summary: "List visit events",
     description:
-      "Most recent first. Query parameters scope the result; pass none to get " <>
-        "the whole log. Use `since=<iso8601>` for incremental polling — the " <>
-        "filter is `occurred_at >= since`, inclusive, so a consumer can carry " <>
-        "forward the most-recent `occurred_at` from the previous response.",
+      "Newest first. Query parameters scope the result.\n\n" <>
+        "**Incremental polling**: use `?since=<iso8601>` to fetch only events " <>
+        "with `occurred_at >= since`, inclusive — pass the most recent " <>
+        "`occurred_at` from the previous response.\n\n" <>
+        "**Pagination**: `?limit=N&after=<id>` walks the log by id desc. " <>
+        "Default limit 100, max 500. When more rows exist the response " <>
+        "includes an `X-Next-Cursor` header; pass that id as `?after=<id>` " <>
+        "to fetch the next page. The header is absent at the end.\n\n" <>
+        "Pagination orders by id desc, not occurred_at — if you need strict " <>
+        "chronological ordering combine `?since=` with batched id paging.",
     parameters: [
       visit_id: [in: :query, type: :integer, required: false],
       queue_entry_id: [in: :query, type: :integer, required: false],
@@ -33,14 +40,37 @@ defmodule SchedulingWeb.Api.VisitEventController do
         in: :query,
         type: :string,
         required: false,
-        description: "ISO-8601 timestamp (e.g. 2026-06-01T12:00:00Z); returns events with occurred_at >= since"
+        description: "ISO-8601 timestamp; returns events with occurred_at >= since"
+      ],
+      limit: [
+        in: :query,
+        type: :integer,
+        required: false,
+        description: "Page size, default 100, max 500"
+      ],
+      after: [
+        in: :query,
+        type: :integer,
+        required: false,
+        description: "Cursor: id of the last row from the previous page"
       ]
     ],
     responses: [ok: {"Visit events", "application/json", Schemas.VisitEventList}]
 
   def index(conn, params) do
     filters = build_filters(params)
-    json(conn, Enum.map(Audit.list_events(filters), &serialize/1))
+    pagination = Pagination.parse(params)
+
+    {page, next_cursor} =
+      filters
+      |> Audit.events_query()
+      |> Pagination.apply(pagination)
+      |> Scheduling.Repo.all()
+      |> Pagination.slice(pagination.limit)
+
+    conn
+    |> Pagination.put_next_cursor(next_cursor)
+    |> json(Enum.map(page, &serialize/1))
   end
 
   operation :show,

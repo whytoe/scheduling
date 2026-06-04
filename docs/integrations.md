@@ -270,6 +270,28 @@ returns only deltas (filter is `occurred_at >= since`, inclusive).
 `/api/v1/routing_decisions` supports the same query param with the
 matcher's `inserted_at` as the cursor.
 
+### Pagination
+
+Both audit-log endpoints (`/api/v1/visit_events` and
+`/api/v1/routing_decisions`) support cursor pagination:
+
+  GET /api/v1/visit_events?limit=N&after=<id>
+
+- `limit` defaults to **100**, max **500**. Invalid values fall back to default.
+- `after` is the id of the last row from the previous page.
+- The response body stays a raw JSON array (no envelope).
+- When more rows exist the response carries an `X-Next-Cursor` response
+  header; pass its value as `?after=<id>` to fetch the next page. The
+  header is absent at the end of the listing.
+
+Pagination walks by id desc. For strictly chronological order across
+pages, combine `?since=` for the time window with batched id paging
+inside it.
+
+Other list endpoints (capabilities, diagnoses, patients, offices,
+visits, queue, handoffs) currently return all rows; pagination on those
+is tracked in a follow-up bead.
+
 Events are written inside `Ecto.Multi.transaction/0` so the row commits
 with the operation — no half-state where an action succeeds but the
 event is missing.
