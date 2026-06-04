@@ -67,8 +67,8 @@ defmodule SchedulingWeb.Api.QueueEntryController do
       unprocessable_entity: {"Validation failed", "application/json", Schemas.ValidationError}
     ]
 
-  def create(conn, %{"queue_entry" => params}) do
-    with {:ok, entry} <- Queue.create_entry(params) do
+  def create(conn, %{"queue_entry" => params} = body) do
+    with {:ok, entry} <- Queue.create_entry(params, actor_opts(body)) do
       conn |> put_status(:created) |> json(serialize(entry))
     end
   end
@@ -143,11 +143,16 @@ defmodule SchedulingWeb.Api.QueueEntryController do
       unprocessable_entity: {"Validation failed", "application/json", Schemas.ValidationError}
     ]
 
-  def complete(conn, %{"id" => id}) do
+  def complete(conn, %{"id" => id} = body) do
     with {:ok, entry} <- fetch(id),
-         {:ok, completed} <- Queue.complete(entry) do
+         {:ok, completed} <- Queue.complete(entry, actor_opts(body)) do
       json(conn, serialize(reload(completed)))
     end
+  end
+
+  defp actor_opts(body) do
+    [actor_type: Map.get(body, "actor_type"), actor_id: Map.get(body, "actor_id")]
+    |> Enum.reject(fn {_, v} -> is_nil(v) end)
   end
 
   operation :requeue,

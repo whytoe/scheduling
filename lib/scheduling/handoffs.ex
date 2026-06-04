@@ -14,6 +14,7 @@ defmodule Scheduling.Handoffs do
   """
   import Ecto.Query, warn: false
 
+  alias Scheduling.Audit
   alias Scheduling.Handoffs.Handoff
   alias Scheduling.Offices.Office
   alias Scheduling.Queue.QueueEntry
@@ -85,13 +86,38 @@ defmodule Scheduling.Handoffs do
   @spec acknowledge(Handoff.t(), keyword()) ::
           {:ok, Handoff.t()} | {:error, Ecto.Changeset.t()}
   def acknowledge(%Handoff{} = handoff, opts \\ []) do
-    handoff
-    |> Handoff.acknowledge_changeset(opts)
-    |> Repo.update()
+    handoff = Repo.preload(handoff, queue_entry: :visit)
+    visit_id = handoff.queue_entry && handoff.queue_entry.visit_id
+
+    Ecto.Multi.new()
+    |> Ecto.Multi.update(:handoff, Handoff.acknowledge_changeset(handoff, opts))
+    |> Ecto.Multi.run(:event, fn _repo, %{handoff: acked} ->
+      Audit.record_event(%{
+        type: "handoff.acknowledged",
+        visit_id: visit_id,
+        queue_entry_id: acked.queue_entry_id,
+        patient_id: acked.patient_id,
+        handoff_id: acked.id,
+        actor_type: Keyword.get(opts, :actor_type, actor_type_default(opts)),
+        actor_id: Keyword.get(opts, :actor_id, Keyword.get(opts, :acknowledged_by)),
+        occurred_at: acked.acknowledged_at,
+        payload: %{
+          acknowledged_at: acked.acknowledged_at,
+          acknowledged_by: acked.acknowledged_by
+        }
+      })
+    end)
+    |> Repo.transaction()
     |> case do
-      {:ok, acknowledged} -> {:ok, broadcast(acknowledged, :handoff_acknowledged)}
-      {:error, changeset} -> {:error, changeset}
+      {:ok, %{handoff: acked}} -> {:ok, broadcast(acked, :handoff_acknowledged)}
+      {:error, _, changeset, _} -> {:error, changeset}
     end
+  end
+
+  # Falls back to "user" when acknowledged_by is supplied but actor_type isn't —
+  # mirrors how the QueueLive board passes acknowledgments today.
+  defp actor_type_default(opts) do
+    if Keyword.get(opts, :acknowledged_by), do: "user", else: nil
   end
 
   @doc "Lists every pending (unacknowledged) handoff, oldest first."

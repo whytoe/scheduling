@@ -72,16 +72,19 @@ defmodule SchedulingWeb.Api.HandoffController do
 
   def acknowledge(conn, %{"id" => id} = params) do
     opts =
-      case Map.get(params, "acknowledged_by") do
-        nil -> []
-        by -> [acknowledged_by: by]
-      end
+      []
+      |> maybe_put(:acknowledged_by, Map.get(params, "acknowledged_by"))
+      |> maybe_put(:actor_type, Map.get(params, "actor_type"))
+      |> maybe_put(:actor_id, Map.get(params, "actor_id"))
 
     with {:ok, handoff} <- fetch(id),
          {:ok, acked} <- Handoffs.acknowledge(handoff, opts) do
       json(conn, serialize(acked))
     end
   end
+
+  defp maybe_put(opts, _key, nil), do: opts
+  defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
 
   defp fetch(id) do
     case Integer.parse(to_string(id)) do

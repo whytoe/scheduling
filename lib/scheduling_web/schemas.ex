@@ -556,6 +556,37 @@ defmodule SchedulingWeb.Schemas do
     })
   end
 
+  defmodule VisitEvent do
+    @moduledoc "One row in the visit-lifecycle event log."
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "VisitEvent",
+      type: :object,
+      properties: %{
+        id: %Schema{type: :integer},
+        type: %Schema{type: :string, description: "Event type, e.g. visit.created, queue_entry.completed, handoff.acknowledged"},
+        visit_id: %Schema{type: :integer, nullable: true},
+        queue_entry_id: %Schema{type: :integer, nullable: true},
+        patient_id: %Schema{type: :integer, nullable: true},
+        handoff_id: %Schema{type: :integer, nullable: true},
+        actor_type: %Schema{type: :string, nullable: true, description: "e.g. user, service, system"},
+        actor_id: %Schema{type: :string, nullable: true, description: "Subject id within actor_type"},
+        payload: %Schema{type: :object, description: "Event-specific extras"},
+        occurred_at: %Schema{type: :string, format: :"date-time"},
+        inserted_at: %Schema{type: :string, format: :"date-time"},
+        updated_at: %Schema{type: :string, format: :"date-time"}
+      },
+      required: [:id, :type, :occurred_at, :inserted_at, :updated_at]
+    })
+  end
+
+  defmodule VisitEventList do
+    require OpenApiSpex
+    OpenApiSpex.schema(%{title: "VisitEventList", type: :array, items: SchedulingWeb.Schemas.VisitEvent})
+  end
+
   defmodule RoutingDecision do
     @moduledoc "An audit record of one matcher run during the accept flow."
     require OpenApiSpex

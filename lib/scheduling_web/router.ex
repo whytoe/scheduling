@@ -95,6 +95,11 @@ defmodule SchedulingWeb.Router do
       get "/:id", RoutingDecisionController, :show
     end
 
+    scope "/visit_events", Api do
+      get "/", VisitEventController, :index
+      get "/:id", VisitEventController, :show
+    end
+
     scope "/visits", Api do
       get "/", VisitController, :index
       post "/", VisitController, :create

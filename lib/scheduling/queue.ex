@@ -92,23 +92,38 @@ defmodule Scheduling.Queue do
   Returns `{:ok, entry}` with `:patient` and `:required_capabilities`
   preloaded, or `{:error, changeset}`.
   """
-  @spec create_entry(map()) :: {:ok, QueueEntry.t()} | {:error, Ecto.Changeset.t()}
-  def create_entry(attrs) do
+  @spec create_entry(map(), keyword()) :: {:ok, QueueEntry.t()} | {:error, Ecto.Changeset.t()}
+  def create_entry(attrs, opts \\ []) do
     attrs =
       attrs
       |> stringify_keys()
       |> Map.put_new("status", "waiting")
       |> Map.put_new("priority", 0)
 
-    %QueueEntry{required_capabilities: []}
-    |> QueueEntry.changeset(attrs)
-    |> put_required_capabilities(attrs)
-    |> Repo.insert()
+    changeset =
+      %QueueEntry{required_capabilities: []}
+      |> QueueEntry.changeset(attrs)
+      |> put_required_capabilities(attrs)
+
+    Ecto.Multi.new()
+    |> Ecto.Multi.insert(:entry, changeset)
+    |> Ecto.Multi.run(:event, fn _repo, %{entry: entry} ->
+      Audit.record_event(%{
+        type: "queue_entry.created",
+        visit_id: entry.visit_id,
+        queue_entry_id: entry.id,
+        patient_id: entry.patient_id,
+        actor_type: Keyword.get(opts, :actor_type),
+        actor_id: Keyword.get(opts, :actor_id),
+        payload: %{priority: entry.priority, diagnosis_id: entry.diagnosis_id}
+      })
+    end)
+    |> Repo.transaction()
     |> case do
-      {:ok, entry} ->
+      {:ok, %{entry: entry}} ->
         {:ok, Repo.preload(entry, [:patient, :required_capabilities, :assigned_office])}
 
-      {:error, changeset} ->
+      {:error, _, changeset, _} ->
         {:error, changeset}
     end
   end
@@ -252,17 +267,28 @@ defmodule Scheduling.Queue do
   Returns `{:ok, entry}` with `:patient` and `:assigned_office` preloaded, or
   `{:error, changeset}` if the entry was not in an active status.
   """
-  @spec complete(QueueEntry.t()) :: {:ok, QueueEntry.t()} | {:error, Ecto.Changeset.t()}
-  def complete(%QueueEntry{} = entry) do
-    entry
-    |> QueueEntry.completion_changeset()
-    |> Repo.update()
+  @spec complete(QueueEntry.t(), keyword()) :: {:ok, QueueEntry.t()} | {:error, Ecto.Changeset.t()}
+  def complete(%QueueEntry{} = entry, opts \\ []) do
+    Ecto.Multi.new()
+    |> Ecto.Multi.update(:entry, QueueEntry.completion_changeset(entry))
+    |> Ecto.Multi.run(:event, fn _repo, %{entry: completed} ->
+      Audit.record_event(%{
+        type: "queue_entry.completed",
+        visit_id: completed.visit_id,
+        queue_entry_id: completed.id,
+        patient_id: completed.patient_id,
+        actor_type: Keyword.get(opts, :actor_type),
+        actor_id: Keyword.get(opts, :actor_id),
+        payload: %{assigned_office_id: completed.assigned_office_id}
+      })
+    end)
+    |> Repo.transaction()
     |> case do
-      {:ok, completed} ->
+      {:ok, %{entry: completed}} ->
         broadcast_board_change({:completed, completed.id})
         {:ok, Repo.preload(completed, [:patient, :assigned_office])}
 
-      {:error, changeset} ->
+      {:error, _, changeset, _} ->
         {:error, changeset}
     end
   end

@@ -53,8 +53,8 @@ defmodule SchedulingWeb.Api.VisitController do
       unprocessable_entity: {"Validation failed", "application/json", Schemas.ValidationError}
     ]
 
-  def create(conn, %{"visit" => params}) do
-    with {:ok, visit} <- Visits.create_visit(params) do
+  def create(conn, %{"visit" => params} = body) do
+    with {:ok, visit} <- Visits.create_visit(params, actor_opts(body)) do
       conn |> put_status(:created) |> json(serialize(visit))
     end
   end
@@ -69,11 +69,16 @@ defmodule SchedulingWeb.Api.VisitController do
       unprocessable_entity: {"Validation failed", "application/json", Schemas.ValidationError}
     ]
 
-  def end_visit(conn, %{"id" => id}) do
+  def end_visit(conn, %{"id" => id} = body) do
     with {:ok, visit} <- fetch(id),
-         {:ok, ended} <- Visits.end_visit(visit) do
+         {:ok, ended} <- Visits.end_visit(visit, actor_opts(body)) do
       json(conn, serialize(ended))
     end
+  end
+
+  defp actor_opts(body) do
+    [actor_type: Map.get(body, "actor_type"), actor_id: Map.get(body, "actor_id")]
+    |> Enum.reject(fn {_, v} -> is_nil(v) end)
   end
 
   defp fetch(id) do
