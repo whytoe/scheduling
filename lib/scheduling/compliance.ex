@@ -108,6 +108,16 @@ defmodule Scheduling.Compliance do
     end
   end
 
-  defp map_get(map, key) when is_map(map), do: Map.get(map, key) || Map.get(map, String.to_atom(key))
+  # Looks up either a string-keyed or atom-keyed value. CRITICAL: must use
+  # `Map.fetch` not `Map.get || Map.get`, because the latter treats `false`
+  # as "missing" and falls through — which silently broke the `flagged: false`
+  # check (caught by `compliance_http_test.exs`).
+  defp map_get(map, key) when is_map(map) and is_binary(key) do
+    case Map.fetch(map, key) do
+      {:ok, value} -> value
+      :error -> Map.get(map, String.to_atom(key))
+    end
+  end
+
   defp map_get(_, _), do: nil
 end
