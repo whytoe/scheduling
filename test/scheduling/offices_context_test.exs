@@ -1,6 +1,7 @@
 defmodule Scheduling.OfficesContextTest do
   use Scheduling.DataCase, async: true
 
+  alias Scheduling.Catalog
   alias Scheduling.Offices
   alias Scheduling.Catalog.Capability
 
@@ -125,7 +126,7 @@ defmodule Scheduling.OfficesContextTest do
       capability_fixture("CT Scan")
       capability_fixture("Lab")
 
-      assert Offices.list_capabilities() |> Enum.map(& &1.name) == ["CT Scan", "Lab", "XRay"]
+      assert Catalog.list_capabilities() |> Enum.map(& &1.name) == ["CT Scan", "Lab", "XRay"]
     end
   end
 end

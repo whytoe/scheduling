@@ -3,6 +3,7 @@ defmodule SchedulingWeb.OfficeLiveTest do
 
   import Phoenix.LiveViewTest
 
+  alias Scheduling.Catalog
   alias Scheduling.Offices
   alias Scheduling.Repo
   alias Scheduling.Catalog.Capability
@@ -82,7 +83,7 @@ defmodule SchedulingWeb.OfficeLiveTest do
 
       {:ok, live, _html} = live(conn, ~p"/offices/#{office}/edit")
 
-      lab = Enum.find(Offices.list_capabilities(), &(&1.name == "Lab"))
+      lab = Enum.find(Catalog.list_capabilities(), &(&1.name == "Lab"))
 
       live
       |> form("#office-form",

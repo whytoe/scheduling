@@ -1,9 +1,33 @@
 # Integrations
 
-How Scheduling talks to the world. Two surfaces: the HTTP API we **expose** for
-consumers, and the upstream services we **consume**. A third surface
-(check-in app) is still pending — see `integration-contracts.md` for the
-decision record on why it's held.
+How Scheduling talks to the world. Two surfaces today: the HTTP API we
+**expose** for consumers, and the **intake-form** REST API we consume at
+the compliance gate. A third surface (check-in / queueing app) is still
+pending — see `integration-contracts.md` for the decision record.
+
+## Topology
+
+```
+       sign-in
+[Queueing app] ───POST /api/visits───▶ [Scheduling]
+[Queueing app] ───POST /api/queue_entries (with visit_id)──▶
+                                            │
+                                            │  on POST /queue_entries/:id/accept:
+                                            │
+                                            ├─► [Intake-form system]   compliance gate
+                                            │      GET /responses        (per required form_type)
+                                            │
+                                            ├─► [matcher]              best-fit office
+                                            ├─► [routing_decisions]    audit row
+                                            └─► [Handoff]              office staff notified
+```
+
+Two audit logs, both append-only:
+
+- `routing_decisions` — matcher-specific rows (one per accept attempt).
+- `visit_events` — lifecycle events (sign-in, completion, handoff
+  acknowledgement, future cancel / no_show / disposition). See *Audit
+  logs* below.
 
 ## What we expose: Scheduling HTTP API
 
@@ -11,10 +35,10 @@ decision record on why it's held.
 - **Swagger UI:** `GET /api/swagger`
 - **Health probe:** `GET /api/health` (200 `{"status":"ok"}` / 503 `{"status":"degraded"}`)
 
-The API mirrors every operation the LiveView UI offers — 35 endpoints across
-9 tag groups (`capabilities`, `diagnoses`, `patients`, `offices`, `queue`,
-`handoffs`, `routing_decisions`, `board`, `health`). Browse the live spec;
-this document does not re-derive it.
+The API mirrors every operation the LiveView UI offers — 41 endpoints across
+11 tag groups (`capabilities`, `diagnoses`, `patients`, `offices`, `visits`,
+`queue`, `handoffs`, `routing_decisions`, `visit_events`, `board`, `health`).
+Browse the live spec; this document does not re-derive it.
 
 Conventions:
 
@@ -24,7 +48,11 @@ Conventions:
   traversal).
 - Not found → **404** with `{"error":"not_found"}`.
 - Action endpoints under their resource: `POST /queue_entries/:id/accept`,
-  `POST /handoffs/:id/acknowledge`.
+  `POST /handoffs/:id/acknowledge`, `POST /visits/:id/end`.
+- All mutating endpoints accept an optional `actor_type` + `actor_id` at
+  the top level of the request body. These are recorded on the
+  corresponding `visit_event`. Once `sc-6ea` (OAuth) lands, these come
+  from the bearer token's subject claim and become required.
 
 ## What we consume: Intake-form system
 
@@ -161,6 +189,75 @@ A Visit's status starts `active` and moves to `ended` when the patient is
 finally discharged. Visit lifecycle and disposition semantics are tracked
 under `sc-7hu` (state machine extensions).
 
+API surface:
+
+  POST /api/visits             # sign-in
+  GET  /api/visits             # list, most-recent first
+  GET  /api/visits/:id         # show (preloads patient + queue_entries)
+  POST /api/visits/:id/end     # discharge (idempotent)
+
+## Audit logs
+
+Two append-only tables. Together they form the visit timeline; consumers
+can query each separately or union them client-side.
+
+### routing_decisions (matcher-specific)
+
+One row per matcher run during `POST /queue_entries/:id/accept`. Captures
+the chosen office (or `nil` when no eligible office), the eligible
+candidate set, the required capability set, and a human-readable
+`rationale` string. **Read-only.** Used for "why did the matcher pick
+this office for this patient?" queries.
+
+  GET /api/routing_decisions       # most-recent first
+  GET /api/routing_decisions/:id
+
+### visit_events (lifecycle log)
+
+Sibling to `routing_decisions`. Polymorphic `payload jsonb` for
+per-type extras; FK references to `visits`, `queue_entries`, `patients`,
+`handoffs` (all `on_delete: nilify_all` so the audit survives row
+deletion). Today's event types:
+
+| `type`                  | Recorded when                                  |
+|-------------------------|------------------------------------------------|
+| `visit.created`         | `POST /api/visits`                             |
+| `visit.ended`           | `POST /api/visits/:id/end`                     |
+| `queue_entry.created`   | `POST /api/queue_entries`                      |
+| `queue_entry.completed` | `POST /api/queue_entries/:id/complete`         |
+| `handoff.acknowledged`  | `POST /api/handoffs/:id/acknowledge`           |
+
+The accept-time outcomes (`assigned`, `no_eligible_office`,
+`compliance_failed`, `compliance_unavailable`) stay in `routing_decisions`
+to preserve their structured columns.
+
+Each event carries:
+
+- `type` — the event type string
+- FK references that apply (visit_id / queue_entry_id / patient_id / handoff_id)
+- `actor_type` + `actor_id` — split per the design discussion. Once
+  `sc-6ea` (OAuth) lands these become the bearer token's subject claim.
+  Today callers pass them in the request body of the mutating call.
+- `payload` (jsonb) — event-specific extras (e.g.
+  `queue_entry.completed.payload = {assigned_office_id: 17}`)
+- `occurred_at` — defaults to the operation's natural timestamp
+  (`visit.started_at`, `visit.ended_at`, `handoff.acknowledged_at`)
+
+API surface:
+
+  GET /api/visit_events            # most-recent first; query filters:
+                                   #   visit_id, queue_entry_id, patient_id,
+                                   #   handoff_id, type, actor_type, actor_id
+  GET /api/visit_events/:id
+
+Events are written inside `Ecto.Multi.transaction/0` so the row commits
+with the operation — no half-state where an action succeeds but the
+event is missing.
+
+Additional event types will land alongside `sc-7hu`
+(`queue_entry.cancelled`, `queue_entry.no_show`,
+`disposition.next_entry_created`, …).
+
 ## Local-dev recipe
 
 Exercise the compliance gate against a local intake on `localhost:3001`:
@@ -199,6 +296,21 @@ curl -X POST http://localhost:4000/api/patients \
 #            503 if intake is unreachable.
 ```
 
-Watch the audit log at `GET /api/routing_decisions` — every accept attempt
-(success, no-eligible-office, compliance failure, compliance unavailable)
-appears there with a rationale string.
+Watch the matcher audit log at `GET /api/routing_decisions` — every
+accept attempt appears there with a rationale. Watch the lifecycle log
+at `GET /api/visit_events?visit_id=<id>` for the full timeline of a
+visit.
+
+## Open integration work (beads)
+
+Pending feature work that affects integration shape. Track via `bd show
+<id>` in the scheduling workspace.
+
+| Bead     | Scope                                                                                                       |
+|----------|-------------------------------------------------------------------------------------------------------------|
+| `sc-6ea` | Unified OAuth auth system. Service-to-service + per-role human auth. Once landed, `actor_type`/`actor_id` come from the bearer token instead of the request body. |
+| `sc-7hu` | Queue-entry state machine extensions: `scheduled`, `cancelled`, `no_show`, `discharged_with_followup`. Adds new event types to `visit_events`. |
+| `sc-kub` | Service-to-service trust model (blocked-by `sc-6ea`).                                                       |
+| `sc-ry7` | Idempotency-key handling for sign-in / disposition / outbound (blocked-by `sc-6ea`).                        |
+| `sc-ais` | Replay job for queue entries stuck on `compliance_unavailable` / `no_eligible_office`.                      |
+| `sc-nm5` | Patient-facing notifications (SMS / email) for follow-ups.                                                  |
