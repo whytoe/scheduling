@@ -10,6 +10,7 @@ defmodule Scheduling.Queue.QueueEntry do
   alias Scheduling.Catalog.{Capability, Diagnosis}
   alias Scheduling.Offices.Office
   alias Scheduling.Patients.Patient
+  alias Scheduling.Visits.Visit
 
   @statuses [:waiting, :assigned, :in_service, :completed]
   @active_statuses [:assigned, :in_service]
@@ -21,6 +22,7 @@ defmodule Scheduling.Queue.QueueEntry do
     belongs_to :patient, Patient
     belongs_to :diagnosis, Diagnosis
     belongs_to :assigned_office, Office
+    belongs_to :visit, Visit
 
     many_to_many :required_capabilities, Capability,
       join_through: Scheduling.Queue.QueueEntryCapability,
@@ -41,13 +43,21 @@ defmodule Scheduling.Queue.QueueEntry do
   @doc false
   def changeset(queue_entry, attrs) do
     queue_entry
-    |> cast(attrs, [:patient_id, :diagnosis_id, :assigned_office_id, :status, :priority])
+    |> cast(attrs, [
+      :patient_id,
+      :diagnosis_id,
+      :assigned_office_id,
+      :visit_id,
+      :status,
+      :priority
+    ])
     |> validate_required([:patient_id, :status, :priority])
     |> validate_inclusion(:status, @statuses)
     |> validate_number(:priority, greater_than_or_equal_to: 0)
     |> assoc_constraint(:patient)
     |> assoc_constraint(:diagnosis)
     |> assoc_constraint(:assigned_office)
+    |> assoc_constraint(:visit)
   end
 
   @doc """

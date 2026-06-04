@@ -50,6 +50,7 @@ defmodule SchedulingWeb.Api.BoardController do
       patient_id: e.patient_id,
       diagnosis_id: e.diagnosis_id,
       assigned_office_id: e.assigned_office_id,
+      visit_id: e.visit_id,
       patient: serialize_patient(e.patient),
       required_capabilities: serialize_capabilities(e.required_capabilities),
       inserted_at: e.inserted_at,
@@ -94,6 +95,7 @@ defmodule SchedulingWeb.Api.BoardController do
     %{
       id: p.id,
       name: p.name,
+      client_id: p.client_id,
       external_id: p.external_id,
       intake_patient_id: p.intake_patient_id,
       inserted_at: p.inserted_at,

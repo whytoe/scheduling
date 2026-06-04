@@ -4,6 +4,17 @@
 `sc-7hs` and the working contract for its fast-followers `sc-bd8` (check-in
 ingest) and `sc-5ed` (forms requirement details).
 
+**Update 2026-06-04:**
+
+- The **check-in app == the queueing service** — the same external system
+  patients sign into when arriving for an appointment. It is the workflow's
+  entry point. (Previously these were considered separately.)
+- The **forms-management app == the intake-form system**. Its REST API and
+  compliance-gate integration are now implemented; see `integrations.md`.
+- `sc-5ed` is therefore effectively delivered (the diagnosis-driven required
+  forms gate lives at accept time, not ingest time). `sc-bd8` remains held
+  pending the check-in/queueing app publishing its spec.
+
 ## Context
 
 Scheduling is the clinical patient-flow intake service (Phoenix/LiveView +

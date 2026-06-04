@@ -197,15 +197,17 @@ defmodule SchedulingWeb.Schemas do
       properties: %{
         id: %Schema{type: :integer},
         name: %Schema{type: :string, description: "Display name"},
-        external_id: %Schema{type: :string, nullable: true, description: "Optional id assigned by the upstream check-in app"},
+        client_id: %Schema{type: :string, format: :uuid, description: "Canonical scheduling-owned UUID. Auto-generated if not supplied. Used as the inter-service reference; not the EMR record id."},
+        external_id: %Schema{type: :string, nullable: true, description: "Optional id assigned by the upstream check-in / queueing app"},
         intake_patient_id: %Schema{type: :string, format: :uuid, nullable: true, description: "UUID this patient has in the intake-form system. Used at accept time to look up their completed forms."},
         inserted_at: %Schema{type: :string, format: :"date-time"},
         updated_at: %Schema{type: :string, format: :"date-time"}
       },
-      required: [:id, :name, :inserted_at, :updated_at],
+      required: [:id, :name, :client_id, :inserted_at, :updated_at],
       example: %{
         "id" => 1,
         "name" => "Jane Doe",
+        "client_id" => "9b1c4a3e-2f5d-4b8a-9c7e-1a3b5c7d9e2f",
         "external_id" => "checkin-7a3f",
         "intake_patient_id" => "5e1f2c8a-1d3b-4ee9-9a64-8e3b6cf21e10",
         "inserted_at" => "2026-06-01T12:34:56Z",
@@ -233,6 +235,7 @@ defmodule SchedulingWeb.Schemas do
           type: :object,
           properties: %{
             name: %Schema{type: :string, description: "Display name (1–255 chars)"},
+            client_id: %Schema{type: :string, format: :uuid, nullable: true, description: "Canonical UUID. Optional on create: server generates one if omitted."},
             external_id: %Schema{type: :string, nullable: true, description: "Optional unique check-in id"},
             intake_patient_id: %Schema{type: :string, format: :uuid, nullable: true, description: "Optional unique intake-form-system UUID"}
           },
@@ -310,6 +313,54 @@ defmodule SchedulingWeb.Schemas do
     })
   end
 
+  defmodule Visit do
+    @moduledoc "A patient encounter; potentially spans multiple queue entries."
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "Visit",
+      type: :object,
+      properties: %{
+        id: %Schema{type: :integer},
+        patient_id: %Schema{type: :integer},
+        status: %Schema{type: :string, enum: ["active", "ended"]},
+        started_at: %Schema{type: :string, format: :"date-time"},
+        ended_at: %Schema{type: :string, format: :"date-time", nullable: true},
+        inserted_at: %Schema{type: :string, format: :"date-time"},
+        updated_at: %Schema{type: :string, format: :"date-time"}
+      },
+      required: [:id, :patient_id, :status, :started_at, :inserted_at, :updated_at]
+    })
+  end
+
+  defmodule VisitList do
+    require OpenApiSpex
+    OpenApiSpex.schema(%{title: "VisitList", type: :array, items: SchedulingWeb.Schemas.Visit})
+  end
+
+  defmodule VisitRequest do
+    @moduledoc "Request body for creating a visit."
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "VisitRequest",
+      type: :object,
+      properties: %{
+        visit: %Schema{
+          type: :object,
+          properties: %{
+            patient_id: %Schema{type: :integer, description: "Patient whose encounter this is"},
+            started_at: %Schema{type: :string, format: :"date-time", description: "Defaults to now if omitted"}
+          },
+          required: [:patient_id]
+        }
+      },
+      required: [:visit]
+    })
+  end
+
   defmodule QueueEntry do
     @moduledoc "A queue entry — a patient waiting for, or currently receiving, service."
     require OpenApiSpex
@@ -330,6 +381,7 @@ defmodule SchedulingWeb.Schemas do
         patient_id: %Schema{type: :integer},
         diagnosis_id: %Schema{type: :integer, nullable: true},
         assigned_office_id: %Schema{type: :integer, nullable: true},
+        visit_id: %Schema{type: :integer, nullable: true, description: "Parent Visit this entry belongs to (set when created via the queueing service's sign-in flow)"},
         required_capabilities: %Schema{type: :array, items: SchedulingWeb.Schemas.Capability},
         inserted_at: %Schema{type: :string, format: :"date-time"},
         updated_at: %Schema{type: :string, format: :"date-time"}
@@ -357,6 +409,7 @@ defmodule SchedulingWeb.Schemas do
           properties: %{
             patient_id: %Schema{type: :integer, description: "Patient this entry represents"},
             diagnosis_id: %Schema{type: :integer, nullable: true, description: "Optional diagnosis"},
+            visit_id: %Schema{type: :integer, nullable: true, description: "Parent Visit. Set by the queueing service's sign-in flow."},
             priority: %Schema{type: :integer, minimum: 0, description: "Defaults to 0"},
             required_capability_ids: %Schema{
               type: :array,

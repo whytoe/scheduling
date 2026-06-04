@@ -213,6 +213,7 @@ defmodule SchedulingWeb.Api.QueueEntryController do
       patient_id: entry.patient_id,
       diagnosis_id: entry.diagnosis_id,
       assigned_office_id: entry.assigned_office_id,
+      visit_id: entry.visit_id,
       patient: serialize_patient(entry.patient),
       required_capabilities: serialize_capabilities(entry.required_capabilities),
       inserted_at: entry.inserted_at,
@@ -227,6 +228,7 @@ defmodule SchedulingWeb.Api.QueueEntryController do
     %{
       id: p.id,
       name: p.name,
+      client_id: p.client_id,
       external_id: p.external_id,
       intake_patient_id: p.intake_patient_id,
       inserted_at: p.inserted_at,

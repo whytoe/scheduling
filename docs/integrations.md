@@ -115,24 +115,51 @@ patient has no `intake_patient_id`, the gate behaves as follows:
   3. Move the check off the accept path entirely: a background job marks
      entries `compliant: true` and `accept` only books pre-cleared entries.
 
-## What's pending: Check-in app
+## What's pending: Check-in / queueing app
 
-`docs/integration-contracts.md` (sc-7hs) is the decision record. Summary:
+`docs/integration-contracts.md` (sc-7hs) is the decision record. The check-in
+app **is the queueing service** — the same external system patients sign
+into when arriving for an appointment. It owns patient registration and
+emits the sign-in event that creates the visit.
 
-- The check-in app owns patient registration. It will push a webhook on
-  check-in and expose a REST endpoint for reconciliation.
-- It's an external dependency. The spec hasn't shipped yet. Decision:
-  **wait for the real OpenAPI spec, then generate a client. Don't build
-  speculative stubs.**
-
-Today, queue entries are created via `POST /api/queue_entries` (admin / manual
-/ test flows). When the check-in spec lands the work is:
+Decision: **wait for the real OpenAPI spec, then generate a client. Don't
+build speculative stubs.** Today, queue entries are created via
+`POST /api/queue_entries` (admin / manual / test flows). When the check-in
+spec lands the work is:
 
 1. Generate a client from the spec.
 2. Add a webhook receiver under `/api/webhooks/check-in/...`.
 3. Add a periodic reconcile pull against the REST API.
-4. Map check-in patient ids onto `patients.external_id` (separate from
-   `intake_patient_id`; check-in and intake are distinct systems).
+4. The check-in app references patients by their canonical `client_id` (see
+   "Patient identity" below), distinct from `intake_patient_id`.
+
+### Patient identity
+
+Three external systems reference the same human; scheduling owns the
+canonical identity:
+
+| Field on `patients`    | Owned by         | Used by                          |
+|------------------------|------------------|----------------------------------|
+| `client_id` (uuid)     | **scheduling**   | All inter-service references     |
+| `external_id` (string) | check-in/queueing | Map check-in app's patient id    |
+| `intake_patient_id` (uuid) | intake-form  | Compliance gate lookup           |
+
+`client_id` is auto-generated on patient create if not supplied; it is
+**not** the EMR record id. External systems integrate by exchanging
+`client_id` plus their own source-specific id.
+
+### Visit
+
+A `Visit` represents one encounter — a patient's actual visit to the
+facility, spanning potentially multiple queue entries (initial service,
+follow-up procedure within the same day, etc.). The check-in / queueing
+service is responsible for creating the visit when the patient signs in;
+subsequent queue entries (including those created by outbound disposition)
+link back via `queue_entries.visit_id`.
+
+A Visit's status starts `active` and moves to `ended` when the patient is
+finally discharged. Visit lifecycle and disposition semantics are tracked
+under `sc-7hu` (state machine extensions).
 
 ## Local-dev recipe
 
