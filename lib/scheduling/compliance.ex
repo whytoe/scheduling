@@ -74,7 +74,11 @@ defmodule Scheduling.Compliance do
   end
 
   defp form_type_satisfied?(intake_patient_id, form_type) do
-    case Client.list_completed_responses(form_type) do
+    # Pass patient_id through to intake's server-side filter — index-direct
+    # via their `qr_patient_idx`. The defensive patientId equality check below
+    # stays in place (belt-and-suspenders against an intake-side filter bug
+    # that returned other patients' rows).
+    case Client.list_completed_responses(form_type, patient_id: intake_patient_id) do
       {:ok, responses} ->
         if Enum.any?(responses, fn r ->
              map_get(r, "patientId") == intake_patient_id and

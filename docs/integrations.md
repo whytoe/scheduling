@@ -115,9 +115,11 @@ re-litigable; the join is small.
 
 1. **Compliance gate** runs first (when `INTAKE_API_KEY` is set).
 2. For each form type in the entry's diagnosis's `required_form_types`:
-   1. `GET {INTAKE_API_URL}/responses?form_type=<type>&status=completed&limit=200`
-   2. Filter client-side for `patientId == patient.intake_patient_id`
-   3. Require `flagged == false`
+   1. `GET {INTAKE_API_URL}/responses?form_type=<type>&status=completed&patient_id=<intake_patient_id>`
+   2. Defense-in-depth: verify `patientId == patient.intake_patient_id` in
+      the returned row(s) (intake's filter is index-direct, but the second
+      check costs nothing and catches a regression).
+   3. Require `flagged == false`.
 3. **Matcher** runs next (unchanged — best-fit office with free capacity).
 
 Outcomes (all written to the `routing_decisions` audit log with a
@@ -176,10 +178,6 @@ compliance before plumbing those through.
 
 ### Known limitations
 
-- The intake `/responses` endpoint does **not** accept a `patient_id` query
-  parameter. We pull all completed responses per form type (limit 200) and
-  filter client-side. Ask the intake team to add the parameter — turns the
-  lookup from `O(all org responses)` to `O(1)`.
 - The compliance call is **synchronous** inside `accept`. Slow intake = slow
   accept. If this matters, options in increasing order of work:
   1. Short-TTL cache on the per-`(intake_patient_id, form_type)` verdict.
@@ -187,6 +185,11 @@ compliance before plumbing those through.
      entry; revalidate on a TTL.
   3. Move the check off the accept path entirely: a background job marks
      entries `compliant: true` and `accept` only books pre-cleared entries.
+
+(The previous "O(all org responses)" limitation was resolved by
+intakeform adding a `?patient_id=` filter on their `/responses`
+endpoint per scheduling's `sc-c9j`. Our client now passes it; each
+form-type check is one index-direct row instead of up to 200.)
 
 ## What's pending: Check-in / queueing app
 

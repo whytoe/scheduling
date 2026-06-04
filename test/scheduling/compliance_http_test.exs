@@ -98,7 +98,13 @@ defmodule Scheduling.ComplianceHttpTest do
 
       # Confirm the request shape after the verify, when an assertion failure
       # won't poison the cowboy handler.
-      assert_received {:request, %{"form_type" => "stroke-consent", "status" => "completed"}, auth}
+      assert_received {:request,
+                       %{
+                         "form_type" => "stroke-consent",
+                         "status" => "completed",
+                         "patient_id" => @patient_uuid
+                       }, auth}
+
       assert auth == ["Bearer ik_test"]
     end
 
