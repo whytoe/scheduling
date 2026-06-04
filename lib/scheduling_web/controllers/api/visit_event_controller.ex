@@ -16,7 +16,11 @@ defmodule SchedulingWeb.Api.VisitEventController do
 
   operation :index,
     summary: "List visit events",
-    description: "Most recent first. Query parameters scope the result; pass none to get the whole log.",
+    description:
+      "Most recent first. Query parameters scope the result; pass none to get " <>
+        "the whole log. Use `since=<iso8601>` for incremental polling — the " <>
+        "filter is `occurred_at >= since`, inclusive, so a consumer can carry " <>
+        "forward the most-recent `occurred_at` from the previous response.",
     parameters: [
       visit_id: [in: :query, type: :integer, required: false],
       queue_entry_id: [in: :query, type: :integer, required: false],
@@ -24,7 +28,13 @@ defmodule SchedulingWeb.Api.VisitEventController do
       handoff_id: [in: :query, type: :integer, required: false],
       type: [in: :query, type: :string, required: false],
       actor_type: [in: :query, type: :string, required: false],
-      actor_id: [in: :query, type: :string, required: false]
+      actor_id: [in: :query, type: :string, required: false],
+      since: [
+        in: :query,
+        type: :string,
+        required: false,
+        description: "ISO-8601 timestamp (e.g. 2026-06-01T12:00:00Z); returns events with occurred_at >= since"
+      ]
     ],
     responses: [ok: {"Visit events", "application/json", Schemas.VisitEventList}]
 
@@ -55,7 +65,8 @@ defmodule SchedulingWeb.Api.VisitEventController do
       handoff_id: parse_int(params, "handoff_id"),
       type: Map.get(params, "type"),
       actor_type: Map.get(params, "actor_type"),
-      actor_id: Map.get(params, "actor_id")
+      actor_id: Map.get(params, "actor_id"),
+      since: parse_iso8601(params, "since")
     ]
     |> Enum.reject(fn {_, v} -> is_nil(v) end)
     |> Map.new()
@@ -70,6 +81,19 @@ defmodule SchedulingWeb.Api.VisitEventController do
         case Integer.parse(to_string(v)) do
           {n, ""} -> n
           _ -> nil
+        end
+    end
+  end
+
+  defp parse_iso8601(params, key) do
+    case Map.get(params, key) do
+      nil ->
+        nil
+
+      v ->
+        case DateTime.from_iso8601(to_string(v)) do
+          {:ok, dt, _offset} -> dt
+          {:error, _} -> nil
         end
     end
   end

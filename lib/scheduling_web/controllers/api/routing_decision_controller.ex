@@ -16,11 +16,35 @@ defmodule SchedulingWeb.Api.RoutingDecisionController do
 
   operation :index,
     summary: "List routing decisions",
-    description: "Most recent first. Each row captures the matcher inputs (required capabilities, eligible offices), the chosen office (or none), and the human-readable rationale.",
+    description:
+      "Most recent first. Each row captures the matcher inputs (required " <>
+        "capabilities, eligible offices), the chosen office (or none), and " <>
+        "the human-readable rationale. Use `since=<iso8601>` for incremental " <>
+        "polling (filter is `inserted_at >= since`, inclusive).",
+    parameters: [
+      since: [
+        in: :query,
+        type: :string,
+        required: false,
+        description: "ISO-8601 timestamp (e.g. 2026-06-01T12:00:00Z); returns decisions with inserted_at >= since"
+      ]
+    ],
     responses: [ok: {"Routing decisions", "application/json", Schemas.RoutingDecisionList}]
 
-  def index(conn, _params) do
-    json(conn, Enum.map(Audit.list_decisions(), &serialize/1))
+  def index(conn, params) do
+    filters =
+      case Map.get(params, "since") do
+        nil ->
+          %{}
+
+        v ->
+          case DateTime.from_iso8601(to_string(v)) do
+            {:ok, dt, _} -> %{since: dt}
+            _ -> %{}
+          end
+      end
+
+    json(conn, Enum.map(Audit.list_decisions(filters), &serialize/1))
   end
 
   operation :show,

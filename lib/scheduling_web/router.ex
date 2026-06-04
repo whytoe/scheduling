@@ -34,10 +34,17 @@ defmodule SchedulingWeb.Router do
     live "/capabilities/:id/edit", CapabilityLive.Index, :edit
   end
 
+  # Spec-discovery + health stay UNVERSIONED. They evolve independently of
+  # the API surface and clients hit them before they know which version to
+  # use. Everything else lives under /api/v1.
   scope "/api", SchedulingWeb do
     pipe_through :api
 
     get "/health", HealthController, :index
+  end
+
+  scope "/api/v1", SchedulingWeb do
+    pipe_through :api
 
     scope "/capabilities", Api do
       get "/", CapabilityController, :index

@@ -9,8 +9,8 @@ pending — see `integration-contracts.md` for the decision record.
 
 ```
        sign-in
-[Queueing app] ───POST /api/visits───▶ [Scheduling]
-[Queueing app] ───POST /api/queue_entries (with visit_id)──▶
+[Queueing app] ───POST /api/v1/visits───▶ [Scheduling]
+[Queueing app] ───POST /api/v1/queue_entries (with visit_id)──▶
                                             │
                                             │  on POST /queue_entries/:id/accept:
                                             │
@@ -31,9 +31,22 @@ Two audit logs, both append-only:
 
 ## What we expose: Scheduling HTTP API
 
-- **OpenAPI spec:** `GET /api/openapi.json`
-- **Swagger UI:** `GET /api/swagger`
-- **Health probe:** `GET /api/health` (200 `{"status":"ok"}` / 503 `{"status":"degraded"}`)
+- **OpenAPI spec:** `GET /api/openapi.json` *(unversioned)*
+- **Swagger UI:** `GET /api/swagger` *(unversioned)*
+- **Health probe:** `GET /api/health` (200 `{"status":"ok"}` / 503 `{"status":"degraded"}`) *(unversioned)*
+- **Everything else:** lives under `/api/v1/…`
+
+### Versioning policy
+
+All resource endpoints live under a `/api/v1/` prefix. Discovery
+(`openapi.json`, `swagger`) and the health probe stay unversioned —
+clients hit them before they know which version to use, and they may
+evolve on their own cadence.
+
+Future major versions are sibling scopes (`/api/v2/…`), introduced as
+needed; old versions are deprecated with a sunset header before removal.
+There is no breaking change *within* a major version — additive changes
+only (new fields, new endpoints, new optional query params).
 
 The API mirrors every operation the LiveView UI offers — 41 endpoints across
 11 tag groups (`capabilities`, `diagnoses`, `patients`, `offices`, `visits`,
@@ -85,11 +98,11 @@ Two columns wire scheduling rows to intake rows:
 - `patients.intake_patient_id` (`uuid`, unique nullable) — the patient's id in
   the intake-form system. **The correlation key** when looking up form
   responses. Set this when a patient is created or updated via
-  `POST/PATCH /api/patients`.
+  `POST/PATCH /api/v1/patients`.
 - `diagnoses.required_form_types` (`text[]`, default `[]`) — the intake
   `formType` strings that must be on file (status `completed` AND not
   `flagged`) before a patient with this diagnosis can be assigned to an
-  office. Set via `POST/PATCH /api/diagnoses`.
+  office. Set via `POST/PATCH /api/v1/diagnoses`.
 
 Forms-required lives on the **diagnosis**, not the capability, because
 compliance is service-defined (what visit is the patient here for?), not
@@ -98,7 +111,7 @@ re-litigable; the join is small.
 
 ### Behavior
 
-`POST /api/queue_entries/:id/accept`:
+`POST /api/v1/queue_entries/:id/accept`:
 
 1. **Compliance gate** runs first (when `INTAKE_API_KEY` is set).
 2. For each form type in the entry's diagnosis's `required_form_types`:
@@ -152,11 +165,11 @@ emits the sign-in event that creates the visit.
 
 Decision: **wait for the real OpenAPI spec, then generate a client. Don't
 build speculative stubs.** Today, queue entries are created via
-`POST /api/queue_entries` (admin / manual / test flows). When the check-in
+`POST /api/v1/queue_entries` (admin / manual / test flows). When the check-in
 spec lands the work is:
 
 1. Generate a client from the spec.
-2. Add a webhook receiver under `/api/webhooks/check-in/...`.
+2. Add a webhook receiver under `/api/v1/webhooks/check-in/...`.
 3. Add a periodic reconcile pull against the REST API.
 4. The check-in app references patients by their canonical `client_id` (see
    "Patient identity" below), distinct from `intake_patient_id`.
@@ -191,10 +204,10 @@ under `sc-7hu` (state machine extensions).
 
 API surface:
 
-  POST /api/visits             # sign-in
-  GET  /api/visits             # list, most-recent first
-  GET  /api/visits/:id         # show (preloads patient + queue_entries)
-  POST /api/visits/:id/end     # discharge (idempotent)
+  POST /api/v1/visits             # sign-in
+  GET  /api/v1/visits             # list, most-recent first
+  GET  /api/v1/visits/:id         # show (preloads patient + queue_entries)
+  POST /api/v1/visits/:id/end     # discharge (idempotent)
 
 ## Audit logs
 
@@ -209,8 +222,8 @@ candidate set, the required capability set, and a human-readable
 `rationale` string. **Read-only.** Used for "why did the matcher pick
 this office for this patient?" queries.
 
-  GET /api/routing_decisions       # most-recent first
-  GET /api/routing_decisions/:id
+  GET /api/v1/routing_decisions    # most-recent first; supports ?since=<iso8601>
+  GET /api/v1/routing_decisions/:id
 
 ### visit_events (lifecycle log)
 
@@ -221,11 +234,11 @@ deletion). Today's event types:
 
 | `type`                  | Recorded when                                  |
 |-------------------------|------------------------------------------------|
-| `visit.created`         | `POST /api/visits`                             |
-| `visit.ended`           | `POST /api/visits/:id/end`                     |
-| `queue_entry.created`   | `POST /api/queue_entries`                      |
-| `queue_entry.completed` | `POST /api/queue_entries/:id/complete`         |
-| `handoff.acknowledged`  | `POST /api/handoffs/:id/acknowledge`           |
+| `visit.created`         | `POST /api/v1/visits`                             |
+| `visit.ended`           | `POST /api/v1/visits/:id/end`                     |
+| `queue_entry.created`   | `POST /api/v1/queue_entries`                      |
+| `queue_entry.completed` | `POST /api/v1/queue_entries/:id/complete`         |
+| `handoff.acknowledged`  | `POST /api/v1/handoffs/:id/acknowledge`           |
 
 The accept-time outcomes (`assigned`, `no_eligible_office`,
 `compliance_failed`, `compliance_unavailable`) stay in `routing_decisions`
@@ -245,10 +258,17 @@ Each event carries:
 
 API surface:
 
-  GET /api/visit_events            # most-recent first; query filters:
-                                   #   visit_id, queue_entry_id, patient_id,
-                                   #   handoff_id, type, actor_type, actor_id
-  GET /api/visit_events/:id
+  GET /api/v1/visit_events            # most-recent first; query filters:
+                                      #   visit_id, queue_entry_id, patient_id,
+                                      #   handoff_id, type, actor_type, actor_id,
+                                      #   since=<iso8601>
+  GET /api/v1/visit_events/:id
+
+`since=<iso8601>` enables cheap incremental polling: pass the most
+recent `occurred_at` from the previous response and the next call
+returns only deltas (filter is `occurred_at >= since`, inclusive).
+`/api/v1/routing_decisions` supports the same query param with the
+matcher's `inserted_at` as the cursor.
 
 Events are written inside `Ecto.Multi.transaction/0` so the row commits
 with the operation — no half-state where an action succeeds but the
@@ -298,13 +318,15 @@ curl -X POST http://localhost:4000/api/patients \
 
 Watch the matcher audit log at `GET /api/routing_decisions` — every
 accept attempt appears there with a rationale. Watch the lifecycle log
-at `GET /api/visit_events?visit_id=<id>` for the full timeline of a
+at `GET /api/v1/visit_events?visit_id=<id>` for the full timeline of a
 visit.
 
 ## Open integration work (beads)
 
 Pending feature work that affects integration shape. Track via `bd show
 <id>` in the scheduling workspace.
+
+**Auth & lifecycle**
 
 | Bead     | Scope                                                                                                       |
 |----------|-------------------------------------------------------------------------------------------------------------|
@@ -314,3 +336,16 @@ Pending feature work that affects integration shape. Track via `bd show
 | `sc-ry7` | Idempotency-key handling for sign-in / disposition / outbound (blocked-by `sc-6ea`).                        |
 | `sc-ais` | Replay job for queue entries stuck on `compliance_unavailable` / `no_eligible_office`.                      |
 | `sc-nm5` | Patient-facing notifications (SMS / email) for follow-ups.                                                  |
+
+**Integration surface gaps**
+
+| Bead     | Scope                                                                                                       |
+|----------|-------------------------------------------------------------------------------------------------------------|
+| `sc-qsr` | Outbound webhooks for visit / queue / handoff events — so integrators don't have to poll.                   |
+| `sc-s7u` | Cursor pagination on every list endpoint.                                                                   |
+| `sc-2y8` | Unify error response envelope (`{"error": {"code", "message", "details"}}`).                                |
+| `sc-c41` | Rate limiting per token / per service (blocked-by `sc-6ea`).                                                |
+| `sc-r5n` | External real-time subscription endpoint (SSE / WebSocket, blocked-by `sc-6ea`).                            |
+| `sc-ckz` | Wait-time / queue-position read API for the queueing-service patient UI.                                    |
+| `sc-jma` | Document the recommended generated-client / SDK toolchain.                                                  |
+| `sc-j2s` | Cross-resource query / GraphQL story (deferred).                                                            |

@@ -12,7 +12,7 @@ defmodule SchedulingWeb.Api.VisitControllerTest do
     test "creates an active visit and returns 201", %{conn: conn} do
       patient = patient_fixture()
 
-      conn = post(conn, ~p"/api/visits", visit: %{patient_id: patient.id})
+      conn = post(conn, ~p"/api/v1/visits", visit: %{patient_id: patient.id})
       body = json_response(conn, 201)
 
       assert body["status"] == "active"
@@ -22,7 +22,7 @@ defmodule SchedulingWeb.Api.VisitControllerTest do
     end
 
     test "returns 422 when patient_id is missing", %{conn: conn} do
-      conn = post(conn, ~p"/api/visits", visit: %{})
+      conn = post(conn, ~p"/api/v1/visits", visit: %{})
       assert %{"errors" => errors} = json_response(conn, 422)
       assert errors["patient_id"] == ["can't be blank"]
     end
@@ -31,15 +31,15 @@ defmodule SchedulingWeb.Api.VisitControllerTest do
   describe "GET /api/visits/:id" do
     test "returns the visit", %{conn: conn} do
       patient = patient_fixture()
-      create = post(conn, ~p"/api/visits", visit: %{patient_id: patient.id})
+      create = post(conn, ~p"/api/v1/visits", visit: %{patient_id: patient.id})
       %{"id" => id} = json_response(create, 201)
 
-      conn = build_conn() |> get(~p"/api/visits/#{id}")
+      conn = build_conn() |> get(~p"/api/v1/visits/#{id}")
       assert %{"id" => ^id, "status" => "active"} = json_response(conn, 200)
     end
 
     test "returns 404 for an unknown id", %{conn: conn} do
-      conn = get(conn, ~p"/api/visits/99999")
+      conn = get(conn, ~p"/api/v1/visits/99999")
       assert %{"error" => "not_found"} = json_response(conn, 404)
     end
   end
@@ -47,14 +47,14 @@ defmodule SchedulingWeb.Api.VisitControllerTest do
   describe "POST /api/visits/:id/end" do
     test "stamps ended status and is idempotent", %{conn: conn} do
       patient = patient_fixture()
-      create = post(conn, ~p"/api/visits", visit: %{patient_id: patient.id})
+      create = post(conn, ~p"/api/v1/visits", visit: %{patient_id: patient.id})
       %{"id" => id} = json_response(create, 201)
 
-      first = build_conn() |> post(~p"/api/visits/#{id}/end")
+      first = build_conn() |> post(~p"/api/v1/visits/#{id}/end")
       assert %{"status" => "ended", "ended_at" => ended_at} = json_response(first, 200)
       refute is_nil(ended_at)
 
-      again = build_conn() |> post(~p"/api/visits/#{id}/end")
+      again = build_conn() |> post(~p"/api/v1/visits/#{id}/end")
       assert %{"status" => "ended"} = json_response(again, 200)
     end
   end

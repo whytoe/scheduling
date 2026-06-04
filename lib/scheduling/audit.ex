@@ -45,13 +45,27 @@ defmodule Scheduling.Audit do
     |> Repo.insert()
   end
 
-  @doc "Lists routing decisions, most recent first, with associations preloaded."
-  @spec list_decisions() :: [RoutingDecision.t()]
-  def list_decisions do
+  @doc """
+  Lists routing decisions, most recent first, with associations preloaded.
+  Optional filter `:since` (a `%DateTime{}`) returns decisions with
+  `inserted_at >= since` — useful for incremental polling.
+  """
+  @spec list_decisions(map() | keyword()) :: [RoutingDecision.t()]
+  def list_decisions(filters \\ %{}) do
+    filters = Map.new(filters)
+
     RoutingDecision
+    |> apply_decision_filters(filters)
     |> order_by([d], desc: d.inserted_at, desc: d.id)
     |> Repo.all()
     |> Repo.preload([:patient, :chosen_office, :queue_entry])
+  end
+
+  defp apply_decision_filters(query, filters) do
+    case Map.get(filters, :since) do
+      %DateTime{} = ts -> where(query, [d], d.inserted_at >= ^ts)
+      _ -> query
+    end
   end
 
   @doc "Fetches one routing decision by id, with associations preloaded. Raises if missing."
@@ -103,6 +117,7 @@ defmodule Scheduling.Audit do
       {:type, t}, q when is_binary(t) -> where(q, [e], e.type == ^t)
       {:actor_type, t}, q when is_binary(t) -> where(q, [e], e.actor_type == ^t)
       {:actor_id, id}, q when is_binary(id) -> where(q, [e], e.actor_id == ^id)
+      {:since, %DateTime{} = ts}, q -> where(q, [e], e.occurred_at >= ^ts)
       {_, _}, q -> q
     end)
   end
