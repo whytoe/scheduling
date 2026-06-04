@@ -8,11 +8,34 @@ defmodule Scheduling.Patients do
   alias Scheduling.Repo
   alias Scheduling.Patients.Patient
 
-  @doc "Lists patients ordered by name."
-  def list_patients do
+  @doc """
+  Lists patients ordered by name. Optional id filters return at most one row
+  (each of the three id columns carries a unique index):
+
+    * `:intake_patient_id` (uuid) — the intakeform UUID, primary integration key
+    * `:external_id`       (string) — the check-in / queueing app's id
+    * `:client_id`         (uuid) — the canonical scheduling-owned id
+
+  Filters compose via AND. Unknown keys are ignored. Used by the integration
+  controller to skip the O(N) "list-and-filter-client-side" pattern (see
+  sc-13t for the rationale).
+  """
+  def list_patients(filters \\ %{}) do
+    filters = Map.new(filters)
+
     Patient
+    |> apply_patient_filters(filters)
     |> order_by(asc: :name)
     |> Repo.all()
+  end
+
+  defp apply_patient_filters(query, filters) do
+    Enum.reduce(filters, query, fn
+      {:intake_patient_id, id}, q when is_binary(id) -> where(q, [p], p.intake_patient_id == ^id)
+      {:external_id, id}, q when is_binary(id) -> where(q, [p], p.external_id == ^id)
+      {:client_id, id}, q when is_binary(id) -> where(q, [p], p.client_id == ^id)
+      {_, _}, q -> q
+    end)
   end
 
   @doc "Fetches a patient by id. Raises if missing."

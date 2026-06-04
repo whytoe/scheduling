@@ -15,10 +15,47 @@ defmodule SchedulingWeb.Api.PatientController do
 
   operation :index,
     summary: "List patients",
+    description:
+      "Sorted by name. Pass one of the id filters to look up a single patient by " <>
+        "their external identifier — useful for integration services that need to " <>
+        "know 'have I created a scheduling patient for this upstream id yet?' " <>
+        "Each id column carries a unique index, so a filtered query returns at " <>
+        "most one row.",
+    parameters: [
+      intake_patient_id: [
+        in: :query,
+        type: :string,
+        required: false,
+        description: "Intakeform UUID — primary key used by the compliance gate"
+      ],
+      external_id: [
+        in: :query,
+        type: :string,
+        required: false,
+        description: "Check-in / queueing app's patient id"
+      ],
+      client_id: [
+        in: :query,
+        type: :string,
+        required: false,
+        description: "Canonical scheduling-owned UUID"
+      ]
+    ],
     responses: [ok: {"Patients", "application/json", Schemas.PatientList}]
 
-  def index(conn, _params) do
-    json(conn, Enum.map(Patients.list_patients(), &serialize/1))
+  def index(conn, params) do
+    filters = patient_filters(params)
+    json(conn, Enum.map(Patients.list_patients(filters), &serialize/1))
+  end
+
+  defp patient_filters(params) do
+    [intake_patient_id: "intake_patient_id", external_id: "external_id", client_id: "client_id"]
+    |> Enum.reduce(%{}, fn {key, param}, acc ->
+      case Map.get(params, param) do
+        v when is_binary(v) and v != "" -> Map.put(acc, key, v)
+        _ -> acc
+      end
+    end)
   end
 
   operation :show,

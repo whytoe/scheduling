@@ -142,6 +142,38 @@ patient has no `intake_patient_id`, the gate behaves as follows:
   `compliance_failed`, listing every required type as missing. (You can't
   satisfy compliance for a patient we can't correlate.)
 
+### Sensitive forms and PHI considerations
+
+**The compliance gate is not a privacy boundary.** Any `formType` string
+written into a diagnosis's `required_form_types` ends up visible in
+several downstream surfaces:
+
+- `queue_entries` metadata (board snapshot, list endpoints)
+- `routing_decisions.rationale` (audit log — includes the
+  missing-form-types list when compliance fails)
+- `visit_events` (lifecycle log)
+- every outbound webhook subscription (`sc-qsr`)
+
+Consequence: scheduling-side operators MUST NOT add `formType` values
+for **sensitive** form classes — behavioral health, substance use,
+reproductive health, HIV status, anything else a clinic treats as
+specially protected. Routing those `formType` strings into a
+general-purpose scheduling queue can leak the existence of a sensitive
+encounter via queue metadata even though scheduling never sees the form
+answers.
+
+The intake-scheduling bridge enforces the same rule on its side
+(`BRIDGE_FORM_TYPE_MAP` omits sensitive types entirely); see
+intakeform's `docs/integrations/scheduling.md` §"Production
+considerations". This is one of the cases where the two systems need to
+make the same policy decision separately — neither one can enforce it
+for the other.
+
+If a clinic genuinely needs a compliance gate around a sensitive form,
+the right shape is a separate code that maps to the form *category*
+without identifying the form's clinical purpose. Talk to legal /
+compliance before plumbing those through.
+
 ### Known limitations
 
 - The intake `/responses` endpoint does **not** accept a `patient_id` query
