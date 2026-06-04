@@ -659,6 +659,92 @@ defmodule SchedulingWeb.Schemas do
     })
   end
 
+  defmodule WebhookSubscription do
+    @moduledoc "An outbound webhook subscription."
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "WebhookSubscription",
+      type: :object,
+      properties: %{
+        id: %Schema{type: :integer},
+        url: %Schema{type: :string, description: "HTTPS URL receiving signed POSTs"},
+        event_types: %Schema{
+          type: :array,
+          items: %Schema{type: :string},
+          description: "Event types to receive (empty = all). e.g. [\"visit.created\", \"queue_entry.completed\"]"
+        },
+        active: %Schema{type: :boolean},
+        description: %Schema{type: :string, nullable: true},
+        inserted_at: %Schema{type: :string, format: :"date-time"},
+        updated_at: %Schema{type: :string, format: :"date-time"}
+      },
+      required: [:id, :url, :event_types, :active, :inserted_at, :updated_at]
+    })
+  end
+
+  defmodule WebhookSubscriptionCreated do
+    @moduledoc "Response on create — includes the generated secret. Only returned once."
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "WebhookSubscriptionCreated",
+      allOf: [
+        SchedulingWeb.Schemas.WebhookSubscription,
+        %Schema{
+          type: :object,
+          properties: %{
+            secret: %Schema{
+              type: :string,
+              description: "HMAC key used to sign delivery bodies. STORED ONLY ONCE — copy now; subsequent GETs do not include it. Rotation = new subscription."
+            }
+          },
+          required: [:secret]
+        }
+      ]
+    })
+  end
+
+  defmodule WebhookSubscriptionList do
+    require OpenApiSpex
+    OpenApiSpex.schema(%{title: "WebhookSubscriptionList", type: :array, items: SchedulingWeb.Schemas.WebhookSubscription})
+  end
+
+  defmodule WebhookSubscriptionRequest do
+    @moduledoc "Request body for creating or updating a webhook subscription."
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "WebhookSubscriptionRequest",
+      type: :object,
+      properties: %{
+        webhook_subscription: %Schema{
+          type: :object,
+          properties: %{
+            url: %Schema{type: :string, description: "HTTPS URL to deliver to"},
+            event_types: %Schema{
+              type: :array,
+              items: %Schema{type: :string},
+              description: "Event types to receive; pass [] (default) for all"
+            },
+            active: %Schema{type: :boolean, description: "Default true"},
+            description: %Schema{type: :string, nullable: true},
+            secret: %Schema{
+              type: :string,
+              nullable: true,
+              description: "16–256 chars. If omitted on create, a random one is generated. Do not update once subscription is in use."
+            }
+          },
+          required: [:url]
+        }
+      },
+      required: [:webhook_subscription]
+    })
+  end
+
   defmodule HealthResponse do
     @moduledoc "Health probe response body."
     require OpenApiSpex

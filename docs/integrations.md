@@ -300,6 +300,84 @@ Additional event types will land alongside `sc-7hu`
 (`queue_entry.cancelled`, `queue_entry.no_show`,
 `disposition.next_entry_created`, …).
 
+## Outbound webhooks
+
+Scheduling can push signed HTTPS POSTs to subscriber URLs whenever a
+`VisitEvent` is recorded. Saves integrators from polling, mirrors the
+pattern the check-in app will use.
+
+### Subscribe
+
+```
+POST /api/v1/webhook_subscriptions
+{
+  "webhook_subscription": {
+    "url": "https://your-app.example/hooks/scheduling",
+    "event_types": ["visit.created", "queue_entry.completed"],
+    "description": "monitoring sink"
+  }
+}
+```
+
+Response (201) — **the only time the `secret` is returned**:
+
+```
+{
+  "id": 7,
+  "url": "...",
+  "event_types": [...],
+  "active": true,
+  "secret": "<32-byte base64 url-safe>"
+}
+```
+
+Subsequent `GET` / `PATCH` / `DELETE` responses omit `secret`. Rotation
+= issue a new subscription, retire the old one.
+
+`event_types: []` (or omitted) subscribes to **all** events.
+
+### Delivery shape
+
+Each delivery is a POST with these headers:
+
+  Content-Type: application/json
+  X-Scheduling-Event-Type: visit.created
+  X-Scheduling-Timestamp: <unix-seconds>
+  X-Scheduling-Signature: t=<unix-seconds>,v1=<hex>
+
+The body is the same JSON shape that `GET /api/v1/visit_events/:id`
+returns.
+
+### Verifying signatures
+
+`v1` is the lowercase-hex HMAC-SHA-256 of `"<timestamp>.<raw body>"`,
+keyed by the secret you captured at subscription time:
+
+```
+signature == hex(HMAC-SHA256(secret, "<timestamp>.<raw_body>"))
+```
+
+Use a constant-time string compare. Reject deliveries whose timestamp
+is too far in the past (the standard Stripe-style guard against replay
+— 5 minutes is a reasonable default).
+
+`Scheduling.Webhooks.verify_signature/5` is the canonical helper for
+Elixir receivers; for other languages, the spec above is everything you
+need.
+
+### Delivery semantics (today)
+
+- Fire-and-forget via `Task.start`: a slow receiver never blocks
+  scheduling.
+- No retries; non-2xx responses are dropped. Tracked under `sc-6ub`
+  (delivery log + retries + DLQ). Until then, design your receiver to
+  be idempotent on delivery duplicates and expect occasional drops on
+  failure.
+- No delivery log. If you need durability today, poll
+  `/api/v1/visit_events?since=<iso8601>` in a reconciliation loop as a
+  fallback.
+- A subscription test-fire endpoint is tracked under `sc-yl8`.
+
 ## Local-dev recipe
 
 Exercise the compliance gate against a local intake on `localhost:3001`:

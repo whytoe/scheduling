@@ -98,7 +98,20 @@ defmodule Scheduling.Audit do
         DateTime.utc_now() |> DateTime.truncate(:second)
       end)
 
-    %VisitEvent{} |> VisitEvent.changeset(attrs) |> Repo.insert()
+    case %VisitEvent{} |> VisitEvent.changeset(attrs) |> Repo.insert() do
+      {:ok, event} = ok ->
+        # Fire-and-forget outbound webhooks. Tests can disable globally via
+        # `Application.put_env(:scheduling, :webhooks_enabled, false)` —
+        # which the test helper does by default to keep tests deterministic.
+        if Application.get_env(:scheduling, :webhooks_enabled, true) do
+          Scheduling.Webhooks.dispatch(event)
+        end
+
+        ok
+
+      err ->
+        err
+    end
   end
 
   @doc """

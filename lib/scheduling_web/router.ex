@@ -114,6 +114,15 @@ defmodule SchedulingWeb.Router do
       post "/:id/end", VisitController, :end_visit
     end
 
+    scope "/webhook_subscriptions", Api do
+      get "/", WebhookSubscriptionController, :index
+      post "/", WebhookSubscriptionController, :create
+      get "/:id", WebhookSubscriptionController, :show
+      put "/:id", WebhookSubscriptionController, :update
+      patch "/:id", WebhookSubscriptionController, :update
+      delete "/:id", WebhookSubscriptionController, :delete
+    end
+
     get "/board", Api.BoardController, :show
   end
 

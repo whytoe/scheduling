@@ -23,6 +23,10 @@ config :scheduling, SchedulingWeb.Endpoint,
 # In test we don't send emails
 config :scheduling, Scheduling.Mailer, adapter: Swoosh.Adapters.Test
 
+# Disable outbound webhooks by default in test so unrelated tests don't fire
+# off background HTTP requests. The webhook tests turn this on per-test.
+config :scheduling, :webhooks_enabled, false
+
 # Disable swoosh api client as it is only required for production adapters
 config :swoosh, :api_client, false
 
