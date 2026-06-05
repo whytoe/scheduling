@@ -20,26 +20,94 @@ defmodule SchedulingWeb.Api.QueueEntryController do
     description:
       "By default lists waiting entries (highest priority first). Pass " <>
         "`?status=active` for entries currently consuming office capacity " <>
-        "(`assigned`/`in_service`), or `?status=all` for both.",
+        "(`assigned`/`in_service`), or `?status=all` for both.\n\n" <>
+        "Patient-id filters (all AND-composable with `?status=`, each backed " <>
+        "by a uniquely-indexed column on `patients`):\n\n" <>
+        "- `?patient_id=<int>` — scheduling-side patient id\n" <>
+        "- `?intake_patient_id=<uuid>` — intakeform UUID\n" <>
+        "- `?external_id=<string>` — check-in / queueing app's id\n" <>
+        "- `?client_id=<uuid>` — canonical scheduling-owned id\n\n" <>
+        "Typical integrator use: `?intake_patient_id=<uuid>&status=waiting` " <>
+        "answers 'does this patient already have a waiting entry?' in one " <>
+        "round-trip, no client-side filtering.",
     parameters: [
       status: [
         in: :query,
         description: "`waiting` (default), `active`, or `all`",
         type: :string,
         required: false
+      ],
+      patient_id: [
+        in: :query,
+        type: :integer,
+        required: false,
+        description: "Scheduling-side patient id"
+      ],
+      intake_patient_id: [
+        in: :query,
+        type: :string,
+        required: false,
+        description: "Intakeform UUID — primary integration key"
+      ],
+      external_id: [
+        in: :query,
+        type: :string,
+        required: false,
+        description: "Check-in / queueing app's patient id"
+      ],
+      client_id: [
+        in: :query,
+        type: :string,
+        required: false,
+        description: "Canonical scheduling-owned UUID"
       ]
     ],
     responses: [ok: {"Queue entries", "application/json", Schemas.QueueEntryList}]
 
   def index(conn, params) do
+    filters = queue_filters(params)
+
     entries =
       case Map.get(params, "status", "waiting") do
-        "active" -> Queue.list_active_entries()
-        "all" -> Queue.list_waiting_entries() ++ Queue.list_active_entries()
-        _ -> Queue.list_waiting_entries()
+        "active" ->
+          Queue.list_active_entries(filters)
+
+        "all" ->
+          Queue.list_waiting_entries(filters) ++ Queue.list_active_entries(filters)
+
+        _ ->
+          Queue.list_waiting_entries(filters)
       end
 
     json(conn, Enum.map(entries, &serialize/1))
+  end
+
+  defp queue_filters(params) do
+    %{}
+    |> maybe_put_int(:patient_id, params, "patient_id")
+    |> maybe_put_string(:intake_patient_id, params, "intake_patient_id")
+    |> maybe_put_string(:external_id, params, "external_id")
+    |> maybe_put_string(:client_id, params, "client_id")
+  end
+
+  defp maybe_put_int(filters, key, params, name) do
+    case Map.get(params, name) do
+      nil ->
+        filters
+
+      v ->
+        case Integer.parse(to_string(v)) do
+          {n, ""} when n > 0 -> Map.put(filters, key, n)
+          _ -> filters
+        end
+    end
+  end
+
+  defp maybe_put_string(filters, key, params, name) do
+    case Map.get(params, name) do
+      v when is_binary(v) and v != "" -> Map.put(filters, key, v)
+      _ -> filters
+    end
   end
 
   operation :show,

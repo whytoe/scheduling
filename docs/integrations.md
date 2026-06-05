@@ -224,6 +224,22 @@ canonical identity:
 **not** the EMR record id. External systems integrate by exchanging
 `client_id` plus their own source-specific id.
 
+Each of the three id columns is uniquely indexed and exposed as a query
+filter on the two list endpoints integrators reach for most:
+
+  GET /api/v1/patients?intake_patient_id=<uuid>
+  GET /api/v1/patients?external_id=<string>
+  GET /api/v1/patients?client_id=<uuid>
+
+  GET /api/v1/queue_entries?intake_patient_id=<uuid>&status=waiting
+  GET /api/v1/queue_entries?external_id=<string>
+  GET /api/v1/queue_entries?client_id=<uuid>
+  GET /api/v1/queue_entries?patient_id=<int>
+
+Patient-side filters compose AND with `?status=` on queue_entries.
+Typical bridge-style use: "does this patient already have a waiting
+entry?" answered with one round-trip (no list-and-walk).
+
 ### Visit
 
 A `Visit` represents one encounter — a patient's actual visit to the

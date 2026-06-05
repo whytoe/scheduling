@@ -36,11 +36,23 @@ defmodule Scheduling.Queue do
   @doc """
   Lists waiting queue entries, highest priority first then oldest, with the
   patient and required capabilities preloaded for display.
+
+  Optional patient-id filters (each AND-composable with the others):
+
+    * `:patient_id`         (int)   — scheduling-side patient id (FK direct)
+    * `:intake_patient_id`  (uuid)  — joins patients, filters server-side
+    * `:external_id`        (str)   — joins patients, filters server-side
+    * `:client_id`          (uuid)  — joins patients, filters server-side
+
+  Used by integration services (e.g. the intake-scheduling-bridge) to ask
+  "does this patient already have a waiting entry?" before creating a new
+  one — avoids duplicates on outbox replay.
   """
-  def list_waiting_entries do
+  def list_waiting_entries(filters \\ %{}) do
     QueueEntry
     |> where([e], e.status == :waiting)
     |> order_by([e], desc: e.priority, asc: e.inserted_at, asc: e.id)
+    |> apply_patient_id_filters(filters)
     |> Repo.all()
     |> Repo.preload([:patient, :required_capabilities])
   end
@@ -55,16 +67,41 @@ defmodule Scheduling.Queue do
   @doc """
   Lists the entries currently occupying office capacity (statuses in
   `QueueEntry.active_statuses/0`), oldest first, with the patient, assigned
-  office and required capabilities preloaded for display.
+  office and required capabilities preloaded for display. Supports the same
+  patient-id filters as `list_waiting_entries/1`.
   """
-  def list_active_entries do
+  def list_active_entries(filters \\ %{}) do
     active = QueueEntry.active_statuses()
 
     QueueEntry
     |> where([e], e.status in ^active)
     |> order_by([e], asc: e.inserted_at, asc: e.id)
+    |> apply_patient_id_filters(filters)
     |> Repo.all()
     |> Repo.preload([:patient, :assigned_office, :required_capabilities])
+  end
+
+  defp apply_patient_id_filters(query, filters) do
+    filters = Map.new(filters)
+
+    query
+    |> filter_by_patient_id(Map.get(filters, :patient_id))
+    |> filter_by_patient_field(:intake_patient_id, Map.get(filters, :intake_patient_id))
+    |> filter_by_patient_field(:external_id, Map.get(filters, :external_id))
+    |> filter_by_patient_field(:client_id, Map.get(filters, :client_id))
+  end
+
+  defp filter_by_patient_id(query, nil), do: query
+
+  defp filter_by_patient_id(query, id) when is_integer(id),
+    do: where(query, [e], e.patient_id == ^id)
+
+  defp filter_by_patient_field(query, _field, nil), do: query
+
+  defp filter_by_patient_field(query, field, value) when is_binary(value) do
+    from e in query,
+      join: p in assoc(e, :patient),
+      where: field(p, ^field) == ^value
   end
 
   @doc """
