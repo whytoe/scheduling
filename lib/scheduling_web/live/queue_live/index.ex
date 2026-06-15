@@ -242,8 +242,7 @@ defmodule SchedulingWeb.QueueLive.Index do
               title="No eligible office"
             >
               <span :if={@selected.missing != []}>
-                No office provides <b>{Enum.join(@selected.missing, ", ")}</b>
-                with free capacity.
+                No office provides <b>{Enum.join(@selected.missing, ", ")}</b> with free capacity.
               </span>
               <span :if={@selected.missing == []}>
                 No eligible office has free capacity for these requirements right now.
@@ -255,16 +254,19 @@ defmodule SchedulingWeb.QueueLive.Index do
               <div class="t-small">Best fit for</div>
               <div class="pcard__name" style="margin-bottom:var(--s-3)">{@selected.name}</div>
 
-              <div
-                style="padding:var(--s-3);border-radius:var(--radius-field);background:var(--st-assigned-bg);border:1px solid var(--st-assigned-line);margin-bottom:var(--s-3)"
-              >
+              <div style="padding:var(--s-3);border-radius:var(--radius-field);background:var(--st-assigned-bg);border:1px solid var(--st-assigned-line);margin-bottom:var(--s-3)">
                 <div class="flex justify-between items-center">
-                  <span style="font-weight:600;color:var(--st-assigned-fg)">{@selected.chosen.name}</span>
+                  <span style="font-weight:600;color:var(--st-assigned-fg)">
+                    {@selected.chosen.name}
+                  </span>
                   <.status_badge status="assigned" label="Will route here" />
                 </div>
                 <div class="t-small" style="margin-top:4px">
-                  {@selected.chosen.surplus} surplus {pluralize(@selected.chosen.surplus, "capability", "capabilities")}
-                  · {@selected.chosen.free} free {pluralize(@selected.chosen.free, "slot", "slots")}
+                  {@selected.chosen.surplus} surplus {pluralize(
+                    @selected.chosen.surplus,
+                    "capability",
+                    "capabilities"
+                  )} · {@selected.chosen.free} free {pluralize(@selected.chosen.free, "slot", "slots")}
                 </div>
               </div>
 
@@ -275,7 +277,10 @@ defmodule SchedulingWeb.QueueLive.Index do
                 <div
                   :for={{e, i} <- Enum.with_index(@selected.eligible)}
                   class="flex justify-between text-[13px]"
-                  style={i == 0 && "color:var(--color-base-content)" || "color:var(--color-base-content-muted)"}
+                  style={
+                    (i == 0 && "color:var(--color-base-content)") ||
+                      "color:var(--color-base-content-muted)"
+                  }
                 >
                   <span>{e.name}</span>
                   <span class="tnum">{e.free} free · {e.surplus} surplus</span>

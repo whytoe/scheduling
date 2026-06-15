@@ -31,7 +31,8 @@ defmodule SchedulingWeb.EventTimeline do
 
   @doc "Maps a single event to a timeline view map."
   def view_event(e) do
-    {label, icon, tone} = Map.get(@event_meta, e.type, {humanize(e.type), "hero-clock", "neutral"})
+    {label, icon, tone} =
+      Map.get(@event_meta, e.type, {humanize(e.type), "hero-clock", "neutral"})
 
     %{
       label: label,

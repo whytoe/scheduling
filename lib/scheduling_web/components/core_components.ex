@@ -617,7 +617,9 @@ defmodule SchedulingWeb.CoreComponents do
           </div>
         </div>
         <div class="ocard__cap">
-          <div class="ocard__capnum tnum" style={@free == 0 && "color:var(--st-error-fg)"}>{@free}</div>
+          <div class="ocard__capnum tnum" style={@free == 0 && "color:var(--st-error-fg)"}>
+            {@free}
+          </div>
           <div class="ocard__caplbl">{if @free == 1, do: "slot free", else: "slots free"}</div>
         </div>
       </div>
@@ -630,8 +632,8 @@ defmodule SchedulingWeb.CoreComponents do
           :for={i <- 0..(@capacity - 1)//1}
           class={[
             "loadmeter__slot",
-            i < @load && (@load >= @capacity && "loadmeter__slot--full" || "loadmeter__slot--used"),
-            i >= @load and i < @load + @incoming && "loadmeter__slot--incoming"
+            i < @load && ((@load >= @capacity && "loadmeter__slot--full") || "loadmeter__slot--used"),
+            (i >= @load and i < @load + @incoming) && "loadmeter__slot--incoming"
           ]}
         />
       </div>
@@ -640,7 +642,8 @@ defmodule SchedulingWeb.CoreComponents do
           <i style="background:var(--st-active-fg)"></i>In service <b class="tnum">{@load}</b>
         </span>
         <span :if={@incoming > 0} class="ocard__legdot">
-          <i style="background:var(--st-assigned-fg);opacity:.6"></i>Incoming <b class="tnum">{@incoming}</b>
+          <i style="background:var(--st-assigned-fg);opacity:.6"></i>Incoming
+          <b class="tnum">{@incoming}</b>
         </span>
         <span class="ocard__legdot">
           <i style="background:var(--color-base-300)"></i>Free <b class="tnum">{@free}</b>
@@ -669,10 +672,14 @@ defmodule SchedulingWeb.CoreComponents do
       "neutral" => "hero-signal-slash"
     }
 
-    assigns = assign_new(assigns, :resolved_icon, fn -> assigns.icon || default_icon[assigns.tone] end)
+    assigns =
+      assign_new(assigns, :resolved_icon, fn -> assigns.icon || default_icon[assigns.tone] end)
 
     ~H"""
-    <div class={["callout", @tone, @dashed && "callout--dashed"]} role={if @tone == "error", do: "alert", else: "status"}>
+    <div
+      class={["callout", @tone, @dashed && "callout--dashed"]}
+      role={if @tone == "error", do: "alert", else: "status"}
+    >
       <.icon name={@resolved_icon} class="size-5 shrink-0" />
       <div class="callout__main">
         <div :if={@title} class="callout__title">{@title}</div>
@@ -811,7 +818,7 @@ defmodule SchedulingWeb.CoreComponents do
           </button>
           <button
             type="button"
-            class={["btn", @tone == "error" && "btn-danger" || "btn-primary"]}
+            class={["btn", (@tone == "error" && "btn-danger") || "btn-primary"]}
             phx-click={@on_confirm}
           >
             {@confirm_label}
@@ -895,7 +902,11 @@ defmodule SchedulingWeb.CoreComponents do
         class="grid gap-[var(--s-4)]"
         style={"grid-template-columns:repeat(#{@cols},1fr);padding:var(--s-3) var(--s-4);border-bottom:1px solid var(--color-base-300)"}
       >
-        <.skel :for={j <- 1..@cols//1} class="skel--text" style={"width:#{if j == 1, do: 60, else: 45}%"} />
+        <.skel
+          :for={j <- 1..@cols//1}
+          class="skel--text"
+          style={"width:#{if j == 1, do: 60, else: 45}%"}
+        />
       </div>
     </div>
     """

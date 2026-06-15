@@ -109,11 +109,17 @@ defmodule SchedulingWeb.VisitEventLive.Index do
             <.status_badge status={g.status} />
             <.icon
               name="hero-chevron-down"
-              class={["size-4 text-base-content/50 transition-transform", @open_id == g.id && "rotate-180"]}
+              class={[
+                "size-4 text-base-content/50 transition-transform",
+                @open_id == g.id && "rotate-180"
+              ]}
             />
           </button>
 
-          <div :if={@open_id == g.id} style="padding:var(--s-4) var(--s-6);border-top:1px solid var(--color-base-300)">
+          <div
+            :if={@open_id == g.id}
+            style="padding:var(--s-4) var(--s-6);border-top:1px solid var(--color-base-300)"
+          >
             <.timeline events={g.events} />
           </div>
         </div>

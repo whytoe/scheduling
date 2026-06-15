@@ -12,7 +12,11 @@ defmodule SchedulingWeb.DiagnosisLiveTest do
 
   describe "Index" do
     test "lists diagnoses with their form types", %{conn: conn} do
-      diagnosis_fixture(%{"name" => "Chest pain", "code" => "R07.9", "required_form_types" => ["cardiac-history"]})
+      diagnosis_fixture(%{
+        "name" => "Chest pain",
+        "code" => "R07.9",
+        "required_form_types" => ["cardiac-history"]
+      })
 
       {:ok, _live, html} = live(conn, ~p"/diagnoses")
 

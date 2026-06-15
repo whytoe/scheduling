@@ -137,7 +137,9 @@ defmodule SchedulingWeb.VisitLive.Index do
               <tr :if={@open_id == v.id}>
                 <td colspan="6" style="background:var(--color-base-150);padding:var(--s-4) var(--s-6)">
                   <.timeline :if={@open_events != []} events={@open_events} />
-                  <p :if={@open_events == []} class="t-small">No events recorded for this visit yet.</p>
+                  <p :if={@open_events == []} class="t-small">
+                    No events recorded for this visit yet.
+                  </p>
                 </td>
               </tr>
             <% end %>

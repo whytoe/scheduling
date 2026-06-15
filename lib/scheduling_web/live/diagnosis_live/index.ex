@@ -213,8 +213,8 @@ defmodule SchedulingWeb.DiagnosisLive.Index do
                 <span class="chiprow">
                   <span
                     :for={f <- d.required_form_types || []}
-                    class={["badge", sensitive?(f) && "attention" || "neutral"]}
-                    title={sensitive?(f) && "Sensitive form type" || nil}
+                    class={["badge", (sensitive?(f) && "attention") || "neutral"]}
+                    title={(sensitive?(f) && "Sensitive form type") || nil}
                   >
                     <.icon :if={sensitive?(f)} name="hero-eye-slash" class="size-[12px]" />
                     <span class="mono" style="font-size:12px">{f}</span>
@@ -343,14 +343,20 @@ defmodule SchedulingWeb.DiagnosisLive.Index do
             class={["input mono flex-1", @draft_sensitive && "input--error"]}
             placeholder="e.g. vitals-baseline"
             autocomplete="off"
-            aria-describedby={@draft_sensitive && "sens-warn" || nil}
+            aria-describedby={(@draft_sensitive && "sens-warn") || nil}
           />
           <.button variant="subtle" type="submit">Add</.button>
         </form>
-        <div class="field__hint">Press Enter to add. Form types matching a sensitive class are flagged.</div>
+        <div class="field__hint">
+          Press Enter to add. Form types matching a sensitive class are flagged.
+        </div>
 
         <div :if={@draft_sensitive} id="sens-warn" style="margin-top:var(--s-2)">
-          <.callout tone="attention" icon="hero-eye-slash" title={~s["#{String.trim(@draft)}" looks like a sensitive form type]}>
+          <.callout
+            tone="attention"
+            icon="hero-eye-slash"
+            title={~s["#{String.trim(@draft)}" looks like a sensitive form type]}
+          >
             Sensitive forms gate routing through the compliance check and are handled under
             stricter access rules. Confirm this is intended before saving.
           </.callout>
@@ -359,7 +365,7 @@ defmodule SchedulingWeb.DiagnosisLive.Index do
         <div class="chiprow" style="margin-top:var(--s-3)">
           <span
             :for={f <- @form_types}
-            class={["badge", sensitive?(f) && "attention" || "neutral"]}
+            class={["badge", (sensitive?(f) && "attention") || "neutral"]}
             style="gap:6px"
           >
             <.icon :if={sensitive?(f)} name="hero-eye-slash" class="size-[12px]" />

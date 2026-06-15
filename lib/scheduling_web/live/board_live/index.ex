@@ -336,10 +336,18 @@ defmodule SchedulingWeb.BoardLive.Index do
                 </div>
                 <div class="pcard__side">
                   <span class="pcard__wait tnum">{p.since}</span>
-                  <.button variant="subtle" size="sm" phx-click={JS.push("complete", value: %{id: p.id})}>
+                  <.button
+                    variant="subtle"
+                    size="sm"
+                    phx-click={JS.push("complete", value: %{id: p.id})}
+                  >
                     Complete
                   </.button>
-                  <.button variant="ghost" size="sm" phx-click={JS.push("requeue", value: %{id: p.id})}>
+                  <.button
+                    variant="ghost"
+                    size="sm"
+                    phx-click={JS.push("requeue", value: %{id: p.id})}
+                  >
                     Re-queue
                   </.button>
                 </div>

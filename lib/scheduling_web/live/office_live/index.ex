@@ -165,7 +165,11 @@ defmodule SchedulingWeb.OfficeLive.Index do
               <td><.cap_row caps={capability_list(office)} /></td>
               <td>
                 <div class="table__actions">
-                  <.link navigate={~p"/offices/#{office}/edit"} class="btn btn-ghost btn-sm" aria-label={"Edit #{office.name}"}>
+                  <.link
+                    navigate={~p"/offices/#{office}/edit"}
+                    class="btn btn-ghost btn-sm"
+                    aria-label={"Edit #{office.name}"}
+                  >
                     <.icon name="hero-pencil-square" class="size-[15px]" />
                   </.link>
                   <button

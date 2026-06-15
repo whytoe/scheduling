@@ -108,7 +108,10 @@ defmodule SchedulingWeb.RoutingDecisionLive.Index do
       </.page_head>
 
       <%!-- FILTER BAR --%>
-      <div class="card card__body flex flex-wrap items-center gap-[var(--s-3)]" style="margin-bottom:var(--s-4)">
+      <div
+        class="card card__body flex flex-wrap items-center gap-[var(--s-3)]"
+        style="margin-bottom:var(--s-4)"
+      >
         <form phx-change="search" class="relative flex-1 min-w-[220px]">
           <.icon
             name="hero-magnifying-glass"
@@ -159,7 +162,10 @@ defmodule SchedulingWeb.RoutingDecisionLive.Index do
             <.status_badge status={d.outcome} />
             <.icon
               name="hero-chevron-down"
-              class={["size-4 text-base-content/50 transition-transform", @open_id == d.id && "rotate-180"]}
+              class={[
+                "size-4 text-base-content/50 transition-transform",
+                @open_id == d.id && "rotate-180"
+              ]}
             />
           </button>
 

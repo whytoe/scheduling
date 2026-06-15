@@ -117,7 +117,10 @@ defmodule SchedulingWeb.CapabilityLive.Index do
 
   defp filtered(capabilities, query) do
     q = query |> to_string() |> String.downcase() |> String.trim()
-    if q == "", do: capabilities, else: Enum.filter(capabilities, &String.contains?(String.downcase(&1.name), q))
+
+    if q == "",
+      do: capabilities,
+      else: Enum.filter(capabilities, &String.contains?(String.downcase(&1.name), q))
   end
 
   @impl true
@@ -231,7 +234,9 @@ defmodule SchedulingWeb.CapabilityLive.Index do
             class="input"
             placeholder="e.g. Audiology"
           />
-          <div class="field__hint">Short, unique. Used as a chip across offices, diagnoses and the queue.</div>
+          <div class="field__hint">
+            Short, unique. Used as a chip across offices, diagnoses and the queue.
+          </div>
           <.field_errors field={@form[:name]} />
         </div>
 

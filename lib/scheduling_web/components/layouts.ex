@@ -29,7 +29,8 @@ defmodule SchedulingWeb.Layouts do
 
   attr :active, :atom,
     default: nil,
-    doc: "the active nav tab — one of :board, :queue, :decisions, :visit_events, :visits, :offices, :capabilities, :diagnoses"
+    doc:
+      "the active nav tab — one of :board, :queue, :decisions, :visit_events, :visits, :offices, :capabilities, :diagnoses"
 
   attr :wide, :boolean, default: false, doc: "use the wider page container"
 
@@ -137,13 +138,28 @@ defmodule SchedulingWeb.Layouts do
   def theme_toggle(assigns) do
     ~H"""
     <div class="themetoggle" role="group" aria-label={gettext("Color theme")}>
-      <button type="button" phx-click={JS.dispatch("phx:set-theme")} data-phx-theme="system" aria-label={gettext("System theme")}>
+      <button
+        type="button"
+        phx-click={JS.dispatch("phx:set-theme")}
+        data-phx-theme="system"
+        aria-label={gettext("System theme")}
+      >
         <.icon name="hero-computer-desktop" class="size-4" />
       </button>
-      <button type="button" phx-click={JS.dispatch("phx:set-theme")} data-phx-theme="light" aria-label={gettext("Light theme")}>
+      <button
+        type="button"
+        phx-click={JS.dispatch("phx:set-theme")}
+        data-phx-theme="light"
+        aria-label={gettext("Light theme")}
+      >
         <.icon name="hero-sun" class="size-4" />
       </button>
-      <button type="button" phx-click={JS.dispatch("phx:set-theme")} data-phx-theme="dark" aria-label={gettext("Dark theme")}>
+      <button
+        type="button"
+        phx-click={JS.dispatch("phx:set-theme")}
+        data-phx-theme="dark"
+        aria-label={gettext("Dark theme")}
+      >
         <.icon name="hero-moon" class="size-4" />
       </button>
     </div>
