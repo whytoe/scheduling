@@ -26,8 +26,12 @@ defmodule SchedulingWeb.BoardLive.Index do
     {:ok,
      socket
      |> assign(:page_title, "Board")
+     |> assign(:announcement, "")
      |> load_board()}
   end
+
+  # Politely announce board changes to screen readers without stealing focus.
+  defp announce(socket, message), do: assign(socket, :announcement, message)
 
   @impl true
   def handle_info({:board_changed, _event}, socket) do
@@ -51,6 +55,7 @@ defmodule SchedulingWeb.BoardLive.Index do
         {:noreply,
          socket
          |> put_flash(:info, "Completed #{patient_name(completed)} — office capacity freed.")
+         |> announce("Completed #{patient_name(completed)}, capacity freed.")
          |> load_board()}
 
       {:error, _changeset} ->
@@ -70,6 +75,7 @@ defmodule SchedulingWeb.BoardLive.Index do
            :info,
            "Re-queued #{patient_name(requeued)} for another service — office capacity freed."
          )
+         |> announce("Re-queued #{patient_name(requeued)} for another service.")
          |> load_board()}
 
       {:error, _changeset} ->
@@ -89,6 +95,7 @@ defmodule SchedulingWeb.BoardLive.Index do
            :info,
            "Acknowledged #{handoff_patient(acknowledged)} — handoff cleared."
          )
+         |> announce("Acknowledged #{handoff_patient(acknowledged)} into service.")
          |> load_board()}
 
       {:error, _changeset} ->
@@ -219,6 +226,8 @@ defmodule SchedulingWeb.BoardLive.Index do
           live — no refresh.
         </:subtitle>
       </.page_head>
+
+      <div class="sr-only" role="status" aria-live="polite">{@announcement}</div>
 
       <div class="cols cols--board">
         <%!-- WAITING --%>

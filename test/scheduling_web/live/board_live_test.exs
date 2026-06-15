@@ -118,6 +118,8 @@ defmodule SchedulingWeb.BoardLiveTest do
 
       assert has_element?(live, "#board-active-count", "0")
       assert html =~ "capacity freed"
+      # The polite live region announces the change for screen readers.
+      assert has_element?(live, "[role=status][aria-live=polite]", "Completed Jane Doe")
       assert Queue.current_loads() == %{}
 
       reloaded = Repo.get!(QueueEntry, assigned.id)
