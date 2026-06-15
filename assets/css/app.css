@@ -484,15 +484,13 @@ html:not([data-theme])   .themetoggle [data-phx-theme="system"] {
 .actor--system    { color: var(--color-base-content-muted); }
 .actor--queueing  { color: var(--st-assigned-fg); }
 
-/* timeline (visit lifecycle) */
-.timeline { position: relative; margin-top: var(--s-3); padding-left: var(--s-6); }
-.timeline::before { content: ""; position: absolute; left: 9px; top: 4px; bottom: 4px; width: 2px; background: var(--color-base-300); }
-.timeline__item { position: relative; padding-bottom: var(--s-4); }
-.timeline__item:last-child { padding-bottom: 0; }
-.timeline__dot { position: absolute; left: calc(-1 * var(--s-6) + 4px); top: 2px; width: 12px; height: 12px; border-radius: 999px; background: var(--color-base-100); border: 2px solid var(--st-assigned-fg); }
-.timeline__dot--done { background: var(--st-success-fg); border-color: var(--st-success-fg); }
-.timeline__head { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
-.timeline__time { font-family: var(--font-mono); font-size: var(--t-small); color: var(--color-base-content-muted); }
+/* timeline (visit lifecycle) — colored icon dot per event with a connector */
+.tl { list-style: none; margin: 0; padding: 0; }
+.tl__item { position: relative; display: grid; grid-template-columns: 28px 1fr; gap: var(--s-3); padding-bottom: var(--s-4); }
+.tl__item:last-child { padding-bottom: 0; }
+.tl__item:not(:last-child)::before { content: ""; position: absolute; left: 13px; top: 30px; bottom: 0; width: 2px; background: var(--color-base-300); }
+.tl__dot { width: 28px; height: 28px; border-radius: 999px; display: grid; place-items: center; z-index: 1; }
+.tl__head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
 /* === PATTERN 5 — Inline edit form (form above table) === */
 .editform {
