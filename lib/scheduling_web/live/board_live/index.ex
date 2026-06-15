@@ -171,6 +171,20 @@ defmodule SchedulingWeb.BoardLive.Index do
     |> assign(:waiting_count, length(waiting))
     |> assign(:active, active)
     |> assign(:active_count, length(active))
+    |> assign(:alerts, routing_alerts(waiting, offices))
+  end
+
+  # Surfaces waiting patients who require a capability NO office provides at all
+  # — a persistent routing gap (distinct from transient full capacity) that an
+  # operator must resolve by adding the capability somewhere or referring out.
+  defp routing_alerts(waiting, offices) do
+    provided = offices |> Enum.flat_map(& &1.caps) |> MapSet.new()
+
+    for w <- waiting,
+        missing = Enum.reject(w.caps, &MapSet.member?(provided, &1)),
+        missing != [] do
+      %{patient: w.name, missing: missing}
+    end
   end
 
   defp capability_list(caps) when is_list(caps), do: caps |> Enum.map(& &1.name) |> Enum.sort()
@@ -228,6 +242,17 @@ defmodule SchedulingWeb.BoardLive.Index do
       </.page_head>
 
       <div class="sr-only" role="status" aria-live="polite">{@announcement}</div>
+
+      <div :if={@alerts != []} class="stack" style="margin-bottom:var(--s-6)">
+        <.callout
+          :for={alert <- @alerts}
+          tone="attention"
+          title={"#{alert.patient} could not be routed"}
+        >
+          No eligible office provides <b>{Enum.join(alert.missing, ", ")}</b>
+          with the required capability. Add it to an office or refer out.
+        </.callout>
+      </div>
 
       <div class="cols cols--board">
         <%!-- WAITING --%>

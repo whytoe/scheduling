@@ -58,6 +58,20 @@ defmodule SchedulingWeb.BoardLiveTest do
       assert html =~ "Jane Doe"
       assert has_element?(live, "#board-waiting-count", "1")
     end
+
+    test "raises a no-eligible-office alert when a required capability is unprovided",
+         %{conn: conn} do
+      mri = capability_fixture("MRI")
+      xray = capability_fixture("XRay")
+      # The only office provides XRay; nobody provides MRI.
+      _office = office_fixture("Room A", 3, [xray.id])
+      _entry = waiting_entry("Robert Lindqvist", [mri])
+
+      {:ok, _live, html} = live(conn, ~p"/board")
+
+      assert html =~ "Robert Lindqvist could not be routed"
+      assert html =~ "MRI"
+    end
   end
 
   describe "real-time updates" do
