@@ -36,8 +36,12 @@ const Hooks = {
         this.el.querySelectorAll(
           'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
         )
-      const cancel = this.el.querySelector("[data-confirm-cancel]") || focusables()[0]
-      cancel && cancel.focus()
+      // Defer to the next frame: LiveView restores focus to the trigger after a
+      // DOM patch, which would otherwise clobber a synchronous focus() here.
+      requestAnimationFrame(() => {
+        const cancel = this.el.querySelector("[data-confirm-cancel]") || focusables()[0]
+        cancel && cancel.focus()
+      })
 
       this.onKey = (e) => {
         if (e.key !== "Tab") return

@@ -607,25 +607,27 @@ html:not([data-theme])   .themetoggle [data-phx-theme="system"] {
   animation: scrim-in var(--motion-state) both;
 }
 @keyframes scrim-in { from { opacity: 0; } to { opacity: 1; } }
-.modal {
+/* `.cdialog` (not `.modal`) — `.modal` is a DaisyUI component that defaults to
+   visibility:hidden + full-screen grid, which would hide this card. */
+.cdialog {
   width: 440px; max-width: 100%;
   background: var(--color-base-100);
   border: var(--border) solid var(--color-base-300);
   border-radius: var(--radius-box);
   box-shadow: var(--elev-modal);
   padding: var(--s-6);
-  animation: modal-in var(--motion-arrival) both;
+  animation: cdialog-in var(--motion-arrival) both;
 }
-@keyframes modal-in { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
-.modal__head { display: flex; gap: var(--s-3); align-items: flex-start; margin-bottom: var(--s-3); }
-.modal__icon { flex: none; width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; }
-.modal__icon.error { background: var(--st-error-bg); color: var(--st-error-fg); }
-.modal__icon.attention { background: var(--st-attention-bg); color: var(--st-attention-fg); }
-.modal__icon .hero { width: 22px; height: 22px; }
-.modal__title { font-size: var(--t-h2); font-weight: 600; }
-.modal__body { font-size: var(--t-body); color: var(--color-base-content-muted); line-height: 1.55; }
-.modal__body b { color: var(--color-base-content); }
-.modal__actions { display: flex; justify-content: flex-end; gap: var(--s-2); margin-top: var(--s-6); }
+@keyframes cdialog-in { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+.cdialog__head { display: flex; gap: var(--s-3); align-items: flex-start; margin-bottom: var(--s-3); }
+.cdialog__icon { flex: none; width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; }
+.cdialog__icon.error { background: var(--st-error-bg); color: var(--st-error-fg); }
+.cdialog__icon.attention { background: var(--st-attention-bg); color: var(--st-attention-fg); }
+.cdialog__icon .hero { width: 22px; height: 22px; }
+.cdialog__title { font-size: var(--t-h2); font-weight: 600; }
+.cdialog__body { font-size: var(--t-body); color: var(--color-base-content-muted); line-height: 1.55; }
+.cdialog__body b { color: var(--color-base-content); }
+.cdialog__actions { display: flex; justify-content: flex-end; gap: var(--s-2); margin-top: var(--s-6); }
 
 /* === PATTERN 9 — Loading / skeleton (reduced-motion-safe) === */
 .skel { position: relative; overflow: hidden; background: var(--color-base-200); border-radius: 6px; }

@@ -107,9 +107,12 @@ defmodule SchedulingWeb.CoreComponents do
     }
 
     assigns =
-      assign_new(assigns, :class, fn ->
-        ["btn", Map.fetch!(variants, assigns.variant), assigns.size == "sm" && "btn-sm"]
-      end)
+      assign(
+        assigns,
+        :class,
+        assigns.class ||
+          ["btn", Map.fetch!(variants, assigns.variant), assigns.size == "sm" && "btn-sm"]
+      )
 
     if rest[:href] || rest[:navigate] || rest[:patch] do
       ~H"""
@@ -799,23 +802,23 @@ defmodule SchedulingWeb.CoreComponents do
       phx-key="escape"
     >
       <div
-        class="modal"
+        class="cdialog"
         role="alertdialog"
         aria-modal="true"
         aria-labelledby={"#{@id}-title"}
         aria-describedby={"#{@id}-body"}
         phx-click-away={@on_cancel}
       >
-        <div class="modal__head">
-          <div class={["modal__icon", @tone]}><.icon name={@icon} class="size-[22px]" /></div>
+        <div class="cdialog__head">
+          <div class={["cdialog__icon", @tone]}><.icon name={@icon} class="size-[22px]" /></div>
           <div>
-            <div id={"#{@id}-title"} class="modal__title">{@title}</div>
-            <div id={"#{@id}-body"} class="modal__body" style="margin-top:4px">
+            <div id={"#{@id}-title"} class="cdialog__title">{@title}</div>
+            <div id={"#{@id}-body"} class="cdialog__body" style="margin-top:4px">
               {render_slot(@inner_block)}
             </div>
           </div>
         </div>
-        <div class="modal__actions">
+        <div class="cdialog__actions">
           <button type="button" class="btn btn-ghost" data-confirm-cancel phx-click={@on_cancel}>
             {gettext("Cancel")}
           </button>
