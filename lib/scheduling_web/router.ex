@@ -34,6 +34,10 @@ defmodule SchedulingWeb.Router do
     live "/capabilities", CapabilityLive.Index, :index
     live "/capabilities/new", CapabilityLive.Index, :new
     live "/capabilities/:id/edit", CapabilityLive.Index, :edit
+
+    live "/diagnoses", DiagnosisLive.Index, :index
+    live "/diagnoses/new", DiagnosisLive.Index, :new
+    live "/diagnoses/:id/edit", DiagnosisLive.Index, :edit
   end
 
   # Spec-discovery + health stay UNVERSIONED. They evolve independently of
