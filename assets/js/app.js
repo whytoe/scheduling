@@ -25,11 +25,48 @@ import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/scheduling"
 import topbar from "../vendor/topbar"
 
+// Confirmation dialog: move focus to Cancel (the safe default), trap Tab inside
+// the modal, and return focus to the trigger on close. Esc + backdrop dismissal
+// are wired through phx events on the component itself.
+const Hooks = {
+  ConfirmDialog: {
+    mounted() {
+      this.lastFocused = document.activeElement
+      const focusables = () =>
+        this.el.querySelectorAll(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        )
+      const cancel = this.el.querySelector("[data-confirm-cancel]") || focusables()[0]
+      cancel && cancel.focus()
+
+      this.onKey = (e) => {
+        if (e.key !== "Tab") return
+        const f = Array.from(focusables())
+        if (f.length === 0) return
+        const first = f[0]
+        const last = f[f.length - 1]
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault()
+          last.focus()
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault()
+          first.focus()
+        }
+      }
+      this.el.addEventListener("keydown", this.onKey)
+    },
+    destroyed() {
+      this.el.removeEventListener("keydown", this.onKey)
+      this.lastFocused && this.lastFocused.focus && this.lastFocused.focus()
+    },
+  },
+}
+
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks},
+  hooks: {...colocatedHooks, ...Hooks},
 })
 
 // Show progress bar on live navigation and form submits

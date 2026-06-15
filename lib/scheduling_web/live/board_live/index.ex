@@ -14,6 +14,7 @@ defmodule SchedulingWeb.BoardLive.Index do
   alias Scheduling.Handoffs
   alias Scheduling.Offices
   alias Scheduling.Queue
+  alias Scheduling.Repo
 
   @impl true
   def mount(_params, _session, socket) do
@@ -114,9 +115,8 @@ defmodule SchedulingWeb.BoardLive.Index do
           id: office.id,
           name: office.name,
           intake_capacity: office.intake_capacity,
-          capabilities: capability_names(office.capabilities),
+          caps: capability_list(office.capabilities),
           load: load,
-          free: max(office.intake_capacity - load, 0),
           incoming: length(Map.get(incoming_by_office, office.id, []))
         }
       end)
@@ -125,20 +125,23 @@ defmodule SchedulingWeb.BoardLive.Index do
       Enum.map(pending, fn handoff ->
         %{
           id: handoff.id,
-          patient: handoff_patient(handoff),
+          name: handoff_patient(handoff),
           office: handoff.office_name || "office ##{handoff.office_id}",
-          required: format_caps(handoff.required_capabilities)
+          caps: sorted_strings(handoff.required_capabilities)
         }
       end)
 
     waiting =
-      Enum.map(Queue.list_waiting_entries(), fn entry ->
+      Queue.list_waiting_entries()
+      |> Repo.preload(:diagnosis)
+      |> Enum.map(fn entry ->
         %{
           id: entry.id,
-          patient: patient_name(entry),
-          required: capability_names(entry.required_capabilities),
+          name: patient_name(entry),
+          diagnosis: diagnosis_name(entry),
+          caps: capability_list(entry.required_capabilities),
           priority: entry.priority,
-          waiting_for: format_wait(now, entry.inserted_at)
+          wait: format_wait(now, entry.inserted_at)
         }
       end)
 
@@ -146,10 +149,10 @@ defmodule SchedulingWeb.BoardLive.Index do
       Enum.map(Queue.list_active_entries(), fn entry ->
         %{
           id: entry.id,
-          patient: patient_name(entry),
+          name: patient_name(entry),
           office: office_name(entry),
-          required: capability_names(entry.required_capabilities),
-          status: humanize_status(entry.status)
+          status: to_string(entry.status),
+          since: format_wait(now, entry.inserted_at)
         }
       end)
 
@@ -163,17 +166,11 @@ defmodule SchedulingWeb.BoardLive.Index do
     |> assign(:active_count, length(active))
   end
 
-  defp capability_names(caps) when is_list(caps) and caps != [] do
-    caps |> Enum.map(& &1.name) |> Enum.sort() |> Enum.join(", ")
-  end
+  defp capability_list(caps) when is_list(caps), do: caps |> Enum.map(& &1.name) |> Enum.sort()
+  defp capability_list(_), do: []
 
-  defp capability_names(_), do: "—"
-
-  defp format_caps(caps) when is_list(caps) and caps != [] do
-    caps |> Enum.sort() |> Enum.join(", ")
-  end
-
-  defp format_caps(_), do: "—"
+  defp sorted_strings(caps) when is_list(caps), do: Enum.sort(caps)
+  defp sorted_strings(_), do: []
 
   defp handoff_patient(handoff) do
     handoff.patient_name || "patient ##{handoff.patient_id}"
@@ -186,16 +183,19 @@ defmodule SchedulingWeb.BoardLive.Index do
     end
   end
 
+  defp diagnosis_name(entry) do
+    case entry.diagnosis do
+      %{name: name} when is_binary(name) -> name
+      _ -> nil
+    end
+  end
+
   defp office_name(entry) do
     case entry.assigned_office do
       %{name: name} when is_binary(name) -> name
       _ -> "—"
     end
   end
-
-  defp humanize_status(:assigned), do: "Assigned"
-  defp humanize_status(:in_service), do: "In service"
-  defp humanize_status(status), do: status |> to_string() |> String.capitalize()
 
   defp format_wait(_now, nil), do: "—"
 
@@ -212,66 +212,142 @@ defmodule SchedulingWeb.BoardLive.Index do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash}>
-      <.header>
-        Shared board
+    <Layouts.app flash={@flash} active={:board} wide>
+      <.page_head title="Shared board" live>
         <:subtitle>
-          Live view of the waiting room and office capacity. Updates in real time as
-          patients are accepted.
+          One source of truth for front desk and clinical staff. Every change pushes
+          live — no refresh.
         </:subtitle>
-      </.header>
+      </.page_head>
 
-      <section class="mb-8">
-        <h2 class="text-sm font-semibold mb-2">Offices</h2>
-        <.table id="board-offices" rows={@offices}>
-          <:col :let={office} label="Office">{office.name}</:col>
-          <:col :let={office} label="Capabilities">{office.capabilities}</:col>
-          <:col :let={office} label="In service">{office.load}</:col>
-          <:col :let={office} label="Incoming">{office.incoming}</:col>
-          <:col :let={office} label="Capacity">{office.intake_capacity}</:col>
-          <:col :let={office} label="Free">{office.free}</:col>
-        </.table>
-      </section>
+      <div class="cols cols--board">
+        <%!-- WAITING --%>
+        <section aria-labelledby="zone-waiting">
+          <.zone_head
+            id="zone-waiting"
+            count_id="board-waiting-count"
+            icon="hero-clock"
+            title="Waiting room"
+            count={@waiting_count}
+          />
+          <div :if={@waiting == []} class="card">
+            <.empty_state icon="hero-check-circle" title="Waiting room is clear">
+              No patients are waiting. The board is live and listening for new sign-ins.
+            </.empty_state>
+          </div>
+          <div :if={@waiting != []} id="board-waiting" class="stack">
+            <div :for={p <- @waiting} class="pcard">
+              <.priority_tag priority={p.priority} />
+              <div class="pcard__main">
+                <div class="pcard__name">{p.name}</div>
+                <div class="pcard__meta">
+                  <span :if={p.diagnosis} class="t-small">{p.diagnosis}</span>
+                  <span :if={p.diagnosis} style="color:var(--color-base-300)">·</span>
+                  <.cap_row caps={p.caps} />
+                </div>
+              </div>
+              <div class="pcard__side">
+                <.status_badge status="waiting" />
+                <span class="pcard__wait tnum" title="Waiting time">{p.wait}</span>
+              </div>
+            </div>
+          </div>
+        </section>
 
-      <section class="mb-8">
-        <h2 class="text-sm font-semibold mb-2">Incoming patients ({@incoming_count})</h2>
-        <.table id="board-incoming" rows={@incoming}>
-          <:col :let={handoff} label="Office">{handoff.office}</:col>
-          <:col :let={handoff} label="Patient">{handoff.patient}</:col>
-          <:col :let={handoff} label="Required capabilities">{handoff.required}</:col>
-          <:action :let={handoff}>
-            <.button phx-click={JS.push("acknowledge_handoff", value: %{id: handoff.id})}>
-              Acknowledge
-            </.button>
-          </:action>
-        </.table>
-      </section>
+        <%!-- INCOMING --%>
+        <section aria-labelledby="zone-incoming">
+          <.zone_head
+            id="zone-incoming"
+            count_id="board-incoming-count"
+            icon="hero-arrow-right-circle"
+            title="Incoming — awaiting acknowledgement"
+            count={@incoming_count}
+          />
+          <div :if={@incoming == []} class="card">
+            <.empty_state icon="hero-hand-raised" title="Nothing incoming">
+              All handoffs acknowledged. New routed patients appear here for clinical staff to confirm.
+            </.empty_state>
+          </div>
+          <div :if={@incoming != []} id="board-incoming" class="stack">
+            <div :for={p <- @incoming} class="pcard" style="border-color:var(--st-assigned-line)">
+              <div class="pcard__main">
+                <div class="pcard__name">{p.name}</div>
+                <div class="pcard__meta">
+                  <.status_badge status="assigned" label={"→ #{p.office}"} />
+                  <.cap_row caps={p.caps} />
+                </div>
+              </div>
+              <.button
+                variant="clinical"
+                phx-click={JS.push("acknowledge_handoff", value: %{id: p.id})}
+                aria-label={"Acknowledge #{p.name}"}
+              >
+                <.icon name="hero-hand-raised" class="size-5" />Acknowledge
+              </.button>
+            </div>
+          </div>
+        </section>
 
-      <section class="mb-8">
-        <h2 class="text-sm font-semibold mb-2">In service ({@active_count})</h2>
-        <.table id="board-active" rows={@active}>
-          <:col :let={entry} label="Patient">{entry.patient}</:col>
-          <:col :let={entry} label="Office">{entry.office}</:col>
-          <:col :let={entry} label="Required capabilities">{entry.required}</:col>
-          <:col :let={entry} label="Status">{entry.status}</:col>
-          <:action :let={entry}>
-            <.button phx-click={JS.push("complete", value: %{id: entry.id})}>Complete</.button>
-          </:action>
-          <:action :let={entry}>
-            <.button phx-click={JS.push("requeue", value: %{id: entry.id})}>Re-queue</.button>
-          </:action>
-        </.table>
-      </section>
+        <%!-- OFFICES + IN SERVICE --%>
+        <section aria-labelledby="zone-offices">
+          <.zone_head
+            id="zone-offices"
+            icon="hero-building-office"
+            title="Office capacity"
+            count={length(@offices)}
+          />
+          <div :if={@offices == []} class="card">
+            <.empty_state icon="hero-building-office" title="No offices configured">
+              Add an office to start routing patients.
+            </.empty_state>
+          </div>
+          <div :if={@offices != []} class="grid-cards">
+            <.office_card
+              :for={o <- @offices}
+              name={o.name}
+              capacity={o.intake_capacity}
+              load={o.load}
+              incoming={o.incoming}
+              compact
+            />
+          </div>
 
-      <section>
-        <h2 class="text-sm font-semibold mb-2">Waiting room ({@waiting_count})</h2>
-        <.table id="board-waiting" rows={@waiting}>
-          <:col :let={entry} label="Patient">{entry.patient}</:col>
-          <:col :let={entry} label="Required capabilities">{entry.required}</:col>
-          <:col :let={entry} label="Priority">{entry.priority}</:col>
-          <:col :let={entry} label="Waiting">{entry.waiting_for}</:col>
-        </.table>
-      </section>
+          <div style="margin-top:var(--s-6)">
+            <.zone_head
+              id="zone-active"
+              count_id="board-active-count"
+              icon="hero-bolt"
+              title="In service"
+              count={@active_count}
+            />
+            <div :if={@active == []} class="card">
+              <.empty_state icon="hero-bolt" title="No one in service">
+                Acknowledged patients in service will show here.
+              </.empty_state>
+            </div>
+            <div :if={@active != []} id="board-active" class="stack">
+              <div :for={p <- @active} class="pcard">
+                <div class="pcard__main">
+                  <div class="pcard__name">{p.name}</div>
+                  <div class="pcard__meta">
+                    <span class="t-small">{p.office}</span>
+                    <.status_badge status={p.status} />
+                  </div>
+                </div>
+                <div class="pcard__side">
+                  <span class="pcard__wait tnum">{p.since}</span>
+                  <.button variant="subtle" size="sm" phx-click={JS.push("complete", value: %{id: p.id})}>
+                    Complete
+                  </.button>
+                  <.button variant="ghost" size="sm" phx-click={JS.push("requeue", value: %{id: p.id})}>
+                    Re-queue
+                  </.button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
     </Layouts.app>
     """
   end

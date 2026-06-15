@@ -48,15 +48,15 @@ defmodule SchedulingWeb.BoardLiveTest do
       _office = office_fixture("Room A", 3, [xray.id])
       _entry = waiting_entry("Jane Doe", [xray])
 
-      {:ok, _live, html} = live(conn, ~p"/board")
+      {:ok, live, html} = live(conn, ~p"/board")
 
       assert html =~ "Shared board"
-      # Office section: name, capability, and capacity columns.
+      # Office section: name and capability chips.
       assert html =~ "Room A"
       assert html =~ "XRay"
-      # Waiting room section: the waiting patient.
+      # Waiting room section: the waiting patient + count pill.
       assert html =~ "Jane Doe"
-      assert html =~ "Waiting room (1)"
+      assert has_element?(live, "#board-waiting-count", "1")
     end
   end
 
@@ -68,18 +68,18 @@ defmodule SchedulingWeb.BoardLiveTest do
 
       {:ok, live, html} = live(conn, ~p"/board")
       assert html =~ "Jane Doe"
-      assert html =~ "Waiting room (1)"
+      assert has_element?(live, "#board-waiting-count", "1")
 
       # Accept the patient out-of-band; Queue.accept/1 broadcasts on success.
       {:ok, _assigned, _result} = Queue.accept(Queue.get_entry!(entry.id))
 
-      html = render(live)
+      render(live)
 
       # Patient has left the waiting room, now appears in service, and the
       # office shows load.
-      assert html =~ "Waiting room (0)"
-      assert html =~ "In service (1)"
-      assert html =~ "Jane Doe"
+      assert has_element?(live, "#board-waiting-count", "0")
+      assert has_element?(live, "#board-active-count", "1")
+      assert has_element?(live, "#board-active", "Jane Doe")
       assert Queue.current_loads() == %{office.id => 1}
     end
 
@@ -94,7 +94,7 @@ defmodule SchedulingWeb.BoardLiveTest do
 
       html = render(live)
       assert html =~ "Late Arrival"
-      assert html =~ "Waiting room (1)"
+      assert has_element?(live, "#board-waiting-count", "1")
     end
   end
 
@@ -106,9 +106,9 @@ defmodule SchedulingWeb.BoardLiveTest do
 
       {:ok, assigned, _} = Queue.accept(Queue.get_entry!(entry.id))
 
-      {:ok, live, html} = live(conn, ~p"/board")
-      assert html =~ "In service (1)"
-      assert html =~ "Jane Doe"
+      {:ok, live, _html} = live(conn, ~p"/board")
+      assert has_element?(live, "#board-active-count", "1")
+      assert has_element?(live, "#board-active", "Jane Doe")
       assert Queue.current_loads() == %{office.id => 1}
 
       html =
@@ -116,7 +116,7 @@ defmodule SchedulingWeb.BoardLiveTest do
         |> element("#board-active button", "Complete")
         |> render_click()
 
-      assert html =~ "In service (0)"
+      assert has_element?(live, "#board-active-count", "0")
       assert html =~ "capacity freed"
       assert Queue.current_loads() == %{}
 
@@ -133,13 +133,12 @@ defmodule SchedulingWeb.BoardLiveTest do
 
       {:ok, live, _html} = live(conn, ~p"/board")
 
-      html =
-        live
-        |> element("#board-active button", "Re-queue")
-        |> render_click()
+      live
+      |> element("#board-active button", "Re-queue")
+      |> render_click()
 
-      assert html =~ "In service (0)"
-      assert html =~ "Waiting room (1)"
+      assert has_element?(live, "#board-active-count", "0")
+      assert has_element?(live, "#board-waiting-count", "1")
       assert Queue.current_loads() == %{}
       refute office.id in Map.keys(Queue.current_loads())
 
@@ -155,14 +154,14 @@ defmodule SchedulingWeb.BoardLiveTest do
       _office = office_fixture("Room A", 2, [xray.id])
       entry = waiting_entry("Jane Doe", [xray])
 
-      {:ok, live, html} = live(conn, ~p"/board")
-      assert html =~ "Incoming patients (0)"
+      {:ok, live, _html} = live(conn, ~p"/board")
+      assert has_element?(live, "#board-incoming-count", "0")
 
       # Accept out-of-band; the handoff broadcast should push to the board.
       {:ok, _assigned, _} = Queue.accept(Queue.get_entry!(entry.id))
 
       html = render(live)
-      assert html =~ "Incoming patients (1)"
+      assert has_element?(live, "#board-incoming-count", "1")
       assert html =~ "Jane Doe"
       assert html =~ "Room A"
     end
@@ -174,16 +173,16 @@ defmodule SchedulingWeb.BoardLiveTest do
 
       {:ok, _assigned, _} = Queue.accept(Queue.get_entry!(entry.id))
 
-      {:ok, live, html} = live(conn, ~p"/board")
-      assert html =~ "Incoming patients (1)"
-      assert html =~ "Jane Doe"
+      {:ok, live, _html} = live(conn, ~p"/board")
+      assert has_element?(live, "#board-incoming-count", "1")
+      assert has_element?(live, "#board-incoming", "Jane Doe")
 
       html =
         live
         |> element("#board-incoming button", "Acknowledge")
         |> render_click()
 
-      assert html =~ "Incoming patients (0)"
+      assert has_element?(live, "#board-incoming-count", "0")
       assert html =~ "handoff cleared"
     end
   end
