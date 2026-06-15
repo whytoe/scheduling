@@ -9,23 +9,7 @@ defmodule SchedulingWeb.VisitEventLive.Index do
 
   alias Scheduling.Audit
   alias Scheduling.Repo
-
-  # type => {label, icon, tone}
-  @event_meta %{
-    "queue_entry.created" => {"Signed in", "hero-arrow-right-circle", "assigned"},
-    "queue_entry.completed" => {"Completed", "hero-check-circle", "success"},
-    "handoff.acknowledged" => {"Handoff acknowledged", "hero-hand-raised", "active"},
-    "visit.created" => {"Visit opened", "hero-arrow-right-circle", "assigned"},
-    "visit.ended" => {"Visit ended", "hero-check-circle", "success"}
-  }
-
-  @event_note %{
-    "queue_entry.created" => "Joined the waiting queue",
-    "queue_entry.completed" => "Service completed · capacity freed",
-    "handoff.acknowledged" => "Acknowledged by clinical staff",
-    "visit.created" => "Visit opened",
-    "visit.ended" => "Visit ended"
-  }
+  alias SchedulingWeb.EventTimeline
 
   @impl true
   def mount(_params, _session, socket) do
@@ -66,11 +50,11 @@ defmodule SchedulingWeb.VisitEventLive.Index do
       id: key_id(key),
       label: key_label(key),
       patient: patient_name(first),
-      status: derive_status(types),
+      status: EventTimeline.derive_status(types),
       opened: Calendar.strftime(first.occurred_at, "%Y-%m-%d %H:%M"),
       opened_sort: first.occurred_at,
       count: length(ordered),
-      events: Enum.map(ordered, &event_view/1)
+      events: EventTimeline.view_events(ordered)
     }
   end
 
@@ -81,34 +65,6 @@ defmodule SchedulingWeb.VisitEventLive.Index do
   defp key_label({:visit, id}), do: "v-#{id}"
   defp key_label({:entry, id}), do: "entry ##{id}"
   defp key_label({:patient, id}), do: "patient ##{id}"
-
-  defp derive_status(types) do
-    cond do
-      "queue_entry.completed" in types or "visit.ended" in types -> "completed"
-      "handoff.acknowledged" in types -> "in_service"
-      true -> "waiting"
-    end
-  end
-
-  defp event_view(e) do
-    {label, icon, tone} = Map.get(@event_meta, e.type, {humanize(e.type), "hero-clock", "neutral"})
-
-    %{
-      label: label,
-      icon: icon,
-      tone: tone,
-      time: Calendar.strftime(e.occurred_at, "%H:%M:%S"),
-      actor: actor_key(e.actor_type),
-      note: Map.get(@event_note, e.type)
-    }
-  end
-
-  defp humanize(type), do: type |> String.replace([".", "_"], " ") |> String.capitalize()
-
-  # Map stored actor_type values onto the actor vocabulary.
-  defp actor_key("clinical"), do: "clinician"
-  defp actor_key(t) when t in ["front_desk", "clinician", "queueing", "system"], do: t
-  defp actor_key(_), do: "system"
 
   defp patient_name(e) do
     case e.patient do
@@ -158,24 +114,7 @@ defmodule SchedulingWeb.VisitEventLive.Index do
           </button>
 
           <div :if={@open_id == g.id} style="padding:var(--s-4) var(--s-6);border-top:1px solid var(--color-base-300)">
-            <ol class="tl">
-              <li :for={ev <- g.events} class="tl__item">
-                <span
-                  class="tl__dot"
-                  style={"background:var(--st-#{ev.tone}-bg);color:var(--st-#{ev.tone}-fg);border:1px solid var(--st-#{ev.tone}-line)"}
-                >
-                  <.icon name={ev.icon} class="size-4" />
-                </span>
-                <div>
-                  <div class="tl__head">
-                    <span class="font-semibold">{ev.label}</span>
-                    <span class="mono t-small">{ev.time}</span>
-                    <.actor actor={ev.actor} />
-                  </div>
-                  <div :if={ev.note} class="t-small" style="margin-top:2px">{ev.note}</div>
-                </div>
-              </li>
-            </ol>
+            <.timeline events={g.events} />
           </div>
         </div>
       </div>

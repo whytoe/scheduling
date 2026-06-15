@@ -822,6 +822,36 @@ defmodule SchedulingWeb.CoreComponents do
     """
   end
 
+  @doc """
+  Vertical lifecycle timeline. `events` is a list of maps with `:label`,
+  `:icon`, `:tone` (an `--st-*` tone key), `:time`, `:actor`, and optional
+  `:note`. Shared by `/visit_events` and `/visits`.
+  """
+  attr :events, :list, required: true
+
+  def timeline(assigns) do
+    ~H"""
+    <ol class="tl">
+      <li :for={ev <- @events} class="tl__item">
+        <span
+          class="tl__dot"
+          style={"background:var(--st-#{ev.tone}-bg);color:var(--st-#{ev.tone}-fg);border:1px solid var(--st-#{ev.tone}-line)"}
+        >
+          <.icon name={ev.icon} class="size-4" />
+        </span>
+        <div>
+          <div class="tl__head">
+            <span class="font-semibold">{ev.label}</span>
+            <span class="mono t-small">{ev.time}</span>
+            <.actor actor={ev.actor} />
+          </div>
+          <div :if={ev.note} class="t-small" style="margin-top:2px">{ev.note}</div>
+        </div>
+      </li>
+    </ol>
+    """
+  end
+
   @doc "PATTERN 9 — a single skeleton bar (reduced-motion falls back to a static tint)."
   attr :class, :any, default: nil
   attr :rest, :global

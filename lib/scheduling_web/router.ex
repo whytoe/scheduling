@@ -27,6 +27,8 @@ defmodule SchedulingWeb.Router do
 
     live "/visit_events", VisitEventLive.Index, :index
 
+    live "/visits", VisitLive.Index, :index
+
     live "/offices", OfficeLive.Index, :index
     live "/offices/new", OfficeLive.Index, :new
     live "/offices/:id/edit", OfficeLive.Index, :edit
