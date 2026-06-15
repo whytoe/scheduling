@@ -48,11 +48,14 @@ defmodule SchedulingWeb.RoutingDecisionLiveTest do
       _office = office_fixture("Room A", 2, [xray.id])
       {:ok, _assigned, _result} = Queue.accept(waiting_entry("Jane Doe", [xray]))
 
-      {:ok, _live, html} = live(conn, ~p"/decisions")
+      {:ok, live, html} = live(conn, ~p"/decisions")
 
       assert html =~ "Routing decisions"
       assert html =~ "Jane Doe"
       assert html =~ "XRay"
+
+      # The chosen office and verbatim rationale live in the expandable detail.
+      html = live |> element(".audit__row", "Jane Doe") |> render_click()
       assert html =~ "Room A"
       assert html =~ "tightest capability match"
     end
