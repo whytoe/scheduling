@@ -13,9 +13,9 @@ defmodule SchedulingWeb.Api.VisitEventController do
 
   action_fallback SchedulingWeb.Api.FallbackController
 
-  tags ["visit_events"]
+  tags(["visit_events"])
 
-  operation :index,
+  operation(:index,
     summary: "List visit events",
     description:
       "Newest first. Query parameters scope the result.\n\n" <>
@@ -56,6 +56,7 @@ defmodule SchedulingWeb.Api.VisitEventController do
       ]
     ],
     responses: [ok: {"Visit events", "application/json", Schemas.VisitEventList}]
+  )
 
   def index(conn, params) do
     filters = build_filters(params)
@@ -73,13 +74,14 @@ defmodule SchedulingWeb.Api.VisitEventController do
     |> json(Enum.map(page, &serialize/1))
   end
 
-  operation :show,
+  operation(:show,
     summary: "Get one visit event",
     parameters: [id: [in: :path, type: :integer]],
     responses: [
       ok: {"Visit event", "application/json", Schemas.VisitEvent},
       not_found: {"Not found", "application/json", Schemas.NotFoundError}
     ]
+  )
 
   def show(conn, %{"id" => id}) do
     with {:ok, event} <- fetch(id) do

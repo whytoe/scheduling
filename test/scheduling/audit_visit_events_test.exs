@@ -60,7 +60,13 @@ defmodule Scheduling.AuditVisitEventsTest do
       v2 = visit_fixture(p2)
       e1 = entry_fixture(p1)
 
-      a = event!(%{type: "visit.created", visit_id: v1.id, patient_id: p1.id, actor_type: "service"})
+      a =
+        event!(%{
+          type: "visit.created",
+          visit_id: v1.id,
+          patient_id: p1.id,
+          actor_type: "service"
+        })
 
       b =
         event!(%{

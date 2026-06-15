@@ -11,9 +11,9 @@ defmodule SchedulingWeb.Api.PatientController do
 
   action_fallback SchedulingWeb.Api.FallbackController
 
-  tags ["patients"]
+  tags(["patients"])
 
-  operation :index,
+  operation(:index,
     summary: "List patients",
     description:
       "Sorted by name. Pass one of the id filters to look up a single patient by " <>
@@ -42,6 +42,7 @@ defmodule SchedulingWeb.Api.PatientController do
       ]
     ],
     responses: [ok: {"Patients", "application/json", Schemas.PatientList}]
+  )
 
   def index(conn, params) do
     filters = patient_filters(params)
@@ -58,13 +59,14 @@ defmodule SchedulingWeb.Api.PatientController do
     end)
   end
 
-  operation :show,
+  operation(:show,
     summary: "Get one patient",
     parameters: [id: [in: :path, description: "Patient id", type: :integer]],
     responses: [
       ok: {"Patient", "application/json", Schemas.Patient},
       not_found: {"Not found", "application/json", Schemas.NotFoundError}
     ]
+  )
 
   def show(conn, %{"id" => id}) do
     with {:ok, patient} <- fetch(id) do
@@ -72,13 +74,14 @@ defmodule SchedulingWeb.Api.PatientController do
     end
   end
 
-  operation :create,
+  operation(:create,
     summary: "Create a patient",
     request_body: {"Patient attrs", "application/json", Schemas.PatientRequest},
     responses: [
       created: {"Created", "application/json", Schemas.Patient},
       unprocessable_entity: {"Validation failed", "application/json", Schemas.ValidationError}
     ]
+  )
 
   def create(conn, %{"patient" => params}) do
     with {:ok, patient} <- Patients.create_patient(params) do
@@ -86,7 +89,7 @@ defmodule SchedulingWeb.Api.PatientController do
     end
   end
 
-  operation :update,
+  operation(:update,
     summary: "Update a patient",
     parameters: [id: [in: :path, description: "Patient id", type: :integer]],
     request_body: {"Patient attrs", "application/json", Schemas.PatientRequest},
@@ -95,6 +98,7 @@ defmodule SchedulingWeb.Api.PatientController do
       not_found: {"Not found", "application/json", Schemas.NotFoundError},
       unprocessable_entity: {"Validation failed", "application/json", Schemas.ValidationError}
     ]
+  )
 
   def update(conn, %{"id" => id, "patient" => params}) do
     with {:ok, patient} <- fetch(id),
@@ -103,7 +107,7 @@ defmodule SchedulingWeb.Api.PatientController do
     end
   end
 
-  operation :delete,
+  operation(:delete,
     summary: "Delete a patient",
     description: "Cascades to the patient's queue entries (FK on_delete: :delete_all).",
     parameters: [id: [in: :path, description: "Patient id", type: :integer]],
@@ -111,6 +115,7 @@ defmodule SchedulingWeb.Api.PatientController do
       no_content: "Deleted",
       not_found: {"Not found", "application/json", Schemas.NotFoundError}
     ]
+  )
 
   def delete(conn, %{"id" => id}) do
     with {:ok, patient} <- fetch(id),

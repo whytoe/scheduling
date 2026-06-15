@@ -11,23 +11,25 @@ defmodule SchedulingWeb.Api.DiagnosisController do
 
   action_fallback SchedulingWeb.Api.FallbackController
 
-  tags ["diagnoses"]
+  tags(["diagnoses"])
 
-  operation :index,
+  operation(:index,
     summary: "List diagnoses",
     responses: [ok: {"Diagnoses", "application/json", Schemas.DiagnosisList}]
+  )
 
   def index(conn, _params) do
     json(conn, Enum.map(Catalog.list_diagnoses(), &serialize/1))
   end
 
-  operation :show,
+  operation(:show,
     summary: "Get one diagnosis",
     parameters: [id: [in: :path, description: "Diagnosis id", type: :integer]],
     responses: [
       ok: {"Diagnosis", "application/json", Schemas.Diagnosis},
       not_found: {"Not found", "application/json", Schemas.NotFoundError}
     ]
+  )
 
   def show(conn, %{"id" => id}) do
     with {:ok, diagnosis} <- fetch(id) do
@@ -35,13 +37,14 @@ defmodule SchedulingWeb.Api.DiagnosisController do
     end
   end
 
-  operation :create,
+  operation(:create,
     summary: "Create a diagnosis",
     request_body: {"Diagnosis attrs", "application/json", Schemas.DiagnosisRequest},
     responses: [
       created: {"Created", "application/json", Schemas.Diagnosis},
       unprocessable_entity: {"Validation failed", "application/json", Schemas.ValidationError}
     ]
+  )
 
   def create(conn, %{"diagnosis" => params}) do
     with {:ok, diagnosis} <- Catalog.create_diagnosis(params) do
@@ -49,7 +52,7 @@ defmodule SchedulingWeb.Api.DiagnosisController do
     end
   end
 
-  operation :update,
+  operation(:update,
     summary: "Update a diagnosis",
     parameters: [id: [in: :path, description: "Diagnosis id", type: :integer]],
     request_body: {"Diagnosis attrs", "application/json", Schemas.DiagnosisRequest},
@@ -58,6 +61,7 @@ defmodule SchedulingWeb.Api.DiagnosisController do
       not_found: {"Not found", "application/json", Schemas.NotFoundError},
       unprocessable_entity: {"Validation failed", "application/json", Schemas.ValidationError}
     ]
+  )
 
   def update(conn, %{"id" => id, "diagnosis" => params}) do
     with {:ok, diagnosis} <- fetch(id),
@@ -66,13 +70,14 @@ defmodule SchedulingWeb.Api.DiagnosisController do
     end
   end
 
-  operation :delete,
+  operation(:delete,
     summary: "Delete a diagnosis",
     parameters: [id: [in: :path, description: "Diagnosis id", type: :integer]],
     responses: [
       no_content: "Deleted",
       not_found: {"Not found", "application/json", Schemas.NotFoundError}
     ]
+  )
 
   def delete(conn, %{"id" => id}) do
     with {:ok, diagnosis} <- fetch(id),

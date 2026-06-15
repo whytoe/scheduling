@@ -12,27 +12,29 @@ defmodule SchedulingWeb.Api.CapabilityController do
 
   action_fallback SchedulingWeb.Api.FallbackController
 
-  tags ["capabilities"]
+  tags(["capabilities"])
 
-  operation :index,
+  operation(:index,
     summary: "List capabilities",
     description: "Returns every capability in the catalog, sorted by name.",
     responses: [
       ok: {"Capabilities", "application/json", Schemas.CapabilityList}
     ]
+  )
 
   def index(conn, _params) do
     capabilities = Catalog.list_capabilities()
     json(conn, Enum.map(capabilities, &serialize/1))
   end
 
-  operation :show,
+  operation(:show,
     summary: "Get one capability",
     parameters: [id: [in: :path, description: "Capability id", type: :integer, example: 1]],
     responses: [
       ok: {"Capability", "application/json", Schemas.Capability},
       not_found: {"Not found", "application/json", Schemas.NotFoundError}
     ]
+  )
 
   def show(conn, %{"id" => id}) do
     with {:ok, capability} <- fetch(id) do
@@ -40,13 +42,14 @@ defmodule SchedulingWeb.Api.CapabilityController do
     end
   end
 
-  operation :create,
+  operation(:create,
     summary: "Create a capability",
     request_body: {"Capability attrs", "application/json", Schemas.CapabilityRequest},
     responses: [
       created: {"Created", "application/json", Schemas.Capability},
       unprocessable_entity: {"Validation failed", "application/json", Schemas.ValidationError}
     ]
+  )
 
   def create(conn, %{"capability" => params}) do
     with {:ok, capability} <- Catalog.create_capability(params) do
@@ -54,7 +57,7 @@ defmodule SchedulingWeb.Api.CapabilityController do
     end
   end
 
-  operation :update,
+  operation(:update,
     summary: "Update a capability",
     parameters: [id: [in: :path, description: "Capability id", type: :integer, example: 1]],
     request_body: {"Capability attrs", "application/json", Schemas.CapabilityRequest},
@@ -63,6 +66,7 @@ defmodule SchedulingWeb.Api.CapabilityController do
       not_found: {"Not found", "application/json", Schemas.NotFoundError},
       unprocessable_entity: {"Validation failed", "application/json", Schemas.ValidationError}
     ]
+  )
 
   def update(conn, %{"id" => id, "capability" => params}) do
     with {:ok, capability} <- fetch(id),
@@ -71,7 +75,7 @@ defmodule SchedulingWeb.Api.CapabilityController do
     end
   end
 
-  operation :delete,
+  operation(:delete,
     summary: "Delete a capability",
     description:
       "Cascades through `office_capabilities`, `diagnosis_capabilities`, and " <>
@@ -83,6 +87,7 @@ defmodule SchedulingWeb.Api.CapabilityController do
       no_content: "Deleted",
       not_found: {"Not found", "application/json", Schemas.NotFoundError}
     ]
+  )
 
   def delete(conn, %{"id" => id}) do
     with {:ok, capability} <- fetch(id),

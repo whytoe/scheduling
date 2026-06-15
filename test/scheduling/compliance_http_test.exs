@@ -32,7 +32,9 @@ defmodule Scheduling.ComplianceHttpTest do
   end
 
   defp patient_fixture(attrs \\ %{}) do
-    attrs = Map.merge(%{name: "Compliance HTTP", intake_patient_id: @patient_uuid}, Map.new(attrs))
+    attrs =
+      Map.merge(%{name: "Compliance HTTP", intake_patient_id: @patient_uuid}, Map.new(attrs))
+
     Repo.insert!(Patient.changeset(%Patient{}, attrs))
   end
 
@@ -74,7 +76,11 @@ defmodule Scheduling.ComplianceHttpTest do
 
       Bypass.expect(bypass, "GET", "/api/v1/responses", fn conn ->
         conn = Plug.Conn.fetch_query_params(conn)
-        send(parent, {:request, conn.query_params, Plug.Conn.get_req_header(conn, "authorization")})
+
+        send(
+          parent,
+          {:request, conn.query_params, Plug.Conn.get_req_header(conn, "authorization")}
+        )
 
         respond_json(
           conn,

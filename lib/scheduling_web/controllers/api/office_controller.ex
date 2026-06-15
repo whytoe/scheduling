@@ -11,23 +11,25 @@ defmodule SchedulingWeb.Api.OfficeController do
 
   action_fallback SchedulingWeb.Api.FallbackController
 
-  tags ["offices"]
+  tags(["offices"])
 
-  operation :index,
+  operation(:index,
     summary: "List offices",
     responses: [ok: {"Offices", "application/json", Schemas.OfficeList}]
+  )
 
   def index(conn, _params) do
     json(conn, Enum.map(Offices.list_offices(), &serialize/1))
   end
 
-  operation :show,
+  operation(:show,
     summary: "Get one office",
     parameters: [id: [in: :path, description: "Office id", type: :integer]],
     responses: [
       ok: {"Office", "application/json", Schemas.Office},
       not_found: {"Not found", "application/json", Schemas.NotFoundError}
     ]
+  )
 
   def show(conn, %{"id" => id}) do
     with {:ok, office} <- fetch(id) do
@@ -35,13 +37,14 @@ defmodule SchedulingWeb.Api.OfficeController do
     end
   end
 
-  operation :create,
+  operation(:create,
     summary: "Create an office",
     request_body: {"Office attrs", "application/json", Schemas.OfficeRequest},
     responses: [
       created: {"Created", "application/json", Schemas.Office},
       unprocessable_entity: {"Validation failed", "application/json", Schemas.ValidationError}
     ]
+  )
 
   def create(conn, %{"office" => params}) do
     with {:ok, office} <- Offices.create_office(params) do
@@ -49,7 +52,7 @@ defmodule SchedulingWeb.Api.OfficeController do
     end
   end
 
-  operation :update,
+  operation(:update,
     summary: "Update an office",
     parameters: [id: [in: :path, description: "Office id", type: :integer]],
     request_body: {"Office attrs", "application/json", Schemas.OfficeRequest},
@@ -58,6 +61,7 @@ defmodule SchedulingWeb.Api.OfficeController do
       not_found: {"Not found", "application/json", Schemas.NotFoundError},
       unprocessable_entity: {"Validation failed", "application/json", Schemas.ValidationError}
     ]
+  )
 
   def update(conn, %{"id" => id, "office" => params}) do
     with {:ok, office} <- fetch(id),
@@ -66,13 +70,14 @@ defmodule SchedulingWeb.Api.OfficeController do
     end
   end
 
-  operation :delete,
+  operation(:delete,
     summary: "Delete an office",
     parameters: [id: [in: :path, description: "Office id", type: :integer]],
     responses: [
       no_content: "Deleted",
       not_found: {"Not found", "application/json", Schemas.NotFoundError}
     ]
+  )
 
   def delete(conn, %{"id" => id}) do
     with {:ok, office} <- fetch(id),

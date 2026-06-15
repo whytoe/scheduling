@@ -16,23 +16,25 @@ defmodule SchedulingWeb.Api.WebhookSubscriptionController do
 
   action_fallback SchedulingWeb.Api.FallbackController
 
-  tags ["webhook_subscriptions"]
+  tags(["webhook_subscriptions"])
 
-  operation :index,
+  operation(:index,
     summary: "List webhook subscriptions",
     responses: [ok: {"Subscriptions", "application/json", Schemas.WebhookSubscriptionList}]
+  )
 
   def index(conn, _params) do
     json(conn, Enum.map(Webhooks.list_subscriptions(), &serialize/1))
   end
 
-  operation :show,
+  operation(:show,
     summary: "Get one webhook subscription",
     parameters: [id: [in: :path, type: :integer]],
     responses: [
       ok: {"Subscription", "application/json", Schemas.WebhookSubscription},
       not_found: {"Not found", "application/json", Schemas.NotFoundError}
     ]
+  )
 
   def show(conn, %{"id" => id}) do
     with {:ok, sub} <- fetch(id) do
@@ -40,7 +42,7 @@ defmodule SchedulingWeb.Api.WebhookSubscriptionController do
     end
   end
 
-  operation :create,
+  operation(:create,
     summary: "Create a webhook subscription",
     description:
       "On create the response includes the auto-generated `secret`. **This is the only opportunity to capture the secret.** Subsequent reads do not return it.",
@@ -49,6 +51,7 @@ defmodule SchedulingWeb.Api.WebhookSubscriptionController do
       created: {"Created", "application/json", Schemas.WebhookSubscriptionCreated},
       unprocessable_entity: {"Validation failed", "application/json", Schemas.ValidationError}
     ]
+  )
 
   def create(conn, %{"webhook_subscription" => params}) do
     with {:ok, sub} <- Webhooks.create_subscription(params) do
@@ -56,7 +59,7 @@ defmodule SchedulingWeb.Api.WebhookSubscriptionController do
     end
   end
 
-  operation :update,
+  operation(:update,
     summary: "Update a webhook subscription",
     parameters: [id: [in: :path, type: :integer]],
     request_body: {"Subscription attrs", "application/json", Schemas.WebhookSubscriptionRequest},
@@ -65,6 +68,7 @@ defmodule SchedulingWeb.Api.WebhookSubscriptionController do
       not_found: {"Not found", "application/json", Schemas.NotFoundError},
       unprocessable_entity: {"Validation failed", "application/json", Schemas.ValidationError}
     ]
+  )
 
   def update(conn, %{"id" => id, "webhook_subscription" => params}) do
     with {:ok, sub} <- fetch(id),
@@ -73,13 +77,14 @@ defmodule SchedulingWeb.Api.WebhookSubscriptionController do
     end
   end
 
-  operation :delete,
+  operation(:delete,
     summary: "Delete a webhook subscription",
     parameters: [id: [in: :path, type: :integer]],
     responses: [
       no_content: "Deleted",
       not_found: {"Not found", "application/json", Schemas.NotFoundError}
     ]
+  )
 
   def delete(conn, %{"id" => id}) do
     with {:ok, sub} <- fetch(id),

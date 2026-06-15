@@ -12,9 +12,9 @@ defmodule SchedulingWeb.Api.HandoffController do
 
   action_fallback SchedulingWeb.Api.FallbackController
 
-  tags ["handoffs"]
+  tags(["handoffs"])
 
-  operation :index,
+  operation(:index,
     summary: "List pending handoffs",
     description: "Returns pending handoffs. Pass `?office_id=N` to scope to one office.",
     parameters: [
@@ -26,6 +26,7 @@ defmodule SchedulingWeb.Api.HandoffController do
       ]
     ],
     responses: [ok: {"Handoffs", "application/json", Schemas.HandoffList}]
+  )
 
   def index(conn, params) do
     handoffs =
@@ -43,13 +44,14 @@ defmodule SchedulingWeb.Api.HandoffController do
     json(conn, Enum.map(handoffs, &serialize/1))
   end
 
-  operation :show,
+  operation(:show,
     summary: "Get one handoff",
     parameters: [id: [in: :path, description: "Handoff id", type: :integer]],
     responses: [
       ok: {"Handoff", "application/json", Schemas.Handoff},
       not_found: {"Not found", "application/json", Schemas.NotFoundError}
     ]
+  )
 
   def show(conn, %{"id" => id}) do
     with {:ok, handoff} <- fetch(id) do
@@ -57,9 +59,10 @@ defmodule SchedulingWeb.Api.HandoffController do
     end
   end
 
-  operation :acknowledge,
+  operation(:acknowledge,
     summary: "Acknowledge a pending handoff",
-    description: "Marks a pending handoff as acknowledged, stamping the time and (optionally) the user.",
+    description:
+      "Marks a pending handoff as acknowledged, stamping the time and (optionally) the user.",
     parameters: [id: [in: :path, description: "Handoff id", type: :integer]],
     request_body:
       {"Acknowledgement attrs", "application/json", Schemas.HandoffAcknowledgeRequest,
@@ -67,8 +70,10 @@ defmodule SchedulingWeb.Api.HandoffController do
     responses: [
       ok: {"Acknowledged", "application/json", Schemas.Handoff},
       not_found: {"Not found", "application/json", Schemas.NotFoundError},
-      unprocessable_entity: {"Already acknowledged or invalid", "application/json", Schemas.ValidationError}
+      unprocessable_entity:
+        {"Already acknowledged or invalid", "application/json", Schemas.ValidationError}
     ]
+  )
 
   def acknowledge(conn, %{"id" => id} = params) do
     opts =

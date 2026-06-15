@@ -13,9 +13,9 @@ defmodule SchedulingWeb.Api.QueueEntryController do
 
   action_fallback SchedulingWeb.Api.FallbackController
 
-  tags ["queue"]
+  tags(["queue"])
 
-  operation :index,
+  operation(:index,
     summary: "List queue entries",
     description:
       "By default lists waiting entries (highest priority first). Pass " <>
@@ -63,6 +63,7 @@ defmodule SchedulingWeb.Api.QueueEntryController do
       ]
     ],
     responses: [ok: {"Queue entries", "application/json", Schemas.QueueEntryList}]
+  )
 
   def index(conn, params) do
     filters = queue_filters(params)
@@ -110,13 +111,14 @@ defmodule SchedulingWeb.Api.QueueEntryController do
     end
   end
 
-  operation :show,
+  operation(:show,
     summary: "Get one queue entry",
     parameters: [id: [in: :path, description: "Queue entry id", type: :integer]],
     responses: [
       ok: {"Queue entry", "application/json", Schemas.QueueEntry},
       not_found: {"Not found", "application/json", Schemas.NotFoundError}
     ]
+  )
 
   def show(conn, %{"id" => id}) do
     with {:ok, entry} <- fetch(id) do
@@ -124,7 +126,7 @@ defmodule SchedulingWeb.Api.QueueEntryController do
     end
   end
 
-  operation :create,
+  operation(:create,
     summary: "Create a queue entry",
     description:
       "Adds a patient to the waiting queue. The matcher does NOT run here — " <>
@@ -134,6 +136,7 @@ defmodule SchedulingWeb.Api.QueueEntryController do
       created: {"Created", "application/json", Schemas.QueueEntry},
       unprocessable_entity: {"Validation failed", "application/json", Schemas.ValidationError}
     ]
+  )
 
   def create(conn, %{"queue_entry" => params} = body) do
     with {:ok, entry} <- Queue.create_entry(params, actor_opts(body)) do
@@ -141,7 +144,7 @@ defmodule SchedulingWeb.Api.QueueEntryController do
     end
   end
 
-  operation :accept,
+  operation(:accept,
     summary: "Accept a waiting entry into an office",
     description:
       "Runs the compliance check (intake forms required by the diagnosis), " <>
@@ -165,10 +168,12 @@ defmodule SchedulingWeb.Api.QueueEntryController do
       not_found: {"Not found", "application/json", Schemas.NotFoundError},
       conflict: {"No eligible office", "application/json", Schemas.NoEligibleOfficeError},
       unprocessable_entity:
-        {"Compliance failed or validation error", "application/json", Schemas.ComplianceFailedError},
+        {"Compliance failed or validation error", "application/json",
+         Schemas.ComplianceFailedError},
       service_unavailable:
         {"Intake-form system unreachable", "application/json", Schemas.ComplianceUnavailableError}
     ]
+  )
 
   def accept(conn, %{"id" => id} = params) do
     opts =
@@ -201,15 +206,17 @@ defmodule SchedulingWeb.Api.QueueEntryController do
     end
   end
 
-  operation :complete,
+  operation(:complete,
     summary: "Complete an in-service entry",
-    description: "Transitions the entry to `:completed` and frees the assigned office's intake capacity.",
+    description:
+      "Transitions the entry to `:completed` and frees the assigned office's intake capacity.",
     parameters: [id: [in: :path, description: "Queue entry id", type: :integer]],
     responses: [
       ok: {"Completed", "application/json", Schemas.QueueEntry},
       not_found: {"Not found", "application/json", Schemas.NotFoundError},
       unprocessable_entity: {"Validation failed", "application/json", Schemas.ValidationError}
     ]
+  )
 
   def complete(conn, %{"id" => id} = body) do
     with {:ok, entry} <- fetch(id),
@@ -223,7 +230,7 @@ defmodule SchedulingWeb.Api.QueueEntryController do
     |> Enum.reject(fn {_, v} -> is_nil(v) end)
   end
 
-  operation :requeue,
+  operation(:requeue,
     summary: "Re-queue an active entry",
     description:
       "Returns the entry to `:waiting`, freeing its assigned office's " <>
@@ -239,6 +246,7 @@ defmodule SchedulingWeb.Api.QueueEntryController do
       not_found: {"Not found", "application/json", Schemas.NotFoundError},
       unprocessable_entity: {"Validation failed", "application/json", Schemas.ValidationError}
     ]
+  )
 
   def requeue(conn, %{"id" => id} = params) do
     opts =
