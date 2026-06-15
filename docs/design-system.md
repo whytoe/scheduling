@@ -75,8 +75,19 @@ Built as HEEx function components; screens compose them.
 - New audit/lifecycle surfaces should reuse the audit-row + `timeline` pattern
   (see `/visit_events` and `/visits`).
 
-## Known follow-ups
+## Real-time board animations
 
-- Board per-item **arrival** / **acknowledge-pulse** animations: CSS is in place
-  (`.is-arriving`, `.is-acking`) but not yet wired (needs stream-based new-id
-  tracking to trigger only on genuinely new rows).
+- **Arrival** (`.is-arriving`): `BoardLive` tracks the ids present at the previous
+  load; on a *live* update (not first paint) the newly-appearing ids get the
+  one-shot `is-arriving` class, which plays the `arrive` keyframe. Each card
+  carries a stable `id` (`w-/i-/a-<id>`) so morphdom matches by id — the class
+  lands on the genuinely new card, not whatever shifted into its position. A
+  `:clear_arrived` timer removes the highlight after the animation. Reduced
+  motion is handled by the global `prefers-reduced-motion` rule (zeroes the
+  duration), so cards appear instantly.
+- **Acknowledge pulse** (`.is-acking`): the Acknowledge button chains
+  `JS.add_class("is-acking", to: "#i-<id>")` before pushing the event, so the
+  card pulses on click. Acknowledgement broadcasts over PubSub and removes the
+  card near-instantly across every board (multi-client consistency), so the
+  pulse is intentionally brief — the board never holds a stale card to finish an
+  animation.

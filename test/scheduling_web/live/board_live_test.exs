@@ -110,6 +110,25 @@ defmodule SchedulingWeb.BoardLiveTest do
       assert html =~ "Late Arrival"
       assert has_element?(live, "#board-waiting-count", "1")
     end
+
+    test "new sign-ins get the arrival animation; existing cards and first paint do not",
+         %{conn: conn} do
+      _office = office_fixture("Room A", 3, [])
+      early = waiting_entry("Early Bird", [])
+
+      {:ok, live, _html} = live(conn, ~p"/board")
+      # No arrival animation on the initial paint.
+      refute has_element?(live, "#w-#{early.id}.is-arriving")
+
+      # A new patient signs in after mount and the board is notified live.
+      late = waiting_entry("Late Arrival", [])
+      Phoenix.PubSub.broadcast(Scheduling.PubSub, Queue.board_topic(), {:board_changed, :arrival})
+      render(live)
+
+      # Only the newly-arrived card animates in.
+      assert has_element?(live, "#w-#{late.id}.is-arriving")
+      refute has_element?(live, "#w-#{early.id}.is-arriving")
+    end
   end
 
   describe "completion + re-queue actions" do

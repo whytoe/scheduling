@@ -27,7 +27,14 @@ defmodule SchedulingWeb.BoardLive.Index do
      socket
      |> assign(:page_title, "Board")
      |> assign(:announcement, "")
-     |> load_board()}
+     |> assign(:arrived_waiting, [])
+     |> assign(:arrived_incoming, [])
+     |> assign(:arrived_active, [])
+     |> assign(:prev_waiting_ids, [])
+     |> assign(:prev_incoming_ids, [])
+     |> assign(:prev_active_ids, [])
+     # No arrival animation on first paint — only genuine live arrivals animate.
+     |> load_board(false)}
   end
 
   # Politely announce board changes to screen readers without stealing focus.
@@ -35,15 +42,24 @@ defmodule SchedulingWeb.BoardLive.Index do
 
   @impl true
   def handle_info({:board_changed, _event}, socket) do
-    {:noreply, load_board(socket)}
+    {:noreply, load_board(socket, true)}
   end
 
   def handle_info({:handoff_created, _handoff}, socket) do
-    {:noreply, load_board(socket)}
+    {:noreply, load_board(socket, true)}
   end
 
   def handle_info({:handoff_acknowledged, _handoff}, socket) do
-    {:noreply, load_board(socket)}
+    {:noreply, load_board(socket, true)}
+  end
+
+  # Clears the one-shot arrival highlight once the animation has played.
+  def handle_info(:clear_arrived, socket) do
+    {:noreply,
+     socket
+     |> assign(:arrived_waiting, [])
+     |> assign(:arrived_incoming, [])
+     |> assign(:arrived_active, [])}
   end
 
   @impl true
@@ -56,7 +72,7 @@ defmodule SchedulingWeb.BoardLive.Index do
          socket
          |> put_flash(:info, "Completed #{patient_name(completed)} — office capacity freed.")
          |> announce("Completed #{patient_name(completed)}, capacity freed.")
-         |> load_board()}
+         |> load_board(true)}
 
       {:error, _changeset} ->
         {:noreply,
@@ -76,7 +92,7 @@ defmodule SchedulingWeb.BoardLive.Index do
            "Re-queued #{patient_name(requeued)} for another service — office capacity freed."
          )
          |> announce("Re-queued #{patient_name(requeued)} for another service.")
-         |> load_board()}
+         |> load_board(true)}
 
       {:error, _changeset} ->
         {:noreply,
@@ -96,7 +112,7 @@ defmodule SchedulingWeb.BoardLive.Index do
            "Acknowledged #{handoff_patient(acknowledged)} — handoff cleared."
          )
          |> announce("Acknowledged #{handoff_patient(acknowledged)} into service.")
-         |> load_board()}
+         |> load_board(true)}
 
       {:error, _changeset} ->
         {:noreply,
@@ -108,7 +124,7 @@ defmodule SchedulingWeb.BoardLive.Index do
     end
   end
 
-  defp load_board(socket) do
+  defp load_board(socket, animate?) do
     loads = Queue.current_loads()
     pending = Handoffs.list_pending()
     incoming_by_office = Enum.group_by(pending, & &1.office_id)
@@ -163,6 +179,21 @@ defmodule SchedulingWeb.BoardLive.Index do
         }
       end)
 
+    # Newly-appearing ids since the last load get the one-shot arrival
+    # highlight; adding `is-arriving` to a freshly-rendered card plays the
+    # animation, while existing cards are left untouched.
+    waiting_ids = Enum.map(waiting, & &1.id)
+    incoming_ids = Enum.map(incoming, & &1.id)
+    active_ids = Enum.map(active, & &1.id)
+
+    arrived_w = if animate?, do: waiting_ids -- socket.assigns.prev_waiting_ids, else: []
+    arrived_i = if animate?, do: incoming_ids -- socket.assigns.prev_incoming_ids, else: []
+    arrived_a = if animate?, do: active_ids -- socket.assigns.prev_active_ids, else: []
+
+    if arrived_w != [] or arrived_i != [] or arrived_a != [] do
+      Process.send_after(self(), :clear_arrived, 450)
+    end
+
     socket
     |> assign(:offices, offices)
     |> assign(:incoming, incoming)
@@ -172,6 +203,12 @@ defmodule SchedulingWeb.BoardLive.Index do
     |> assign(:active, active)
     |> assign(:active_count, length(active))
     |> assign(:alerts, routing_alerts(waiting, offices))
+    |> assign(:arrived_waiting, arrived_w)
+    |> assign(:arrived_incoming, arrived_i)
+    |> assign(:arrived_active, arrived_a)
+    |> assign(:prev_waiting_ids, waiting_ids)
+    |> assign(:prev_incoming_ids, incoming_ids)
+    |> assign(:prev_active_ids, active_ids)
   end
 
   # Surfaces waiting patients who require a capability NO office provides at all
@@ -270,7 +307,11 @@ defmodule SchedulingWeb.BoardLive.Index do
             </.empty_state>
           </div>
           <div :if={@waiting != []} id="board-waiting" class="stack">
-            <div :for={p <- @waiting} class="pcard">
+            <div
+              :for={p <- @waiting}
+              id={"w-#{p.id}"}
+              class={["pcard", p.id in @arrived_waiting && "is-arriving"]}
+            >
               <.priority_tag priority={p.priority} />
               <div class="pcard__main">
                 <div class="pcard__name">{p.name}</div>
@@ -303,7 +344,12 @@ defmodule SchedulingWeb.BoardLive.Index do
             </.empty_state>
           </div>
           <div :if={@incoming != []} id="board-incoming" class="stack">
-            <div :for={p <- @incoming} class="pcard" style="border-color:var(--st-assigned-line)">
+            <div
+              :for={p <- @incoming}
+              id={"i-#{p.id}"}
+              class={["pcard", p.id in @arrived_incoming && "is-arriving"]}
+              style="border-color:var(--st-assigned-line)"
+            >
               <div class="pcard__main">
                 <div class="pcard__name">{p.name}</div>
                 <div class="pcard__meta">
@@ -313,7 +359,10 @@ defmodule SchedulingWeb.BoardLive.Index do
               </div>
               <.button
                 variant="clinical"
-                phx-click={JS.push("acknowledge_handoff", value: %{id: p.id})}
+                phx-click={
+                  JS.add_class("is-acking", to: "#i-#{p.id}")
+                  |> JS.push("acknowledge_handoff", value: %{id: p.id})
+                }
                 aria-label={"Acknowledge #{p.name}"}
               >
                 <.icon name="hero-hand-raised" class="size-5" />Acknowledge
@@ -360,7 +409,11 @@ defmodule SchedulingWeb.BoardLive.Index do
               </.empty_state>
             </div>
             <div :if={@active != []} id="board-active" class="stack">
-              <div :for={p <- @active} class="pcard">
+              <div
+                :for={p <- @active}
+                id={"a-#{p.id}"}
+                class={["pcard", p.id in @arrived_active && "is-arriving"]}
+              >
                 <div class="pcard__main">
                   <div class="pcard__name">{p.name}</div>
                   <div class="pcard__meta">
