@@ -302,6 +302,26 @@ defmodule SchedulingWeb.CoreComponents do
     """
   end
 
+  @doc "Renders translated validation errors for a bare (non-`.input`) form field."
+  attr :field, Phoenix.HTML.FormField, required: true
+
+  def field_errors(assigns) do
+    errors =
+      if Phoenix.Component.used_input?(assigns.field), do: assigns.field.errors, else: []
+
+    assigns = assign(assigns, :errors, Enum.map(errors, &translate_error/1))
+
+    ~H"""
+    <p
+      :for={msg <- @errors}
+      class="mt-1.5 flex gap-2 items-center text-sm"
+      style="color:var(--st-error-fg)"
+    >
+      <.icon name="hero-exclamation-circle" class="size-5" />{msg}
+    </p>
+    """
+  end
+
   # Helper used by inputs to generate form errors
   defp error(assigns) do
     ~H"""

@@ -135,9 +135,13 @@ defmodule SchedulingWeb.OfficeLiveTest do
 
       assert render(live) =~ "Room E"
 
-      live |> element("a", "Delete") |> render_click()
+      # Delete opens a confirmation dialog naming the consequence; confirm it.
+      live |> element("button[aria-label='Delete Room E']") |> render_click()
+      assert render(live) =~ "will be removed"
 
-      refute render(live) =~ "Room E"
+      live |> element("#delete-office button", "Delete office") |> render_click()
+
+      refute has_element?(live, "#offices", "Room E")
       assert Offices.list_offices() == []
     end
   end
