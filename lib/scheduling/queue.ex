@@ -304,7 +304,8 @@ defmodule Scheduling.Queue do
   Returns `{:ok, entry}` with `:patient` and `:assigned_office` preloaded, or
   `{:error, changeset}` if the entry was not in an active status.
   """
-  @spec complete(QueueEntry.t(), keyword()) :: {:ok, QueueEntry.t()} | {:error, Ecto.Changeset.t()}
+  @spec complete(QueueEntry.t(), keyword()) ::
+          {:ok, QueueEntry.t()} | {:error, Ecto.Changeset.t()}
   def complete(%QueueEntry{} = entry, opts \\ []) do
     Ecto.Multi.new()
     |> Ecto.Multi.update(:entry, QueueEntry.completion_changeset(entry))

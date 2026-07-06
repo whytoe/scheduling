@@ -15,17 +15,26 @@ defmodule SchedulingWeb.Schemas do
     OpenApiSpex.schema(%{
       title: "NotFoundError",
       type: :object,
-      properties: %{error: %Schema{type: :string, description: "Human-readable error message"}},
+      properties: %{
+        error: %Schema{
+          type: :object,
+          properties: %{
+            code: %Schema{type: :string, enum: ["not_found"]},
+            message: %Schema{type: :string, description: "Human-readable summary"}
+          },
+          required: [:code, :message]
+        }
+      },
       required: [:error],
-      example: %{"error" => "not_found"}
+      example: %{"error" => %{"code" => "not_found", "message" => "Resource not found"}}
     })
   end
 
   defmodule ValidationError do
     @moduledoc """
-    Returned with HTTP 422 when request body fails validation. `errors` is a
-    map from field name to a list of failure messages — same shape Ecto
-    changeset traversal produces.
+    Returned with HTTP 422 when the request body fails validation. The
+    field → messages map (the shape Ecto changeset traversal produces) is
+    carried under `error.details.fields`.
     """
     require OpenApiSpex
     alias OpenApiSpex.Schema
@@ -34,13 +43,34 @@ defmodule SchedulingWeb.Schemas do
       title: "ValidationError",
       type: :object,
       properties: %{
-        errors: %Schema{
+        error: %Schema{
           type: :object,
-          additionalProperties: %Schema{type: :array, items: %Schema{type: :string}}
+          properties: %{
+            code: %Schema{type: :string, enum: ["validation_failed"]},
+            message: %Schema{type: :string},
+            details: %Schema{
+              type: :object,
+              properties: %{
+                fields: %Schema{
+                  type: :object,
+                  additionalProperties: %Schema{type: :array, items: %Schema{type: :string}},
+                  description: "Map of field name to a list of failure messages"
+                }
+              },
+              required: [:fields]
+            }
+          },
+          required: [:code, :message, :details]
         }
       },
-      required: [:errors],
-      example: %{"errors" => %{"name" => ["can't be blank"]}}
+      required: [:error],
+      example: %{
+        "error" => %{
+          "code" => "validation_failed",
+          "message" => "One or more fields are invalid",
+          "details" => %{"fields" => %{"name" => ["can't be blank"]}}
+        }
+      }
     })
   end
 
@@ -54,8 +84,15 @@ defmodule SchedulingWeb.Schemas do
       type: :object,
       properties: %{
         id: %Schema{type: :integer, description: "Server-assigned id"},
-        name: %Schema{type: :string, description: "Unique name, e.g. \"Computed Tomography (CT)\""},
-        description: %Schema{type: :string, nullable: true, description: "Optional free-form description"},
+        name: %Schema{
+          type: :string,
+          description: "Unique name, e.g. \"Computed Tomography (CT)\""
+        },
+        description: %Schema{
+          type: :string,
+          nullable: true,
+          description: "Optional free-form description"
+        },
         inserted_at: %Schema{type: :string, format: :"date-time"},
         updated_at: %Schema{type: :string, format: :"date-time"}
       },
@@ -116,7 +153,11 @@ defmodule SchedulingWeb.Schemas do
       properties: %{
         id: %Schema{type: :integer},
         name: %Schema{type: :string, description: "Unique display name"},
-        code: %Schema{type: :string, nullable: true, description: "Optional unique short code (e.g. \"DX-FRAC\")"},
+        code: %Schema{
+          type: :string,
+          nullable: true,
+          description: "Optional unique short code (e.g. \"DX-FRAC\")"
+        },
         capabilities: %Schema{
           type: :array,
           items: SchedulingWeb.Schemas.Capability,
@@ -125,7 +166,8 @@ defmodule SchedulingWeb.Schemas do
         required_form_types: %Schema{
           type: :array,
           items: %Schema{type: :string},
-          description: "Intake form types that must be completed (status=completed AND not flagged) before a patient with this diagnosis can be assigned to an office."
+          description:
+            "Intake form types that must be completed (status=completed AND not flagged) before a patient with this diagnosis can be assigned to an office."
         },
         inserted_at: %Schema{type: :string, format: :"date-time"},
         updated_at: %Schema{type: :string, format: :"date-time"}
@@ -146,6 +188,7 @@ defmodule SchedulingWeb.Schemas do
   defmodule DiagnosisList do
     @moduledoc "A list of diagnoses."
     require OpenApiSpex
+
     OpenApiSpex.schema(%{
       title: "DiagnosisList",
       type: :array,
@@ -166,11 +209,16 @@ defmodule SchedulingWeb.Schemas do
           type: :object,
           properties: %{
             name: %Schema{type: :string, description: "Unique display name (1–255 chars)"},
-            code: %Schema{type: :string, nullable: true, description: "Optional unique short code"},
+            code: %Schema{
+              type: :string,
+              nullable: true,
+              description: "Optional unique short code"
+            },
             capability_ids: %Schema{
               type: :array,
               items: %Schema{type: :integer},
-              description: "Capability ids that become this diagnosis's default required capabilities. Omit to leave existing associations unchanged; pass [] to clear them."
+              description:
+                "Capability ids that become this diagnosis's default required capabilities. Omit to leave existing associations unchanged; pass [] to clear them."
             },
             required_form_types: %Schema{
               type: :array,
@@ -182,7 +230,14 @@ defmodule SchedulingWeb.Schemas do
         }
       },
       required: [:diagnosis],
-      example: %{"diagnosis" => %{"name" => "Stroke Workup", "code" => "DX-STRK", "capability_ids" => [1, 2], "required_form_types" => ["stroke-consent"]}}
+      example: %{
+        "diagnosis" => %{
+          "name" => "Stroke Workup",
+          "code" => "DX-STRK",
+          "capability_ids" => [1, 2],
+          "required_form_types" => ["stroke-consent"]
+        }
+      }
     })
   end
 
@@ -197,9 +252,24 @@ defmodule SchedulingWeb.Schemas do
       properties: %{
         id: %Schema{type: :integer},
         name: %Schema{type: :string, description: "Display name"},
-        client_id: %Schema{type: :string, format: :uuid, description: "Canonical scheduling-owned UUID. Auto-generated if not supplied. Used as the inter-service reference; not the EMR record id."},
-        external_id: %Schema{type: :string, nullable: true, description: "Optional id assigned by the upstream check-in / queueing app"},
-        intake_patient_id: %Schema{type: :string, format: :uuid, nullable: true, description: "UUID this patient has in the intake-form system. Used at accept time to look up their completed forms."},
+        client_id: %Schema{
+          type: :string,
+          format: :uuid,
+          description:
+            "Canonical scheduling-owned UUID. Auto-generated if not supplied. Used as the inter-service reference; not the EMR record id."
+        },
+        external_id: %Schema{
+          type: :string,
+          nullable: true,
+          description: "Optional id assigned by the upstream check-in / queueing app"
+        },
+        intake_patient_id: %Schema{
+          type: :string,
+          format: :uuid,
+          nullable: true,
+          description:
+            "UUID this patient has in the intake-form system. Used at accept time to look up their completed forms."
+        },
         inserted_at: %Schema{type: :string, format: :"date-time"},
         updated_at: %Schema{type: :string, format: :"date-time"}
       },
@@ -219,7 +289,12 @@ defmodule SchedulingWeb.Schemas do
   defmodule PatientList do
     @moduledoc "A list of patients."
     require OpenApiSpex
-    OpenApiSpex.schema(%{title: "PatientList", type: :array, items: SchedulingWeb.Schemas.Patient})
+
+    OpenApiSpex.schema(%{
+      title: "PatientList",
+      type: :array,
+      items: SchedulingWeb.Schemas.Patient
+    })
   end
 
   defmodule PatientRequest do
@@ -235,15 +310,35 @@ defmodule SchedulingWeb.Schemas do
           type: :object,
           properties: %{
             name: %Schema{type: :string, description: "Display name (1–255 chars)"},
-            client_id: %Schema{type: :string, format: :uuid, nullable: true, description: "Canonical UUID. Optional on create: server generates one if omitted."},
-            external_id: %Schema{type: :string, nullable: true, description: "Optional unique check-in id"},
-            intake_patient_id: %Schema{type: :string, format: :uuid, nullable: true, description: "Optional unique intake-form-system UUID"}
+            client_id: %Schema{
+              type: :string,
+              format: :uuid,
+              nullable: true,
+              description: "Canonical UUID. Optional on create: server generates one if omitted."
+            },
+            external_id: %Schema{
+              type: :string,
+              nullable: true,
+              description: "Optional unique check-in id"
+            },
+            intake_patient_id: %Schema{
+              type: :string,
+              format: :uuid,
+              nullable: true,
+              description: "Optional unique intake-form-system UUID"
+            }
           },
           required: [:name]
         }
       },
       required: [:patient],
-      example: %{"patient" => %{"name" => "Jane Doe", "external_id" => "checkin-7a3f", "intake_patient_id" => "5e1f2c8a-1d3b-4ee9-9a64-8e3b6cf21e10"}}
+      example: %{
+        "patient" => %{
+          "name" => "Jane Doe",
+          "external_id" => "checkin-7a3f",
+          "intake_patient_id" => "5e1f2c8a-1d3b-4ee9-9a64-8e3b6cf21e10"
+        }
+      }
     })
   end
 
@@ -258,7 +353,11 @@ defmodule SchedulingWeb.Schemas do
       properties: %{
         id: %Schema{type: :integer},
         name: %Schema{type: :string, description: "Unique display name"},
-        intake_capacity: %Schema{type: :integer, minimum: 0, description: "Concurrent patient capacity"},
+        intake_capacity: %Schema{
+          type: :integer,
+          minimum: 0,
+          description: "Concurrent patient capacity"
+        },
         capabilities: %Schema{
           type: :array,
           items: SchedulingWeb.Schemas.Capability,
@@ -302,14 +401,17 @@ defmodule SchedulingWeb.Schemas do
             capability_ids: %Schema{
               type: :array,
               items: %Schema{type: :integer},
-              description: "Capability ids this office provides. Omit to leave associations unchanged; pass [] to clear them."
+              description:
+                "Capability ids this office provides. Omit to leave associations unchanged; pass [] to clear them."
             }
           },
           required: [:name, :intake_capacity]
         }
       },
       required: [:office],
-      example: %{"office" => %{"name" => "Room 101", "intake_capacity" => 2, "capability_ids" => [1, 2]}}
+      example: %{
+        "office" => %{"name" => "Room 101", "intake_capacity" => 2, "capability_ids" => [1, 2]}
+      }
     })
   end
 
@@ -352,7 +454,11 @@ defmodule SchedulingWeb.Schemas do
           type: :object,
           properties: %{
             patient_id: %Schema{type: :integer, description: "Patient whose encounter this is"},
-            started_at: %Schema{type: :string, format: :"date-time", description: "Defaults to now if omitted"}
+            started_at: %Schema{
+              type: :string,
+              format: :"date-time",
+              description: "Defaults to now if omitted"
+            }
           },
           required: [:patient_id]
         }
@@ -374,25 +480,44 @@ defmodule SchedulingWeb.Schemas do
         status: %Schema{
           type: :string,
           enum: ["waiting", "assigned", "in_service", "completed"],
-          description: "Lifecycle status; entries in `assigned` and `in_service` consume office capacity"
+          description:
+            "Lifecycle status; entries in `assigned` and `in_service` consume office capacity"
         },
         priority: %Schema{type: :integer, minimum: 0, description: "Higher = served sooner"},
         patient: %Schema{nullable: true, allOf: [SchedulingWeb.Schemas.Patient]},
         patient_id: %Schema{type: :integer},
         diagnosis_id: %Schema{type: :integer, nullable: true},
         assigned_office_id: %Schema{type: :integer, nullable: true},
-        visit_id: %Schema{type: :integer, nullable: true, description: "Parent Visit this entry belongs to (set when created via the queueing service's sign-in flow)"},
+        visit_id: %Schema{
+          type: :integer,
+          nullable: true,
+          description:
+            "Parent Visit this entry belongs to (set when created via the queueing service's sign-in flow)"
+        },
         required_capabilities: %Schema{type: :array, items: SchedulingWeb.Schemas.Capability},
         inserted_at: %Schema{type: :string, format: :"date-time"},
         updated_at: %Schema{type: :string, format: :"date-time"}
       },
-      required: [:id, :status, :priority, :patient_id, :required_capabilities, :inserted_at, :updated_at]
+      required: [
+        :id,
+        :status,
+        :priority,
+        :patient_id,
+        :required_capabilities,
+        :inserted_at,
+        :updated_at
+      ]
     })
   end
 
   defmodule QueueEntryList do
     require OpenApiSpex
-    OpenApiSpex.schema(%{title: "QueueEntryList", type: :array, items: SchedulingWeb.Schemas.QueueEntry})
+
+    OpenApiSpex.schema(%{
+      title: "QueueEntryList",
+      type: :array,
+      items: SchedulingWeb.Schemas.QueueEntry
+    })
   end
 
   defmodule QueueEntryCreateRequest do
@@ -408,13 +533,22 @@ defmodule SchedulingWeb.Schemas do
           type: :object,
           properties: %{
             patient_id: %Schema{type: :integer, description: "Patient this entry represents"},
-            diagnosis_id: %Schema{type: :integer, nullable: true, description: "Optional diagnosis"},
-            visit_id: %Schema{type: :integer, nullable: true, description: "Parent Visit. Set by the queueing service's sign-in flow."},
+            diagnosis_id: %Schema{
+              type: :integer,
+              nullable: true,
+              description: "Optional diagnosis"
+            },
+            visit_id: %Schema{
+              type: :integer,
+              nullable: true,
+              description: "Parent Visit. Set by the queueing service's sign-in flow."
+            },
             priority: %Schema{type: :integer, minimum: 0, description: "Defaults to 0"},
             required_capability_ids: %Schema{
               type: :array,
               items: %Schema{type: :integer},
-              description: "Capability ids this patient requires. Set explicitly; the diagnosis default isn't auto-applied yet."
+              description:
+                "Capability ids this patient requires. Set explicitly; the diagnosis default isn't auto-applied yet."
             }
           },
           required: [:patient_id]
@@ -433,7 +567,11 @@ defmodule SchedulingWeb.Schemas do
       title: "QueueEntryAcceptRequest",
       type: :object,
       properties: %{
-        accepted_by: %Schema{type: :string, nullable: true, description: "User attribution recorded in the routing decision audit log"}
+        accepted_by: %Schema{
+          type: :string,
+          nullable: true,
+          description: "User attribution recorded in the routing decision audit log"
+        }
       }
     })
   end
@@ -450,7 +588,8 @@ defmodule SchedulingWeb.Schemas do
         required_capability_ids: %Schema{
           type: :array,
           items: %Schema{type: :integer},
-          description: "Capabilities the new service requires. Omit to keep the current set; pass [] to clear."
+          description:
+            "Capabilities the new service requires. Omit to keep the current set; pass [] to clear."
         }
       }
     })
@@ -465,15 +604,35 @@ defmodule SchedulingWeb.Schemas do
       title: "ComplianceFailedError",
       type: :object,
       properties: %{
-        error: %Schema{type: :string, enum: ["compliance_failed"]},
-        missing_form_types: %Schema{
-          type: :array,
-          items: %Schema{type: :string},
-          description: "Form types the patient is missing a completed-and-not-flagged response for"
+        error: %Schema{
+          type: :object,
+          properties: %{
+            code: %Schema{type: :string, enum: ["compliance_failed"]},
+            message: %Schema{type: :string},
+            details: %Schema{
+              type: :object,
+              properties: %{
+                missing_form_types: %Schema{
+                  type: :array,
+                  items: %Schema{type: :string},
+                  description:
+                    "Form types the patient is missing a completed-and-not-flagged response for"
+                }
+              },
+              required: [:missing_form_types]
+            }
+          },
+          required: [:code, :message, :details]
         }
       },
-      required: [:error, :missing_form_types],
-      example: %{"error" => "compliance_failed", "missing_form_types" => ["stroke-consent"]}
+      required: [:error],
+      example: %{
+        "error" => %{
+          "code" => "compliance_failed",
+          "message" => "The patient hasn't completed every required intake form",
+          "details" => %{"missing_form_types" => ["stroke-consent"]}
+        }
+      }
     })
   end
 
@@ -486,11 +645,34 @@ defmodule SchedulingWeb.Schemas do
       title: "ComplianceUnavailableError",
       type: :object,
       properties: %{
-        error: %Schema{type: :string, enum: ["compliance_unavailable"]},
-        reason: %Schema{type: :string, description: "Inspect of the underlying transport error"}
+        error: %Schema{
+          type: :object,
+          properties: %{
+            code: %Schema{type: :string, enum: ["compliance_unavailable"]},
+            message: %Schema{type: :string},
+            details: %Schema{
+              type: :object,
+              properties: %{
+                reason: %Schema{
+                  type: :string,
+                  description: "Inspect of the underlying transport error"
+                }
+              },
+              required: [:reason]
+            }
+          },
+          required: [:code, :message, :details]
+        }
       },
       required: [:error],
-      example: %{"error" => "compliance_unavailable", "reason" => "{:http_status, 401, %{...}}"}
+      example: %{
+        "error" => %{
+          "code" => "compliance_unavailable",
+          "message" =>
+            "The intake-form system is unreachable; booking is blocked until it recovers",
+          "details" => %{"reason" => "{:http_status, 401, %{...}}"}
+        }
+      }
     })
   end
 
@@ -502,9 +684,23 @@ defmodule SchedulingWeb.Schemas do
     OpenApiSpex.schema(%{
       title: "NoEligibleOfficeError",
       type: :object,
-      properties: %{error: %Schema{type: :string, enum: ["no_eligible_office"]}},
+      properties: %{
+        error: %Schema{
+          type: :object,
+          properties: %{
+            code: %Schema{type: :string, enum: ["no_eligible_office"]},
+            message: %Schema{type: :string}
+          },
+          required: [:code, :message]
+        }
+      },
       required: [:error],
-      example: %{"error" => "no_eligible_office"}
+      example: %{
+        "error" => %{
+          "code" => "no_eligible_office",
+          "message" => "No office both provides the required capabilities and has free capacity"
+        }
+      }
     })
   end
 
@@ -519,8 +715,16 @@ defmodule SchedulingWeb.Schemas do
       properties: %{
         id: %Schema{type: :integer},
         status: %Schema{type: :string, enum: ["pending", "acknowledged"]},
-        patient_name: %Schema{type: :string, nullable: true, description: "Snapshotted at handoff time"},
-        office_name: %Schema{type: :string, nullable: true, description: "Snapshotted at handoff time"},
+        patient_name: %Schema{
+          type: :string,
+          nullable: true,
+          description: "Snapshotted at handoff time"
+        },
+        office_name: %Schema{
+          type: :string,
+          nullable: true,
+          description: "Snapshotted at handoff time"
+        },
         required_capabilities: %Schema{
           type: :array,
           items: %Schema{type: :string},
@@ -540,7 +744,12 @@ defmodule SchedulingWeb.Schemas do
 
   defmodule HandoffList do
     require OpenApiSpex
-    OpenApiSpex.schema(%{title: "HandoffList", type: :array, items: SchedulingWeb.Schemas.Handoff})
+
+    OpenApiSpex.schema(%{
+      title: "HandoffList",
+      type: :array,
+      items: SchedulingWeb.Schemas.Handoff
+    })
   end
 
   defmodule HandoffAcknowledgeRequest do
@@ -551,7 +760,11 @@ defmodule SchedulingWeb.Schemas do
       title: "HandoffAcknowledgeRequest",
       type: :object,
       properties: %{
-        acknowledged_by: %Schema{type: :string, nullable: true, description: "User attribution stamped on the handoff"}
+        acknowledged_by: %Schema{
+          type: :string,
+          nullable: true,
+          description: "User attribution stamped on the handoff"
+        }
       }
     })
   end
@@ -566,13 +779,25 @@ defmodule SchedulingWeb.Schemas do
       type: :object,
       properties: %{
         id: %Schema{type: :integer},
-        type: %Schema{type: :string, description: "Event type, e.g. visit.created, queue_entry.completed, handoff.acknowledged"},
+        type: %Schema{
+          type: :string,
+          description:
+            "Event type, e.g. visit.created, queue_entry.completed, handoff.acknowledged"
+        },
         visit_id: %Schema{type: :integer, nullable: true},
         queue_entry_id: %Schema{type: :integer, nullable: true},
         patient_id: %Schema{type: :integer, nullable: true},
         handoff_id: %Schema{type: :integer, nullable: true},
-        actor_type: %Schema{type: :string, nullable: true, description: "e.g. user, service, system"},
-        actor_id: %Schema{type: :string, nullable: true, description: "Subject id within actor_type"},
+        actor_type: %Schema{
+          type: :string,
+          nullable: true,
+          description: "e.g. user, service, system"
+        },
+        actor_id: %Schema{
+          type: :string,
+          nullable: true,
+          description: "Subject id within actor_type"
+        },
         payload: %Schema{type: :object, description: "Event-specific extras"},
         occurred_at: %Schema{type: :string, format: :"date-time"},
         inserted_at: %Schema{type: :string, format: :"date-time"},
@@ -584,7 +809,12 @@ defmodule SchedulingWeb.Schemas do
 
   defmodule VisitEventList do
     require OpenApiSpex
-    OpenApiSpex.schema(%{title: "VisitEventList", type: :array, items: SchedulingWeb.Schemas.VisitEvent})
+
+    OpenApiSpex.schema(%{
+      title: "VisitEventList",
+      type: :array,
+      items: SchedulingWeb.Schemas.VisitEvent
+    })
   end
 
   defmodule RoutingDecision do
@@ -597,11 +827,27 @@ defmodule SchedulingWeb.Schemas do
       type: :object,
       properties: %{
         id: %Schema{type: :integer},
-        patient_name: %Schema{type: :string, nullable: true, description: "Snapshotted patient name"},
-        chosen_office_name: %Schema{type: :string, nullable: true, description: "Snapshotted office name; nil when no office was eligible"},
+        patient_name: %Schema{
+          type: :string,
+          nullable: true,
+          description: "Snapshotted patient name"
+        },
+        chosen_office_name: %Schema{
+          type: :string,
+          nullable: true,
+          description: "Snapshotted office name; nil when no office was eligible"
+        },
         required_capabilities: %Schema{type: :array, items: %Schema{type: :string}},
-        eligible_offices: %Schema{type: :array, items: %Schema{type: :string}, description: "Names of offices that provided every required capability"},
-        rationale: %Schema{type: :string, nullable: true, description: "Human-readable explanation of why this office was chosen (or none)"},
+        eligible_offices: %Schema{
+          type: :array,
+          items: %Schema{type: :string},
+          description: "Names of offices that provided every required capability"
+        },
+        rationale: %Schema{
+          type: :string,
+          nullable: true,
+          description: "Human-readable explanation of why this office was chosen (or none)"
+        },
         accepted_by: %Schema{type: :string, nullable: true},
         patient_id: %Schema{type: :integer, nullable: true},
         chosen_office_id: %Schema{type: :integer, nullable: true},
@@ -615,7 +861,12 @@ defmodule SchedulingWeb.Schemas do
 
   defmodule RoutingDecisionList do
     require OpenApiSpex
-    OpenApiSpex.schema(%{title: "RoutingDecisionList", type: :array, items: SchedulingWeb.Schemas.RoutingDecision})
+
+    OpenApiSpex.schema(%{
+      title: "RoutingDecisionList",
+      type: :array,
+      items: SchedulingWeb.Schemas.RoutingDecision
+    })
   end
 
   defmodule OfficeWithLoad do
@@ -631,12 +882,24 @@ defmodule SchedulingWeb.Schemas do
         name: %Schema{type: :string},
         intake_capacity: %Schema{type: :integer},
         capabilities: %Schema{type: :array, items: SchedulingWeb.Schemas.Capability},
-        load: %Schema{type: :integer, description: "Count of active queue entries currently consuming this office's capacity"},
+        load: %Schema{
+          type: :integer,
+          description: "Count of active queue entries currently consuming this office's capacity"
+        },
         free: %Schema{type: :integer, description: "intake_capacity - load (never negative)"},
         inserted_at: %Schema{type: :string, format: :"date-time"},
         updated_at: %Schema{type: :string, format: :"date-time"}
       },
-      required: [:id, :name, :intake_capacity, :capabilities, :load, :free, :inserted_at, :updated_at]
+      required: [
+        :id,
+        :name,
+        :intake_capacity,
+        :capabilities,
+        :load,
+        :free,
+        :inserted_at,
+        :updated_at
+      ]
     })
   end
 
@@ -649,8 +912,16 @@ defmodule SchedulingWeb.Schemas do
       title: "BoardSnapshot",
       type: :object,
       properties: %{
-        waiting: %Schema{type: :array, items: SchedulingWeb.Schemas.QueueEntry, description: "Waiting queue, highest priority first"},
-        active: %Schema{type: :array, items: SchedulingWeb.Schemas.QueueEntry, description: "Entries currently consuming office capacity"},
+        waiting: %Schema{
+          type: :array,
+          items: SchedulingWeb.Schemas.QueueEntry,
+          description: "Waiting queue, highest priority first"
+        },
+        active: %Schema{
+          type: :array,
+          items: SchedulingWeb.Schemas.QueueEntry,
+          description: "Entries currently consuming office capacity"
+        },
         offices: %Schema{type: :array, items: SchedulingWeb.Schemas.OfficeWithLoad},
         pending_handoffs: %Schema{type: :array, items: SchedulingWeb.Schemas.Handoff},
         generated_at: %Schema{type: :string, format: :"date-time"}
@@ -673,7 +944,8 @@ defmodule SchedulingWeb.Schemas do
         event_types: %Schema{
           type: :array,
           items: %Schema{type: :string},
-          description: "Event types to receive (empty = all). e.g. [\"visit.created\", \"queue_entry.completed\"]"
+          description:
+            "Event types to receive (empty = all). e.g. [\"visit.created\", \"queue_entry.completed\"]"
         },
         active: %Schema{type: :boolean},
         description: %Schema{type: :string, nullable: true},
@@ -698,7 +970,8 @@ defmodule SchedulingWeb.Schemas do
           properties: %{
             secret: %Schema{
               type: :string,
-              description: "HMAC key used to sign delivery bodies. STORED ONLY ONCE — copy now; subsequent GETs do not include it. Rotation = new subscription."
+              description:
+                "HMAC key used to sign delivery bodies. STORED ONLY ONCE — copy now; subsequent GETs do not include it. Rotation = new subscription."
             }
           },
           required: [:secret]
@@ -709,7 +982,12 @@ defmodule SchedulingWeb.Schemas do
 
   defmodule WebhookSubscriptionList do
     require OpenApiSpex
-    OpenApiSpex.schema(%{title: "WebhookSubscriptionList", type: :array, items: SchedulingWeb.Schemas.WebhookSubscription})
+
+    OpenApiSpex.schema(%{
+      title: "WebhookSubscriptionList",
+      type: :array,
+      items: SchedulingWeb.Schemas.WebhookSubscription
+    })
   end
 
   defmodule WebhookSubscriptionRequest do
@@ -735,7 +1013,8 @@ defmodule SchedulingWeb.Schemas do
             secret: %Schema{
               type: :string,
               nullable: true,
-              description: "16–256 chars. If omitted on create, a random one is generated. Do not update once subscription is in use."
+              description:
+                "16–256 chars. If omitted on create, a random one is generated. Do not update once subscription is in use."
             }
           },
           required: [:url]

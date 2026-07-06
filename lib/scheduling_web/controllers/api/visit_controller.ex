@@ -16,24 +16,26 @@ defmodule SchedulingWeb.Api.VisitController do
 
   action_fallback SchedulingWeb.Api.FallbackController
 
-  tags ["visits"]
+  tags(["visits"])
 
-  operation :index,
+  operation(:index,
     summary: "List visits",
     description: "Returns visits most-recent-first.",
     responses: [ok: {"Visits", "application/json", Schemas.VisitList}]
+  )
 
   def index(conn, _params) do
     json(conn, Enum.map(Visits.list_visits(), &serialize/1))
   end
 
-  operation :show,
+  operation(:show,
     summary: "Get one visit",
     parameters: [id: [in: :path, description: "Visit id", type: :integer]],
     responses: [
       ok: {"Visit", "application/json", Schemas.Visit},
       not_found: {"Not found", "application/json", Schemas.NotFoundError}
     ]
+  )
 
   def show(conn, %{"id" => id}) do
     with {:ok, visit} <- fetch(id) do
@@ -41,7 +43,7 @@ defmodule SchedulingWeb.Api.VisitController do
     end
   end
 
-  operation :create,
+  operation(:create,
     summary: "Create a visit (sign-in)",
     description:
       "Called by the check-in / queueing service when a patient signs in. " <>
@@ -52,6 +54,7 @@ defmodule SchedulingWeb.Api.VisitController do
       created: {"Created", "application/json", Schemas.Visit},
       unprocessable_entity: {"Validation failed", "application/json", Schemas.ValidationError}
     ]
+  )
 
   def create(conn, %{"visit" => params} = body) do
     with {:ok, visit} <- Visits.create_visit(params, actor_opts(body)) do
@@ -59,15 +62,17 @@ defmodule SchedulingWeb.Api.VisitController do
     end
   end
 
-  operation :end_visit,
+  operation(:end_visit,
     summary: "End a visit",
-    description: "Stamps `status=ended` and `ended_at=now`. Idempotent on an already-ended visit.",
+    description:
+      "Stamps `status=ended` and `ended_at=now`. Idempotent on an already-ended visit.",
     parameters: [id: [in: :path, description: "Visit id", type: :integer]],
     responses: [
       ok: {"Ended", "application/json", Schemas.Visit},
       not_found: {"Not found", "application/json", Schemas.NotFoundError},
       unprocessable_entity: {"Validation failed", "application/json", Schemas.ValidationError}
     ]
+  )
 
   def end_visit(conn, %{"id" => id} = body) do
     with {:ok, visit} <- fetch(id),

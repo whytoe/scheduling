@@ -55,7 +55,8 @@ defmodule Scheduling.Webhooks.Subscription do
 
       value ->
         case URI.new(value) do
-          {:ok, %URI{scheme: scheme, host: host}} when scheme in ["http", "https"] and is_binary(host) ->
+          {:ok, %URI{scheme: scheme, host: host}}
+          when scheme in ["http", "https"] and is_binary(host) ->
             changeset
 
           _ ->

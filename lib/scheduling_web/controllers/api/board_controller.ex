@@ -13,9 +13,9 @@ defmodule SchedulingWeb.Api.BoardController do
 
   action_fallback SchedulingWeb.Api.FallbackController
 
-  tags ["board"]
+  tags(["board"])
 
-  operation :show,
+  operation(:show,
     summary: "Snapshot the live board",
     description:
       "Returns the waiting queue (highest priority first), the entries " <>
@@ -23,6 +23,7 @@ defmodule SchedulingWeb.Api.BoardController do
         "current load and free slots, and all pending handoffs. " <>
         "Server-side render of the same data the `/board` LiveView shows.",
     responses: [ok: {"Board snapshot", "application/json", Schemas.BoardSnapshot}]
+  )
 
   def show(conn, _params) do
     loads = Queue.current_loads()

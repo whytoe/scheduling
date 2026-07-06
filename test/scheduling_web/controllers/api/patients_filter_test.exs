@@ -42,7 +42,9 @@ defmodule SchedulingWeb.Api.PatientsFilterTest do
     test "returns an empty list when nothing matches", %{conn: conn} do
       patient_fixture(%{intake_patient_id: Ecto.UUID.generate()})
 
-      conn = get(conn, ~p"/api/v1/patients?intake_patient_id=00000000-0000-0000-0000-000000000000")
+      conn =
+        get(conn, ~p"/api/v1/patients?intake_patient_id=00000000-0000-0000-0000-000000000000")
+
       assert [] = json_response(conn, 200)
     end
   end

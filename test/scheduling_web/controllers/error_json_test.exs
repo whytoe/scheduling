@@ -1,12 +1,13 @@
 defmodule SchedulingWeb.ErrorJSONTest do
   use SchedulingWeb.ConnCase, async: true
 
-  test "renders 404" do
-    assert SchedulingWeb.ErrorJSON.render("404.json", %{}) == %{errors: %{detail: "Not Found"}}
+  test "renders 404 in the unified error envelope" do
+    assert SchedulingWeb.ErrorJSON.render("404.json", %{}) ==
+             %{error: %{code: "not_found", message: "Not Found"}}
   end
 
-  test "renders 500" do
+  test "renders 500 in the unified error envelope" do
     assert SchedulingWeb.ErrorJSON.render("500.json", %{}) ==
-             %{errors: %{detail: "Internal Server Error"}}
+             %{error: %{code: "internal_server_error", message: "Internal Server Error"}}
   end
 end

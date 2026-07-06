@@ -13,9 +13,9 @@ defmodule SchedulingWeb.Api.RoutingDecisionController do
 
   action_fallback SchedulingWeb.Api.FallbackController
 
-  tags ["routing_decisions"]
+  tags(["routing_decisions"])
 
-  operation :index,
+  operation(:index,
     summary: "List routing decisions",
     description:
       "Most recent first. Each row captures the matcher inputs (required " <>
@@ -46,6 +46,7 @@ defmodule SchedulingWeb.Api.RoutingDecisionController do
       ]
     ],
     responses: [ok: {"Routing decisions", "application/json", Schemas.RoutingDecisionList}]
+  )
 
   def index(conn, params) do
     filters =
@@ -75,13 +76,14 @@ defmodule SchedulingWeb.Api.RoutingDecisionController do
     |> json(Enum.map(page, &serialize/1))
   end
 
-  operation :show,
+  operation(:show,
     summary: "Get one routing decision",
     parameters: [id: [in: :path, description: "Routing decision id", type: :integer]],
     responses: [
       ok: {"Routing decision", "application/json", Schemas.RoutingDecision},
       not_found: {"Not found", "application/json", Schemas.NotFoundError}
     ]
+  )
 
   def show(conn, %{"id" => id}) do
     with {:ok, decision} <- fetch(id) do

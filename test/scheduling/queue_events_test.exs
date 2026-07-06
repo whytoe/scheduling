@@ -59,7 +59,10 @@ defmodule Scheduling.QueueEventsTest do
       patient = patient_fixture()
       cap = xray_capability()
       office = office_fixture([cap])
-      {:ok, entry} = Queue.create_entry(%{patient_id: patient.id, required_capability_ids: [cap.id]})
+
+      {:ok, entry} =
+        Queue.create_entry(%{patient_id: patient.id, required_capability_ids: [cap.id]})
+
       {:ok, _assigned, _} = Queue.accept(entry, accepted_by: "reception-1")
 
       reloaded = Queue.get_entry!(entry.id)
@@ -97,7 +100,10 @@ defmodule Scheduling.QueueEventsTest do
       patient = patient_fixture()
       cap = xray_capability()
       office = office_fixture([cap])
-      {:ok, entry} = Queue.create_entry(%{patient_id: patient.id, required_capability_ids: [cap.id]})
+
+      {:ok, entry} =
+        Queue.create_entry(%{patient_id: patient.id, required_capability_ids: [cap.id]})
+
       {:ok, _assigned, _} = Queue.accept(entry)
 
       [handoff] = Handoffs.list_pending_for_office(office.id)
@@ -116,7 +122,10 @@ defmodule Scheduling.QueueEventsTest do
       patient = patient_fixture()
       cap = xray_capability()
       _office = office_fixture([cap])
-      {:ok, entry} = Queue.create_entry(%{patient_id: patient.id, required_capability_ids: [cap.id]})
+
+      {:ok, entry} =
+        Queue.create_entry(%{patient_id: patient.id, required_capability_ids: [cap.id]})
+
       {:ok, _assigned, _} = Queue.accept(entry)
       [handoff] = Handoffs.list_pending()
       {:ok, acked} = Handoffs.acknowledge(handoff, acknowledged_by: "nurse-7")

@@ -103,6 +103,7 @@ defmodule SchedulingWeb.Api.VisitEventControllerTest do
 
       ids = Enum.map(body, & &1["id"])
       assert late.id in ids
+
       assert Enum.all?(body, fn e ->
                {:ok, dt, _} = DateTime.from_iso8601(e["occurred_at"])
                DateTime.compare(dt, now) in [:gt, :eq]
@@ -132,10 +133,11 @@ defmodule SchedulingWeb.Api.VisitEventControllerTest do
     end
 
     test "?after=cursor walks to the next page", %{conn: conn} do
-      events = for _ <- 1..3 do
-        {:ok, e} = Scheduling.Audit.record_event(%{type: "queue_entry.completed"})
-        e
-      end
+      events =
+        for _ <- 1..3 do
+          {:ok, e} = Scheduling.Audit.record_event(%{type: "queue_entry.completed"})
+          e
+        end
 
       first = get(conn, ~p"/api/v1/visit_events?limit=2")
       assert length(json_response(first, 200)) == 2
@@ -162,7 +164,7 @@ defmodule SchedulingWeb.Api.VisitEventControllerTest do
 
     test "returns 404 for unknown id", %{conn: conn} do
       conn = get(conn, ~p"/api/v1/visit_events/99999")
-      assert %{"error" => "not_found"} = json_response(conn, 404)
+      assert %{"error" => %{"code" => "not_found"}} = json_response(conn, 404)
     end
   end
 end
