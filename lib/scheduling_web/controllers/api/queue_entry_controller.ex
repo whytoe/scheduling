@@ -9,6 +9,7 @@ defmodule SchedulingWeb.Api.QueueEntryController do
 
   alias Scheduling.Catalog
   alias Scheduling.Queue
+  alias SchedulingWeb.ErrorEnvelope
   alias SchedulingWeb.Schemas
 
   action_fallback SchedulingWeb.Api.FallbackController
@@ -183,17 +184,36 @@ defmodule SchedulingWeb.Api.QueueEntryController do
           json(conn, serialize(reload(assigned)))
 
         {:no_eligible_office, _result} ->
-          conn |> put_status(:conflict) |> json(%{error: "no_eligible_office"})
+          conn
+          |> put_status(:conflict)
+          |> json(
+            ErrorEnvelope.error_envelope(
+              "no_eligible_office",
+              "No office both provides the required capabilities and has free capacity"
+            )
+          )
 
         {:compliance_failed, missing_types} ->
           conn
           |> put_status(:unprocessable_entity)
-          |> json(%{error: "compliance_failed", missing_form_types: missing_types})
+          |> json(
+            ErrorEnvelope.error_envelope(
+              "compliance_failed",
+              "The patient hasn't completed every required intake form",
+              %{missing_form_types: missing_types}
+            )
+          )
 
         {:compliance_unavailable, reason} ->
           conn
           |> put_status(:service_unavailable)
-          |> json(%{error: "compliance_unavailable", reason: inspect(reason)})
+          |> json(
+            ErrorEnvelope.error_envelope(
+              "compliance_unavailable",
+              "The intake-form system is unreachable; booking is blocked until it recovers",
+              %{reason: inspect(reason)}
+            )
+          )
 
         {:error, %Ecto.Changeset{} = changeset} ->
           {:error, changeset}
