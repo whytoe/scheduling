@@ -17,6 +17,9 @@ implementation was checked against; Keycloak is covered by the same defaults.
 The only place a provider's individuality shows through is *where it puts
 roles and tenancy in the token*, and that is configuration, not code.
 
+What this app may *hold* once a caller is through the door is a separate
+question, answered in **`data-boundary.md`**: PII yes, health data no.
+
 Implementation: `Scheduling.Auth` and friends, `SchedulingWeb.Plugs.ApiAuth`,
 `SchedulingWeb.Plugs.BrowserAuth`, `SchedulingWeb.AuthController`,
 `SchedulingWeb.AuthHooks`.
@@ -35,6 +38,7 @@ Implementation: `Scheduling.Auth` and friends, `SchedulingWeb.Plugs.ApiAuth`,
 | `OIDC_ORG_ID_CLAIM`        | no       | `astrum_org_id` | Claim naming the organisation id                |
 | `OIDC_TENANT_CLAIM`        | no       | `astrum_tenant` | Claim naming the tenant                         |
 | `OIDC_DISCOVERY_OVERRIDES` | no       | `{"subject_types_supported":["public"]}` | JSON merged over the discovery document |
+| `ASTRUM_ORG_ID`            | no       | —         | Restricts this deployment to one organisation (see below) |
 | `AUTH_SESSION_TTL_SECONDS` | no       | `28800`   | Browser session lifetime (8h)                         |
 | `AUTH_DISABLED`            | no       | unset     | `true` permits a `:prod` boot with no auth            |
 
@@ -88,6 +92,66 @@ rules the matcher routes by, and `diagnoses.required_form_types` in particular
 decides which intake forms gate an assignment. A change there silently
 re-routes every future patient. That is a different kind of act from accepting
 the person in front of you, so it takes a different role.
+
+## One organisation per deployment
+
+Tokens from Astrum carry `astrum_org_id`, `astrum_org`, `astrum_tenant` and
+`astrum_location`. A deployment serves **one** organisation: set
+`ASTRUM_ORG_ID` and any token naming a different org is refused — 403
+`forbidden` on the API, and the "not permitted" page at browser sign-in.
+
+Set it to the **opaque org id**, not the human-readable org name. Names change;
+ids don't. The check reads `astrum_org_id`, and `astrum_org` is captured for
+display only.
+
+Leave `ASTRUM_ORG_ID` unset and the check is skipped, matching how the rest of
+the auth layer is off when unconfigured.
+
+Two things to know:
+
+- **A token with no org claim is refused when an org is expected.** That is the
+  safe default, but note the failure mode: if `astrum_org_id` turns out to be
+  named something else on real ac-core tokens, *everyone* is refused, not just
+  outsiders. Same class of risk as the `astrum_roles` unknown below — confirm
+  both against a real token before enabling.
+- **This is an authentication boundary, not a data boundary.** No query filters
+  by org. If a deployment ever needs to serve several organisations, that is a
+  schema change (org id on patients, visits, queue entries, offices) and every
+  query and PubSub topic has to be scoped. Today's guarantee is only that a
+  token from another org cannot get in.
+
+## Back-channel logout
+
+Astrum advertises `backchannel_logout_supported: true`, so it can tell us when
+a session ends elsewhere — a different device, or an admin terminating it.
+Without a receiver, such a session would stay live here until the 8h deadline.
+
+`POST /auth/backchannel-logout` accepts a logout token (OpenID Connect
+Back-Channel Logout 1.0). It is public and CSRF-exempt because the IdP calls it
+server-to-server with no session; the token's signature is the authentication.
+Validation goes through the same `Oidcc.Token.validate_jwt/3` path as every
+other token, plus the spec's extra rules: the `events` claim must contain
+`http://schemas.openid.net/event/backchannel-logout`, and a `nonce` must be
+absent (it belongs only on an ID token).
+
+Revocation is a `revoked_sessions` row — Postgres rather than ETS because
+`DNSCluster` is configured and revocation has to hold across nodes.
+`BrowserAuth.scope_from_session/1` checks it, which is the single choke point
+both the plug pipeline and the LiveView hooks already share, so a revoked
+session behaves exactly like an expired one. An hourly sweeper drops rows past
+their expiry.
+
+**Scope**: §2.4 lets a token carry `sub`, `sid`, or both. When `sid` is
+present it wins — that names one session, and revoking the subject too would
+sign an operator out at the nurses' station because they logged out on their
+phone. Only a token with no `sid` means "everywhere".
+
+**Known limitation**: a `sid`-only token (no `sub`) is spec-legal but rejected,
+because `oidcc` requires `sub` on every JWT and fails before our checks run.
+Accepting one would mean hand-composing a JWT validator for a public,
+unauthenticated endpoint, which is a worse trade. ac-core sends `sub` on every
+other token type, so this likely never bites, and the failure is a loud 400
+with a logged `missing_claim` rather than a silent hole.
 
 ## Provider setup
 
@@ -284,18 +348,15 @@ mounted under.
   provider's session is ended. Keeping access-token lifetimes short is the
   mitigation. Astrum exposes `/oauth/introspect`; calling it per request would
   close the window at the cost of a round-trip per call.
-- **No back-channel logout.** Astrum advertises
-  `backchannel_logout_supported: true`, so it can notify us when a session ends
-  elsewhere. We do not host the receiving endpoint, so such a session stays
-  live here until our own 8h deadline. Worth adding.
 - **No rate limiting.** Tracked as `sc-c41`.
-- **Tenancy is captured but not enforced.** `astrum_org`, `astrum_org_id` and
-  `astrum_tenant` land on the identity and are in the session, but nothing
-  filters on them: any authorized role sees every patient in the deployment.
-  Scoping the queue and board by `org_id` is the obvious next step and is why
-  the claims are captured now.
+- **No multi-org data scoping.** `ASTRUM_ORG_ID` keeps other organisations
+  *out*; it does not partition data within a deployment. No query filters by
+  org. See "One organisation per deployment" above.
 - **`astrum_location` is ignored.** If offices map onto it, that is the natural
   key for per-location scoping.
+- **`astrum_apps` is ignored.** It looks like an app-entitlement list; gating
+  sign-in on it containing `scheduling` is Phase 2b, pending confirmation
+  against a real token.
 - **Dev routes** (`/dev/dashboard`, `/dev/mailbox`) are unauthenticated. They
   are compiled out unless `:dev_routes` is set, which is dev and test only.
 

@@ -53,6 +53,13 @@ defmodule Scheduling.Auth do
 
   Any other role string on the token is carried through untouched but grants
   nothing.
+
+  ## Tenancy
+
+  The provider is multi-tenant; a deployment of this app serves exactly one
+  organisation. When `expected_org_id/0` is set, a token whose org id does not
+  match is refused on both surfaces regardless of its roles — see
+  `org_permitted?/1`.
   """
 
   @provider_name Scheduling.Auth.Provider
@@ -127,8 +134,8 @@ defmodule Scheduling.Auth do
   end
 
   @doc """
-  Claim naming the identity's organisation. Captured on the identity but not
-  yet enforced — see `docs/auth.md` §"What is not covered".
+  Claim naming the identity's organisation. Display only — the enforced value
+  is the id from `org_id_claim/0`, since names change and ids do not.
   """
   @spec org_claim() :: String.t()
   def org_claim, do: get(:org_claim) || "astrum_org"
@@ -136,6 +143,43 @@ defmodule Scheduling.Auth do
   @doc "Claim naming the organisation's stable id."
   @spec org_id_claim() :: String.t()
   def org_id_claim, do: get(:org_id_claim) || "astrum_org_id"
+
+  @doc """
+  The single organisation this deployment serves, as the stable org id read
+  from `org_id_claim/0`.
+
+  `nil` (the default) disables the check, matching how the rest of this module
+  behaves when unconfigured. Set `ASTRUM_ORG_ID` to turn it on.
+  """
+  @spec expected_org_id() :: String.t() | nil
+  def expected_org_id, do: get(:expected_org_id)
+
+  @doc """
+  True when an identity carrying `org_id` belongs to the organisation this
+  deployment serves.
+
+  The provider is multi-tenant; a scheduling deployment is not. A token from
+  another organisation is refused on both surfaces even when its roles would
+  otherwise permit the call — otherwise a valid operator at one clinic could
+  read another clinic's board.
+
+  A token with **no** org id is refused too when one is expected. That case is
+  either a claim-mapping mistake or a token from somewhere that does not carry
+  tenancy at all, and neither is something to wave through.
+
+  Takes the id rather than the `Scheduling.Auth.Identity` struct to keep this
+  module free of a compile-time dependency on `Identity`, which already
+  depends on it. Both `SchedulingWeb.Plugs.ApiAuth` and
+  `SchedulingWeb.AuthController` call this, so the two surfaces cannot drift
+  apart on what "permitted here" means.
+  """
+  @spec org_permitted?(String.t() | nil) :: boolean()
+  def org_permitted?(org_id) do
+    case expected_org_id() do
+      nil -> true
+      expected -> org_id == expected
+    end
+  end
 
   @doc "Claim naming the tenant this identity belongs to."
   @spec tenant_claim() :: String.t()

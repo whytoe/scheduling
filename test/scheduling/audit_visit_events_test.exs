@@ -45,10 +45,10 @@ defmodule Scheduling.AuditVisitEventsTest do
     end
 
     test "stores payload as jsonb (string keys after reload)" do
-      e = event!(%{type: "queue_entry.created", payload: %{priority: 5, diagnosis_id: 1}})
+      e = event!(%{type: "queue_entry.created", payload: %{priority: 5, assigned_office_id: 1}})
       reloaded = Audit.get_event!(e.id)
       assert reloaded.payload["priority"] == 5
-      assert reloaded.payload["diagnosis_id"] == 1
+      assert reloaded.payload["assigned_office_id"] == 1
     end
   end
 

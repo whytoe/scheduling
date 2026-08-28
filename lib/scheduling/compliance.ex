@@ -2,103 +2,83 @@ defmodule Scheduling.Compliance do
   @moduledoc """
   Compliance verification against the intake-form system.
 
-  At accept time, before assigning a queue entry to an office, we check
-  that the patient has a `status=completed AND flagged=false` intake
-  response on file for every form type the entry's diagnosis declares
-  in its `required_form_types` array. Missing types block the
-  assignment.
+  At accept time, before assigning a queue entry to an office, we ask intake
+  whether the patient has satisfied the forms this encounter requires. Intake
+  answers yes or no; a "no" blocks the assignment.
 
-  When the `Scheduling.Compliance.api_key` config is nil (default in
-  local dev), the gate is disabled — `verify/1` always returns `:ok`.
-  This keeps the existing scheduling flow working without an intake
-  dependency.
+  ## Why this only sends a reference
+
+  Scheduling carries PII but not health data (`docs/data-boundary.md`). Form
+  type strings like `"stroke-consent"`, tied to a named patient, are health
+  data — and they used to reach the `routing_decisions` rationale, the queue
+  metadata and every outbound webhook. `docs/integrations.md` warned about
+  exactly this leak.
+
+  So the gate now sends an **opaque `compliance_ref`** (supplied by whoever
+  created the entry, ultimately from the EMR) plus the patient's
+  `intake_patient_id`. Intake resolves which forms that reference implies and
+  returns a verdict. Scheduling never learns the form-type names, so it cannot
+  leak them.
+
+  ## When the gate is skipped
+
+  `verify/1` returns `:not_configured` — which the accept flow treats as "pass"
+  — when either:
+
+    * `Scheduling.Compliance.api_key` is unset (the local-dev default), or
+    * the entry carries no `compliance_ref`, so there is nothing to ask about.
+
+  The second case is expected until ac-checkin starts supplying refs. It fails
+  *open* by design: the same posture as an unconfigured intake, and consistent
+  with the pre-existing behaviour for an entry whose diagnosis required no
+  forms.
   """
 
   alias Scheduling.Compliance.Client
   alias Scheduling.Queue.QueueEntry
 
   @typedoc """
-  Either `:ok` when every required form is on file, or `{:missing, [type, ...]}`
-  listing the form types the patient hasn't satisfied. `:not_configured` is
-  returned when the intake API isn't set up (treated as "skip the gate" by
-  the accept flow).
+  `:ok` when intake reports the patient compliant, `:blocked` when it does not,
+  `:not_configured` when there is nothing to check (see the module doc), and
+  `{:error, reason}` when intake could not be reached — which the accept flow
+  treats as fail-closed.
   """
-  @type result :: :ok | {:missing, [String.t()]} | :not_configured | {:error, term()}
+  @type result :: :ok | :blocked | :not_configured | {:error, term()}
 
   @doc """
-  Verifies that the queue entry's patient has satisfied every required form
-  type for their diagnosis. Returns:
+  Asks intake whether the entry's patient has satisfied the forms its
+  `compliance_ref` implies.
 
-    * `:ok` — every required form is satisfied (or the diagnosis requires none)
-    * `{:missing, [form_type, ...]}` — the listed form types are missing
-    * `:not_configured` — no API key set; accept flow should skip the check
-    * `{:error, reason}` — intake API call failed
+  The entry's `:patient` must be preloaded (`Scheduling.Queue.get_entry!/1`
+  does this).
   """
   @spec verify(QueueEntry.t()) :: result()
   def verify(%QueueEntry{} = entry) do
-    case configured?() do
-      false -> :not_configured
-      true -> do_verify(entry)
+    with true <- configured?(),
+         ref when is_binary(ref) and ref != "" <- compliance_ref(entry),
+         intake_patient_id when is_binary(intake_patient_id) <- intake_patient_id(entry) do
+      check(ref, intake_patient_id)
+    else
+      # Not configured, no reference to check, or no patient to correlate
+      # against — nothing to ask intake. See the module doc.
+      _ -> :not_configured
     end
   end
 
-  defp do_verify(entry) do
-    required_types = required_form_types(entry)
-
-    cond do
-      required_types == [] ->
+  defp check(compliance_ref, intake_patient_id) do
+    case Client.compliance_status(compliance_ref, patient_id: intake_patient_id) do
+      {:ok, %{compliant: true}} ->
         :ok
 
-      is_nil(intake_patient_id(entry)) ->
-        # Diagnosis demands forms but we have nothing to correlate against.
-        {:missing, required_types}
-
-      true ->
-        check_all(intake_patient_id(entry), required_types)
-    end
-  end
-
-  defp check_all(intake_patient_id, required_types) do
-    Enum.reduce(required_types, {[], nil}, fn type, {missing_acc, err_acc} ->
-      case form_type_satisfied?(intake_patient_id, type) do
-        :satisfied -> {missing_acc, err_acc}
-        :missing -> {[type | missing_acc], err_acc}
-        {:error, e} -> {missing_acc, e}
-      end
-    end)
-    |> case do
-      {_, err} when not is_nil(err) -> {:error, err}
-      {[], _} -> :ok
-      {missing, _} -> {:missing, Enum.reverse(missing)}
-    end
-  end
-
-  defp form_type_satisfied?(intake_patient_id, form_type) do
-    # Pass patient_id through to intake's server-side filter — index-direct
-    # via their `qr_patient_idx`. The defensive patientId equality check below
-    # stays in place (belt-and-suspenders against an intake-side filter bug
-    # that returned other patients' rows).
-    case Client.list_completed_responses(form_type, patient_id: intake_patient_id) do
-      {:ok, responses} ->
-        if Enum.any?(responses, fn r ->
-             map_get(r, "patientId") == intake_patient_id and
-               map_get(r, "flagged") == false
-           end) do
-          :satisfied
-        else
-          :missing
-        end
+      {:ok, %{compliant: false}} ->
+        :blocked
 
       {:error, reason} ->
         {:error, reason}
     end
   end
 
-  defp required_form_types(%QueueEntry{diagnosis: %{required_form_types: types}})
-       when is_list(types),
-       do: types
-
-  defp required_form_types(_), do: []
+  defp compliance_ref(%QueueEntry{compliance_ref: ref}), do: ref
 
   defp intake_patient_id(%QueueEntry{patient: %{intake_patient_id: id}}) when is_binary(id),
     do: id
@@ -111,17 +91,4 @@ defmodule Scheduling.Compliance do
       cfg -> not is_nil(Keyword.get(cfg, :api_key))
     end
   end
-
-  # Looks up either a string-keyed or atom-keyed value. CRITICAL: must use
-  # `Map.fetch` not `Map.get || Map.get`, because the latter treats `false`
-  # as "missing" and falls through — which silently broke the `flagged: false`
-  # check (caught by `compliance_http_test.exs`).
-  defp map_get(map, key) when is_map(map) and is_binary(key) do
-    case Map.fetch(map, key) do
-      {:ok, value} -> value
-      :error -> Map.get(map, String.to_atom(key))
-    end
-  end
-
-  defp map_get(_, _), do: nil
 end

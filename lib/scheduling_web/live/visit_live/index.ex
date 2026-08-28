@@ -1,6 +1,6 @@
 defmodule SchedulingWeb.VisitLive.Index do
   @moduledoc """
-  The visit list + detail. A table of every visit (id, patient, diagnosis,
+  The visit list + detail. A table of every visit (id, patient,
   opened, status); a row expands to the shared lifecycle timeline. Shows a
   skeleton table on first paint (and a Reload control), reusing the audit-row +
   timeline patterns so this new surface feels native to the rest of the system.
@@ -46,13 +46,12 @@ defmodule SchedulingWeb.VisitLive.Index do
 
   defp load_visits do
     Visits.list_visits()
-    |> Repo.preload(queue_entries: :diagnosis)
+    |> Repo.preload(:queue_entries)
     |> Enum.map(fn v ->
       %{
         id: v.id,
         label: "v-#{v.id}",
         patient: patient_name(v),
-        diagnosis: diagnosis_name(v),
         opened: format_at(v.started_at),
         status: status_key(v.status)
       }
@@ -64,16 +63,6 @@ defmodule SchedulingWeb.VisitLive.Index do
       %{name: name} when is_binary(name) -> name
       _ -> "patient ##{visit.patient_id}"
     end
-  end
-
-  # A visit can hold several queue entries; surface the first diagnosis we find.
-  defp diagnosis_name(visit) do
-    visit.queue_entries
-    |> Enum.map(& &1.diagnosis)
-    |> Enum.find_value(fn
-      %{name: name} when is_binary(name) -> name
-      _ -> nil
-    end) || "—"
   end
 
   defp status_key(:ended), do: "completed"
@@ -111,7 +100,6 @@ defmodule SchedulingWeb.VisitLive.Index do
             <tr>
               <th style="width:120px">Visit</th>
               <th>Patient</th>
-              <th>Diagnosis</th>
               <th style="width:150px">Opened</th>
               <th style="width:150px">Status</th>
               <th style="width:1px"><span class="sr-only">Timeline</span></th>
@@ -122,7 +110,6 @@ defmodule SchedulingWeb.VisitLive.Index do
               <tr style="cursor:pointer" phx-click={JS.push("toggle", value: %{id: v.id})}>
                 <td class="mono t-small">{v.label}</td>
                 <td class="font-semibold">{v.patient}</td>
-                <td>{v.diagnosis}</td>
                 <td class="mono t-small">{v.opened}</td>
                 <td><.status_badge status={v.status} /></td>
                 <td>

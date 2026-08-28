@@ -121,6 +121,36 @@ defmodule Scheduling.OidcProvider do
     )
   end
 
+  @doc """
+  Mints a back-channel logout token (OpenID Connect Back-Channel Logout 1.0).
+
+  Defaults to a valid one naming the same `sid`/`sub` that `access_token/3`
+  issues, so a test can revoke the session it just signed in with. `overrides`
+  replaces any claim, and a claim set to `:drop` is removed entirely — which is
+  how a test produces a token missing `events`, the check that distinguishes a
+  logout token from a replayed ID token.
+  """
+  def logout_token(context, overrides \\ %{}, opts \\ []) do
+    now = System.system_time(:second)
+
+    claims =
+      %{
+        "iss" => context.issuer,
+        "aud" => @client_id,
+        "iat" => now,
+        "exp" => now + 120,
+        "jti" => "logout-#{System.unique_integer([:positive])}",
+        "sub" => "user-1",
+        "sid" => "session-1",
+        "events" => %{"http://schemas.openid.net/event/backchannel-logout" => %{}}
+      }
+      |> Map.merge(overrides)
+      |> Enum.reject(fn {_key, value} -> value == :drop end)
+      |> Map.new()
+
+    sign(Keyword.get(opts, :jwk, context.jwk), claims)
+  end
+
   @doc "Signs arbitrary claims with a key — used to forge a wrong-key token."
   def sign(jwk, claims) do
     {_meta, token} =
@@ -134,6 +164,24 @@ defmodule Scheduling.OidcProvider do
   @doc "Sets the Authorization header for an API request."
   def with_bearer(conn, token),
     do: Plug.Conn.put_req_header(conn, "authorization", "Bearer " <> token)
+
+  @doc """
+  Turns on one `Scheduling.Auth` option on top of what `setup_oidc_provider/1`
+  configured, for the settings that are off by default and so are invisible to
+  most tests — `expected_org_id` being the first of them.
+
+  No cleanup needed: the setup's `on_exit` deletes the whole key.
+  """
+  def put_auth_option(key, value) do
+    config = Application.get_env(:scheduling, Scheduling.Auth, [])
+    Application.put_env(:scheduling, Scheduling.Auth, Keyword.put(config, key, value))
+  end
+
+  @doc "The client id the fake provider issues tokens for."
+  def client_id, do: @client_id
+
+  @doc "The token endpoint path stubbed on the Bypass server."
+  def token_endpoint_path, do: "/protocol/openid-connect/token"
 
   # Astrum flattens roles into one claim and identifies the session with `sid`;
   # Keycloak nests them under `realm_access` and always sends a username.

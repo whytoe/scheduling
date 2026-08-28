@@ -57,7 +57,7 @@ defmodule SchedulingWeb.QueueLive.Index do
   end
 
   defp load_waiting(socket) do
-    waiting = Queue.list_waiting_entries() |> Scheduling.Repo.preload(:diagnosis)
+    waiting = Queue.list_waiting_entries()
 
     # Pre-select the top of the queue so the routing preview is populated on
     # first paint (and without JS); the hook then drives selection client-side.
@@ -134,13 +134,6 @@ defmodule SchedulingWeb.QueueLive.Index do
     end
   end
 
-  defp diagnosis_name(entry) do
-    case entry.diagnosis do
-      %{name: name} when is_binary(name) -> name
-      _ -> nil
-    end
-  end
-
   defp eligibility_detail(%Result{eligible: []}), do: ""
 
   defp eligibility_detail(%Result{eligible: candidates}) do
@@ -211,7 +204,6 @@ defmodule SchedulingWeb.QueueLive.Index do
               <div class="pcard__main">
                 <div class="pcard__name">{patient_name(entry)}</div>
                 <div class="pcard__meta">
-                  <span :if={diagnosis_name(entry)} class="t-small">{diagnosis_name(entry)}</span>
                   <.cap_row caps={required_caps(entry)} />
                 </div>
               </div>

@@ -7,7 +7,18 @@ To start your Phoenix server:
 
 Now you can visit [`localhost:4000`](http://localhost:4000) from your browser.
 
-Ready to run in production? Please [check our deployment guides](https://hexdocs.pm/phoenix/deployment.html).
+Ready to run in production? See [`DEPLOYMENT.md`](DEPLOYMENT.md).
+
+## Documentation
+
+| | |
+|---|---|
+| [`docs/data-boundary.md`](docs/data-boundary.md) | **Read this before adding a field.** Scheduling carries PII, not health data — what that means per table, and the three egress paths that enforce it. |
+| [`docs/auth.md`](docs/auth.md) | OIDC setup: browser SSO, API bearer tokens, roles, org scoping, back-channel logout. |
+| [`docs/integrations.md`](docs/integrations.md) | The API we expose, the intake-form system we consume, audit logs, outbound webhooks. |
+| [`docs/integration-contracts.md`](docs/integration-contracts.md) | Decision record for the check-in / forms contracts. |
+| [`docs/design-system.md`](docs/design-system.md) | Theme tokens, component patterns, accessibility guarantees. |
+| [`DEPLOYMENT.md`](DEPLOYMENT.md) | Environment variables, Postgres requirements, health probe. |
 
 ## Learn more
 

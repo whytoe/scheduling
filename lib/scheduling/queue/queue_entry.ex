@@ -1,13 +1,26 @@
 defmodule Scheduling.Queue.QueueEntry do
   @moduledoc """
-  A patient waiting in the queue. Required capabilities follow the BOTH model:
-  defaults can be derived from the associated `diagnosis`, and an explicit set
-  of `required_capabilities` can be set per entry to override them.
+  A patient waiting in the queue.
+
+  Carries only what routing needs: who (`patient_id`), what equipment
+  (`required_capabilities`), and where they ended up (`assigned_office_id`).
+  It deliberately does **not** record why the patient is here — that is health
+  data and lives in the EMR. See `docs/data-boundary.md`.
+
+  `required_capabilities` is the single source of routing truth;
+  `Scheduling.Matching.match_queue_entry/2` reads nothing else. A diagnosis may
+  be supplied at creation as a convenience (`Scheduling.Queue.create_entry/2`
+  expands it to its default capabilities), but it is expanded and discarded —
+  never stored against the patient.
+
+  `compliance_ref` is an opaque token from whoever created the entry. The
+  intake-form system resolves it to the forms this encounter requires;
+  scheduling passes it through and never learns the form types.
   """
   use Ecto.Schema
   import Ecto.Changeset
 
-  alias Scheduling.Catalog.{Capability, Diagnosis}
+  alias Scheduling.Catalog.Capability
   alias Scheduling.Offices.Office
   alias Scheduling.Patients.Patient
   alias Scheduling.Visits.Visit
@@ -18,9 +31,9 @@ defmodule Scheduling.Queue.QueueEntry do
   schema "queue_entries" do
     field :status, Ecto.Enum, values: @statuses, default: :waiting
     field :priority, :integer, default: 0
+    field :compliance_ref, :string
 
     belongs_to :patient, Patient
-    belongs_to :diagnosis, Diagnosis
     belongs_to :assigned_office, Office
     belongs_to :visit, Visit
 
@@ -45,17 +58,17 @@ defmodule Scheduling.Queue.QueueEntry do
     queue_entry
     |> cast(attrs, [
       :patient_id,
-      :diagnosis_id,
       :assigned_office_id,
       :visit_id,
       :status,
-      :priority
+      :priority,
+      :compliance_ref
     ])
     |> validate_required([:patient_id, :status, :priority])
     |> validate_inclusion(:status, @statuses)
     |> validate_number(:priority, greater_than_or_equal_to: 0)
+    |> validate_length(:compliance_ref, max: 255)
     |> assoc_constraint(:patient)
-    |> assoc_constraint(:diagnosis)
     |> assoc_constraint(:assigned_office)
     |> assoc_constraint(:visit)
   end

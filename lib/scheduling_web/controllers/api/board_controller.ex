@@ -49,7 +49,6 @@ defmodule SchedulingWeb.Api.BoardController do
       status: e.status,
       priority: e.priority,
       patient_id: e.patient_id,
-      diagnosis_id: e.diagnosis_id,
       assigned_office_id: e.assigned_office_id,
       visit_id: e.visit_id,
       patient: serialize_patient(e.patient),
