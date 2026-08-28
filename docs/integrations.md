@@ -125,6 +125,12 @@ Two things wire a scheduling row to the intake system:
   resolves it to the forms this encounter requires. Scheduling never learns
   what those are.
 
+  It is **write-only**: settable on `POST /api/v1/queue_entries`, but not
+  returned on entry reads. The system that sets it already knows it, and no
+  other consumer needs it, so it is surfaced only in the `compliance_failed`
+  error details — where it is actionable. Deliberate minimal exposure rather
+  than an oversight; making it readable later would be an additive change.
+
 `diagnoses.required_form_types` still exists as catalog data but is **no longer
 read at accept time**. It is a routing-template attribute, not something
 scheduling evaluates against a patient.

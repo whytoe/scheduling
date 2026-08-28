@@ -548,7 +548,7 @@ defmodule SchedulingWeb.Schemas do
               type: :string,
               nullable: true,
               description:
-                "Opaque reference the intake-form system resolves to the forms this encounter requires. Scheduling passes it through and never learns the form types. Omit to skip the compliance gate."
+                "Opaque reference the intake-form system resolves to the forms this encounter requires. Scheduling passes it through and never learns the form types. Omit to skip the compliance gate. **Write-only** — it is not returned on QueueEntry reads, only in the `compliance_failed` error details where it is actionable."
             },
             required_capability_ids: %Schema{
               type: :array,
