@@ -23,8 +23,11 @@ defmodule SchedulingWeb.Api.VisitControllerTest do
 
     test "returns 422 when patient_id is missing", %{conn: conn} do
       conn = post(conn, ~p"/api/v1/visits", visit: %{})
-      assert %{"errors" => errors} = json_response(conn, 422)
-      assert errors["patient_id"] == ["can't be blank"]
+
+      assert %{"error" => %{"code" => "validation_failed", "details" => %{"fields" => fields}}} =
+               json_response(conn, 422)
+
+      assert fields["patient_id"] == ["can't be blank"]
     end
   end
 
@@ -40,7 +43,7 @@ defmodule SchedulingWeb.Api.VisitControllerTest do
 
     test "returns 404 for an unknown id", %{conn: conn} do
       conn = get(conn, ~p"/api/v1/visits/99999")
-      assert %{"error" => "not_found"} = json_response(conn, 404)
+      assert %{"error" => %{"code" => "not_found"}} = json_response(conn, 404)
     end
   end
 

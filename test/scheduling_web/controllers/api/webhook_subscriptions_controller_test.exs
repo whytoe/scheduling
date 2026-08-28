@@ -25,8 +25,10 @@ defmodule SchedulingWeb.Api.WebhookSubscriptionControllerTest do
           webhook_subscription: %{url: "ftp://example.test"}
         )
 
-      assert %{"errors" => errors} = json_response(conn, 422)
-      assert "must be a valid http(s) URL" in errors["url"]
+      assert %{"error" => %{"code" => "validation_failed", "details" => %{"fields" => fields}}} =
+               json_response(conn, 422)
+
+      assert "must be a valid http(s) URL" in fields["url"]
     end
   end
 
@@ -47,7 +49,7 @@ defmodule SchedulingWeb.Api.WebhookSubscriptionControllerTest do
 
     test "returns 404 for an unknown id", %{conn: conn} do
       conn = get(conn, ~p"/api/v1/webhook_subscriptions/99999")
-      assert %{"error" => "not_found"} = json_response(conn, 404)
+      assert %{"error" => %{"code" => "not_found"}} = json_response(conn, 404)
     end
   end
 
@@ -80,7 +82,7 @@ defmodule SchedulingWeb.Api.WebhookSubscriptionControllerTest do
 
       assert response(delete(build_conn(), ~p"/api/v1/webhook_subscriptions/#{id}"), 204)
       conn = build_conn() |> get(~p"/api/v1/webhook_subscriptions/#{id}")
-      assert %{"error" => "not_found"} = json_response(conn, 404)
+      assert %{"error" => %{"code" => "not_found"}} = json_response(conn, 404)
     end
   end
 end

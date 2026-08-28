@@ -3,28 +3,24 @@ defmodule SchedulingWeb.Api.FallbackController do
   Translates `{:error, ...}` tuples returned by API controllers into JSON
   responses. Each `:action_fallback` on an API controller delegates here so
   the handler functions only deal with the happy path.
+
+  Every response goes through `SchedulingWeb.ErrorEnvelope` so the API exposes
+  the single unified error envelope.
   """
   use SchedulingWeb, :controller
 
   alias Ecto.Changeset
+  alias SchedulingWeb.ErrorEnvelope
 
   def call(conn, {:error, %Changeset{} = changeset}) do
     conn
     |> put_status(:unprocessable_entity)
-    |> json(%{errors: traverse_errors(changeset)})
+    |> json(ErrorEnvelope.changeset_envelope(changeset))
   end
 
   def call(conn, {:error, :not_found}) do
     conn
     |> put_status(:not_found)
-    |> json(%{error: "not_found"})
-  end
-
-  defp traverse_errors(changeset) do
-    Changeset.traverse_errors(changeset, fn {msg, opts} ->
-      Enum.reduce(opts, msg, fn {key, value}, acc ->
-        String.replace(acc, "%{#{key}}", to_string(value))
-      end)
-    end)
+    |> json(ErrorEnvelope.error_envelope("not_found", "Resource not found"))
   end
 end

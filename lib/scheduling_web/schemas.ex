@@ -15,17 +15,26 @@ defmodule SchedulingWeb.Schemas do
     OpenApiSpex.schema(%{
       title: "NotFoundError",
       type: :object,
-      properties: %{error: %Schema{type: :string, description: "Human-readable error message"}},
+      properties: %{
+        error: %Schema{
+          type: :object,
+          properties: %{
+            code: %Schema{type: :string, enum: ["not_found"]},
+            message: %Schema{type: :string, description: "Human-readable summary"}
+          },
+          required: [:code, :message]
+        }
+      },
       required: [:error],
-      example: %{"error" => "not_found"}
+      example: %{"error" => %{"code" => "not_found", "message" => "Resource not found"}}
     })
   end
 
   defmodule ValidationError do
     @moduledoc """
-    Returned with HTTP 422 when request body fails validation. `errors` is a
-    map from field name to a list of failure messages — same shape Ecto
-    changeset traversal produces.
+    Returned with HTTP 422 when the request body fails validation. The
+    field → messages map (the shape Ecto changeset traversal produces) is
+    carried under `error.details.fields`.
     """
     require OpenApiSpex
     alias OpenApiSpex.Schema
@@ -34,13 +43,34 @@ defmodule SchedulingWeb.Schemas do
       title: "ValidationError",
       type: :object,
       properties: %{
-        errors: %Schema{
+        error: %Schema{
           type: :object,
-          additionalProperties: %Schema{type: :array, items: %Schema{type: :string}}
+          properties: %{
+            code: %Schema{type: :string, enum: ["validation_failed"]},
+            message: %Schema{type: :string},
+            details: %Schema{
+              type: :object,
+              properties: %{
+                fields: %Schema{
+                  type: :object,
+                  additionalProperties: %Schema{type: :array, items: %Schema{type: :string}},
+                  description: "Map of field name to a list of failure messages"
+                }
+              },
+              required: [:fields]
+            }
+          },
+          required: [:code, :message, :details]
         }
       },
-      required: [:errors],
-      example: %{"errors" => %{"name" => ["can't be blank"]}}
+      required: [:error],
+      example: %{
+        "error" => %{
+          "code" => "validation_failed",
+          "message" => "One or more fields are invalid",
+          "details" => %{"fields" => %{"name" => ["can't be blank"]}}
+        }
+      }
     })
   end
 
@@ -574,16 +604,35 @@ defmodule SchedulingWeb.Schemas do
       title: "ComplianceFailedError",
       type: :object,
       properties: %{
-        error: %Schema{type: :string, enum: ["compliance_failed"]},
-        missing_form_types: %Schema{
-          type: :array,
-          items: %Schema{type: :string},
-          description:
-            "Form types the patient is missing a completed-and-not-flagged response for"
+        error: %Schema{
+          type: :object,
+          properties: %{
+            code: %Schema{type: :string, enum: ["compliance_failed"]},
+            message: %Schema{type: :string},
+            details: %Schema{
+              type: :object,
+              properties: %{
+                missing_form_types: %Schema{
+                  type: :array,
+                  items: %Schema{type: :string},
+                  description:
+                    "Form types the patient is missing a completed-and-not-flagged response for"
+                }
+              },
+              required: [:missing_form_types]
+            }
+          },
+          required: [:code, :message, :details]
         }
       },
-      required: [:error, :missing_form_types],
-      example: %{"error" => "compliance_failed", "missing_form_types" => ["stroke-consent"]}
+      required: [:error],
+      example: %{
+        "error" => %{
+          "code" => "compliance_failed",
+          "message" => "The patient hasn't completed every required intake form",
+          "details" => %{"missing_form_types" => ["stroke-consent"]}
+        }
+      }
     })
   end
 
@@ -596,11 +645,34 @@ defmodule SchedulingWeb.Schemas do
       title: "ComplianceUnavailableError",
       type: :object,
       properties: %{
-        error: %Schema{type: :string, enum: ["compliance_unavailable"]},
-        reason: %Schema{type: :string, description: "Inspect of the underlying transport error"}
+        error: %Schema{
+          type: :object,
+          properties: %{
+            code: %Schema{type: :string, enum: ["compliance_unavailable"]},
+            message: %Schema{type: :string},
+            details: %Schema{
+              type: :object,
+              properties: %{
+                reason: %Schema{
+                  type: :string,
+                  description: "Inspect of the underlying transport error"
+                }
+              },
+              required: [:reason]
+            }
+          },
+          required: [:code, :message, :details]
+        }
       },
       required: [:error],
-      example: %{"error" => "compliance_unavailable", "reason" => "{:http_status, 401, %{...}}"}
+      example: %{
+        "error" => %{
+          "code" => "compliance_unavailable",
+          "message" =>
+            "The intake-form system is unreachable; booking is blocked until it recovers",
+          "details" => %{"reason" => "{:http_status, 401, %{...}}"}
+        }
+      }
     })
   end
 
@@ -612,9 +684,23 @@ defmodule SchedulingWeb.Schemas do
     OpenApiSpex.schema(%{
       title: "NoEligibleOfficeError",
       type: :object,
-      properties: %{error: %Schema{type: :string, enum: ["no_eligible_office"]}},
+      properties: %{
+        error: %Schema{
+          type: :object,
+          properties: %{
+            code: %Schema{type: :string, enum: ["no_eligible_office"]},
+            message: %Schema{type: :string}
+          },
+          required: [:code, :message]
+        }
+      },
       required: [:error],
-      example: %{"error" => "no_eligible_office"}
+      example: %{
+        "error" => %{
+          "code" => "no_eligible_office",
+          "message" => "No office both provides the required capabilities and has free capacity"
+        }
+      }
     })
   end
 

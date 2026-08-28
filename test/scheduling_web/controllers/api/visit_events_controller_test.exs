@@ -164,7 +164,7 @@ defmodule SchedulingWeb.Api.VisitEventControllerTest do
 
     test "returns 404 for unknown id", %{conn: conn} do
       conn = get(conn, ~p"/api/v1/visit_events/99999")
-      assert %{"error" => "not_found"} = json_response(conn, 404)
+      assert %{"error" => %{"code" => "not_found"}} = json_response(conn, 404)
     end
   end
 end
