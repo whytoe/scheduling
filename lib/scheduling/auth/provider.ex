@@ -31,10 +31,24 @@ defmodule Scheduling.Auth.Provider do
        %{
          issuer: Auth.issuer(),
          name: Auth.provider_name(),
+         provider_configuration_opts: provider_configuration_opts(),
          backoff_min: 1_000,
          backoff_max: 30_000,
          backoff_type: :exponential
        }}
+    end
+  end
+
+  @doc """
+  Options passed to discovery. `document_overrides` fills in fields the
+  provider omits — see `Scheduling.Auth.discovery_overrides/0` for why that is
+  needed at all and when it should go away.
+  """
+  @spec provider_configuration_opts() :: map()
+  def provider_configuration_opts do
+    case Auth.discovery_overrides() do
+      overrides when overrides == %{} -> %{}
+      overrides -> %{quirks: %{document_overrides: overrides}}
     end
   end
 

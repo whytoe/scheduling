@@ -5,7 +5,7 @@ defmodule Scheduling.Auth.Tokens do
   Integrators authenticate to `/api/v1` with an OAuth access token from the
   same realm as the UI, obtained via the client-credentials grant:
 
-      curl -s -X POST "$KEYCLOAK_ISSUER/protocol/openid-connect/token" \\
+      curl -s -X POST "$OIDC_ISSUER/oauth/token" \\
         -d grant_type=client_credentials \\
         -d client_id=intake-bridge -d client_secret=...
 

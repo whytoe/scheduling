@@ -47,30 +47,40 @@ defmodule Scheduling.OidcProvider do
   end
 
   @doc """
-  Mints a signed access token. `overrides` replaces any default claim, so a
-  test can produce an expired, mis-audienced or mis-issued token by naming
-  just the claim it wants wrong.
+  Mints a signed access token.
 
-  Pass `roles:` for realm roles and `client_roles:` for roles under
-  `resource_access.<client_id>`, mirroring Keycloak's two placements.
+  `overrides` replaces any default claim, so a test can produce an expired,
+  mis-audienced or mis-issued token by naming just the claim it wants wrong.
+
+  `opts[:shape]` selects the provider's claim vocabulary:
+
+    * `:astrum` (default) — `astrum_roles`, `sid`, no `preferred_username`.
+      This is the deployment target (ac-core).
+    * `:keycloak` — `realm_access.roles` plus `preferred_username`.
+
+  Both are exercised, because `Scheduling.Auth.role_claims/0` is meant to
+  cover either without configuration. Pass `roles:` for the roles to grant and
+  `client_roles:` for Keycloak's `resource_access.<client_id>` placement.
   """
   def access_token(context, overrides \\ %{}, opts \\ []) do
     now = System.system_time(:second)
+    roles = Keyword.get(opts, :roles, ["operator"])
+
+    base = %{
+      "iss" => context.issuer,
+      "sub" => "user-1",
+      "aud" => @client_id,
+      "azp" => @client_id,
+      "exp" => now + 300,
+      "iat" => now,
+      "nbf" => now - 5,
+      "email" => "acasey@example.org",
+      "name" => "A. Casey"
+    }
 
     claims =
-      %{
-        "iss" => context.issuer,
-        "sub" => "user-1",
-        "aud" => @client_id,
-        "azp" => @client_id,
-        "exp" => now + 300,
-        "iat" => now,
-        "nbf" => now - 5,
-        "preferred_username" => "acasey",
-        "email" => "acasey@example.org",
-        "name" => "A. Casey",
-        "realm_access" => %{"roles" => Keyword.get(opts, :roles, ["operator"])}
-      }
+      base
+      |> Map.merge(user_shape(Keyword.get(opts, :shape, :astrum), roles))
       |> put_client_roles(opts)
       |> Map.merge(overrides)
 
@@ -78,12 +88,22 @@ defmodule Scheduling.OidcProvider do
   end
 
   @doc """
-  Mints a token shaped like Keycloak's client-credentials grant: the subject
-  is a service-account uuid and `preferred_username` carries the
-  `service-account-` prefix that `Scheduling.Auth.Identity` keys off.
+  Mints a token shaped like the client-credentials grant: no end-user identity
+  on it at all — no `email`, no `sid`, no `preferred_username` — which is what
+  `Scheduling.Auth.Identity` keys off to classify it as a service.
+
+  `shape: :keycloak` instead produces Keycloak's
+  `preferred_username: "service-account-<client>"` marker.
   """
   def service_token(context, overrides \\ %{}, opts \\ []) do
     client = Keyword.get(opts, :client, "intake-bridge")
+    opts = Keyword.put_new(opts, :roles, ["service"])
+
+    service_claims =
+      case Keyword.get(opts, :shape, :astrum) do
+        :keycloak -> %{"preferred_username" => "service-account-#{client}"}
+        :astrum -> %{}
+      end
 
     access_token(
       context,
@@ -91,13 +111,13 @@ defmodule Scheduling.OidcProvider do
         %{
           "sub" => "b3f1e0c2-0000-4000-8000-000000000001",
           "azp" => client,
-          "preferred_username" => "service-account-#{client}",
           "email" => nil,
+          "sid" => nil,
           "name" => nil
         },
-        overrides
+        Map.merge(service_claims, overrides)
       ),
-      Keyword.put_new(opts, :roles, ["service"])
+      opts
     )
   end
 
@@ -114,6 +134,22 @@ defmodule Scheduling.OidcProvider do
   @doc "Sets the Authorization header for an API request."
   def with_bearer(conn, token),
     do: Plug.Conn.put_req_header(conn, "authorization", "Bearer " <> token)
+
+  # Astrum flattens roles into one claim and identifies the session with `sid`;
+  # Keycloak nests them under `realm_access` and always sends a username.
+  defp user_shape(:astrum, roles) do
+    %{
+      "astrum_roles" => roles,
+      "sid" => "session-1",
+      "astrum_org" => "Northside Clinic",
+      "astrum_org_id" => "org-1",
+      "astrum_tenant" => "northside"
+    }
+  end
+
+  defp user_shape(:keycloak, roles) do
+    %{"realm_access" => %{"roles" => roles}, "preferred_username" => "acasey"}
+  end
 
   defp put_client_roles(claims, opts) do
     case Keyword.get(opts, :client_roles) do

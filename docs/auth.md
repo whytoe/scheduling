@@ -9,9 +9,13 @@ realm:
   any other integrator call `/api/v1` with an access token from the
   client-credentials grant.
 
-Written against Keycloak, but nothing here is Keycloak-specific beyond where
-roles live in the token. Any OIDC provider that publishes a discovery document
-and a JWKS will work.
+Provider-neutral: anything that publishes a discovery document and a JWKS
+works. The deployment target is **Astrum core-api**
+(`https://ac-core.45.59.71.47.nip.io`), whose discovery document this
+implementation was checked against; Keycloak is covered by the same defaults.
+
+The only place a provider's individuality shows through is *where it puts
+roles and tenancy in the token*, and that is configuration, not code.
 
 Implementation: `Scheduling.Auth` and friends, `SchedulingWeb.Plugs.ApiAuth`,
 `SchedulingWeb.Plugs.BrowserAuth`, `SchedulingWeb.AuthController`,
@@ -21,11 +25,16 @@ Implementation: `Scheduling.Auth` and friends, `SchedulingWeb.Plugs.ApiAuth`,
 
 | Env var                    | Required | Default   | Purpose                                              |
 |----------------------------|----------|-----------|------------------------------------------------------|
-| `KEYCLOAK_ISSUER`          | yes      | —         | e.g. `https://sso.example.org/realms/clinic`          |
-| `KEYCLOAK_CLIENT_ID`       | yes      | —         | This app's OAuth client, e.g. `scheduling`            |
-| `KEYCLOAK_CLIENT_SECRET`   | yes      | —         | That client's secret                                  |
-| `KEYCLOAK_API_AUDIENCES`   | no       | —         | Extra comma-separated `aud` values accepted on API tokens |
-| `KEYCLOAK_SIGNING_ALGS`    | no       | `RS256`   | Comma-separated JWS algorithms accepted on access tokens |
+| `OIDC_ISSUER`              | yes      | —         | e.g. `https://ac-core.45.59.71.47.nip.io`             |
+| `OIDC_CLIENT_ID`           | yes      | —         | This app's OAuth client, e.g. `scheduling`            |
+| `OIDC_CLIENT_SECRET`       | yes      | —         | That client's secret                                  |
+| `OIDC_API_AUDIENCES`       | no       | —         | Extra comma-separated `aud` values accepted on API tokens |
+| `OIDC_SIGNING_ALGS`        | no       | `RS256`   | Comma-separated JWS algorithms accepted on access tokens |
+| `OIDC_ROLE_CLAIMS`         | no       | see below | Comma-separated dotted claim paths searched for roles |
+| `OIDC_ORG_CLAIM`           | no       | `astrum_org`    | Claim naming the organisation                   |
+| `OIDC_ORG_ID_CLAIM`        | no       | `astrum_org_id` | Claim naming the organisation id                |
+| `OIDC_TENANT_CLAIM`        | no       | `astrum_tenant` | Claim naming the tenant                         |
+| `OIDC_DISCOVERY_OVERRIDES` | no       | `{"subject_types_supported":["public"]}` | JSON merged over the discovery document |
 | `AUTH_SESSION_TTL_SECONDS` | no       | `28800`   | Browser session lifetime (8h)                         |
 | `AUTH_DISABLED`            | no       | unset     | `true` permits a `:prod` boot with no auth            |
 
@@ -41,12 +50,20 @@ Roles come from the token. There is no local users table and no provisioning
 step — a role granted in the realm takes effect at the operator's next sign-in
 (or within `AUTH_SESSION_TTL_SECONDS` for an existing session).
 
-Both Keycloak placements are read and unioned:
+OIDC standardises `sub`, `email` and `exp` — it says nothing about roles, so
+every provider invents a placement. `OIDC_ROLE_CLAIMS` is a list of dotted
+claim paths; **every one present on the token is unioned**. The default covers
+the shapes we have met, so both Astrum and Keycloak work unconfigured:
 
 ```
-realm_access.roles                        # realm roles
-resource_access.<KEYCLOAK_CLIENT_ID>.roles  # client roles for this app
+astrum_roles                        # Astrum core-api
+roles                               # the plain case
+realm_access.roles                  # Keycloak realm roles
+resource_access.<client_id>.roles   # Keycloak client roles
 ```
+
+`<client_id>` is substituted with `OIDC_CLIENT_ID`. Role comparison is
+case-insensitive.
 
 Four roles are recognised. Anything else on the token is carried through but
 grants nothing.
@@ -72,64 +89,94 @@ decides which intake forms gate an assignment. A change there silently
 re-routes every future patient. That is a different kind of act from accepting
 the person in front of you, so it takes a different role.
 
-## Keycloak realm setup
+## Provider setup
 
-### 1. The web client
+### Astrum core-api (the deployment target)
 
-Clients → Create client:
+Discovery: `https://ac-core.45.59.71.47.nip.io/.well-known/openid-configuration`
 
-- Client ID: `scheduling`
-- Client authentication: **On** (confidential — the app holds a secret)
-- Standard flow: **On**; Direct access grants: **Off**
-- Valid redirect URIs: `https://scheduling.example.com/auth/callback`
-- Valid post logout redirect URIs: `https://scheduling.example.com/auth/signed_out`
-- Web origins: `https://scheduling.example.com`
+What it advertises, and what we use:
 
-Copy the secret from the Credentials tab into `KEYCLOAK_CLIENT_SECRET`.
+| | |
+|---|---|
+| `authorization_endpoint` | `/authorize` |
+| `token_endpoint` | `/oauth/token` (`client_secret_basic`, `client_secret_post`) |
+| `jwks_uri` | `/oauth/jwks` — one RS256 key today |
+| `end_session_endpoint` | `/end-session` — used for RP-initiated logout |
+| `grant_types` | `authorization_code`, `client_credentials`, `refresh_token` |
+| `code_challenge_methods` | `S256` — PKCE, which we always send |
+| roles claim | `astrum_roles` |
+| tenancy claims | `astrum_org`, `astrum_org_id`, `astrum_tenant`, `astrum_location` |
+| other claims | `sub`, `email`, `email_verified`, `name`, `sid`, `auth_time`, `nonce`, `astrum_apps` |
 
-PKCE is sent by the app on every authorization request. Setting *Advanced →
-Proof Key for Code Exchange Code Challenge Method* to `S256` makes Keycloak
-require it, which is worth doing — it closes the flow to a client that omits
-it.
+### ⚠ Its discovery document is missing a required field
 
-### 2. Roles
+`ac-core`'s document omits **`subject_types_supported`**, which OIDC Discovery
+1.0 §3 marks REQUIRED. `oidcc` enforces the required set, so without a
+workaround the provider worker **crash-loops at boot** and every request
+returns `503 provider_unavailable` — the app never serves a page.
 
-Realm roles → Create role, once each for `admin`, `operator`, `viewer`. Assign
-them to users or (better) to groups.
+`OIDC_DISCOVERY_OVERRIDES` supplies it, and defaults to exactly that:
 
-Client roles on the `scheduling` client work equally well if you prefer to keep
-them scoped to this app; the token is read for both.
+```json
+{"subject_types_supported": ["public"]}
+```
 
-> **Note.** Keycloak puts `realm_access` / `resource_access` on the **access
-> token** by default, not the ID token. The app handles this — it validates the
-> access token as well and takes roles from there when the ID token has none —
-> so no mapper change is needed. If you would rather have roles on the ID
-> token, enable *Add to ID token* on the realm-roles mapper; that path works too.
+Nothing in this app reads the field — it describes whether the provider issues
+pairwise `sub` values, which matters only to a client correlating subjects
+across relying parties — so filling it in is inert beyond satisfying
+validation.
 
-### 3. A service client per integration
+**This is a workaround, not a feature.** The right fix is for `ac-core` to
+publish the field; set `OIDC_DISCOVERY_OVERRIDES={}` once it does.
+`test/scheduling/auth/provider_test.exs` asserts both that the override works
+and that it is still load-bearing, so the day the provider is fixed the test
+tells you the override can go.
 
-One client per integrating system, so revoking one does not affect the others,
-and so the audit log names which system acted.
+Register two kinds of client:
 
-Clients → Create client:
+1. **The web client** — `scheduling`, confidential, authorization-code flow.
+   Redirect URI `https://<host>/auth/callback`, post-logout redirect URI
+   `https://<host>/auth/signed_out`.
+2. **One service client per integration** — `intake-bridge`, `checkin-app`, …
+   client-credentials only. One each, so revoking one does not affect the
+   others and the audit log names which system acted.
 
-- Client ID: `intake-bridge` (or `checkin-app`, etc.)
-- Client authentication: **On**
-- Standard flow: **Off**; **Service accounts roles: On**
-- Everything else off
+Each needs the `scheduling` app's roles in `astrum_roles` (see the role table
+above), and each service client's tokens must carry an `aud` this app accepts
+— either `scheduling` itself, or a value listed in `OIDC_API_AUDIENCES`.
 
-Then Service account roles → Assign role → `service`.
+> **Open, needs a real token to settle.** The values Astrum actually puts in
+> `astrum_roles` have not been observed — the `/docs` endpoint is 401 and no
+> token was available while this was written. If they are platform-wide roles
+> (`provider`, `staff`, …) rather than this app's four, map them with
+> `OIDC_ROLE_CLAIMS` pointed at a scheduling-specific claim, or have the
+> provider issue `admin`/`operator`/`viewer`/`service` for this client.
+> Likewise `astrum_apps` looks like an app-entitlement list; if it is, gating
+> sign-in on it containing `scheduling` would be worth adding.
 
-If the resulting token's `aud` does not include `scheduling`, either add an
-audience mapper on the service client (Client scopes → dedicated →
-Add mapper → Audience → Included Client Audience: `scheduling`), or list the
-audience it does carry in `KEYCLOAK_API_AUDIENCES`.
+### Keycloak
+
+Also supported by the defaults, unconfigured.
+
+- Client `scheduling`, client authentication **on**, standard flow on, direct
+  access grants off. Redirect `https://<host>/auth/callback`, post-logout
+  `https://<host>/auth/signed_out`. Setting *Advanced → PKCE method* to `S256`
+  makes Keycloak require what we already send.
+- Realm roles `admin` / `operator` / `viewer`, assigned to users or groups.
+  Client roles on the `scheduling` client work too — both are read.
+- One service client per integration: client authentication on, standard flow
+  **off**, **service accounts on**, then assign it the `service` role.
+
+Keycloak puts `realm_access` / `resource_access` on the **access token**, not
+the ID token, by default. The app handles this — it validates the access token
+too and takes roles from there when the ID token has none — so no mapper change
+is needed.
 
 ## Calling the API
 
 ```sh
-TOKEN=$(curl -s -X POST \
-  "$KEYCLOAK_ISSUER/protocol/openid-connect/token" \
+TOKEN=$(curl -s -X POST "$OIDC_ISSUER/oauth/token" \
   -d grant_type=client_credentials \
   -d client_id=intake-bridge \
   -d client_secret=... | jq -r .access_token)
@@ -171,12 +218,18 @@ the request body are **ignored**:
 | User       | `user`       | the `sub` claim                               |
 | Service    | `service`    | the `azp` claim — the OAuth client id         |
 
-A service account's `sub` is an opaque realm uuid that names nothing a human
+A service account's `sub` is an opaque uuid that names nothing a human
 recognises, so services are attributed by client id: an operator reading the
-timeline sees `service:intake-bridge`, not
-`service:b3f1e0c2-…`. Keycloak marks client-credentials tokens by setting
-`preferred_username` to `service-account-<client-id>`, which is how the two are
-told apart.
+timeline sees `service:intake-bridge`, not `service:b3f1e0c2-…`.
+
+**Telling the two apart** is provider-neutral, because the vendor conventions
+disagree. Keycloak marks client-credentials tokens with
+`preferred_username: "service-account-<client>"`; Astrum sends no
+`preferred_username` at all. So the rule is the one OIDC implies: *a token with
+no end-user identity on it is a service token*. `email`, `sid` and
+`preferred_username` each describe a human who authenticated, and a
+client-credentials grant has none of them. Keycloak's convention is honoured
+too, since Keycloak does send a username on service tokens.
 
 This is the change that makes the audit log trustworthy. Previously the actor
 was whatever the caller put in the request body, so any client could attribute
@@ -195,7 +248,7 @@ session expires the operator is bounced through `/auth/login`, which the IdP
 answers silently from its own SSO cookie if the Keycloak session is still
 alive. They see a redirect, not a login form.
 
-**Session lifetime is ours, not the ID token's.** Keycloak ID tokens expire in
+**Session lifetime is ours, not the ID token's.** ID tokens typically expire in
 about five minutes. Honouring that literally would bounce an operator through
 the IdP mid-shift, repeatedly, for no security gain — what actually governs
 whether they must retype a password is the Keycloak SSO session. Our 8h
@@ -204,13 +257,20 @@ land within the day.
 
 **Signing algorithms are pinned.** An access token is not an ID token: OIDC
 does not specify its shape, so the discovery document does not say how it is
-signed. `KEYCLOAK_SIGNING_ALGS` (default `RS256`) is what the app accepts,
+signed. `OIDC_SIGNING_ALGS` (default `RS256`) is what the app accepts,
 rather than trusting the token header's `alg`. That is what makes `alg: none`
 and RS256/HS256 confusion inapplicable rather than merely unlikely.
 
 **JWKS rotation is handled.** `Oidcc.ProviderConfiguration.Worker` caches the
 discovery document and JWKS and re-fetches on an unrecognised `kid`, so
-rotating realm keys does not reject valid traffic.
+rotating signing keys does not reject valid traffic.
+
+**A JSON `null` claim is not `nil`.** `oidcc` decodes JSON `null` to the atom
+`:null`. A provider that sends `"email": null` rather than omitting the key
+therefore produces a value `is_nil/1` does not catch — which would classify
+every such service token as a human and store `:null` as somebody's email
+address. Claim reads go through a normaliser that maps `nil`, `:null` and `""`
+alike to absent.
 
 **`live_session` is the LiveView boundary.** LiveView skips re-running
 `on_mount` hooks only when navigating *within* one `live_session`. The operator
@@ -221,36 +281,45 @@ mounted under.
 ## What is not covered
 
 - **No token revocation check.** A token stays valid until `exp` even if the
-  realm session is ended. Keeping access-token lifetimes short (Keycloak's
-  5-minute default) is the mitigation. Introspection on every request would
-  close the window at the cost of an IdP round-trip per call.
+  provider's session is ended. Keeping access-token lifetimes short is the
+  mitigation. Astrum exposes `/oauth/introspect`; calling it per request would
+  close the window at the cost of a round-trip per call.
+- **No back-channel logout.** Astrum advertises
+  `backchannel_logout_supported: true`, so it can notify us when a session ends
+  elsewhere. We do not host the receiving endpoint, so such a session stays
+  live here until our own 8h deadline. Worth adding.
 - **No rate limiting.** Tracked as `sc-c41`.
-- **No per-office or per-tenant scoping.** Any authorized role sees every
-  patient in the deployment.
+- **Tenancy is captured but not enforced.** `astrum_org`, `astrum_org_id` and
+  `astrum_tenant` land on the identity and are in the session, but nothing
+  filters on them: any authorized role sees every patient in the deployment.
+  Scoping the queue and board by `org_id` is the obvious next step and is why
+  the claims are captured now.
+- **`astrum_location` is ignored.** If offices map onto it, that is the natural
+  key for per-location scoping.
 - **Dev routes** (`/dev/dashboard`, `/dev/mailbox`) are unauthenticated. They
   are compiled out unless `:dev_routes` is set, which is dev and test only.
 
 ## Local development
 
-Leave the `KEYCLOAK_*` variables unset and the app runs with no auth — every
+Leave the `OIDC_*` variables unset and the app runs with no auth — every
 screen open, every endpoint open, `current_scope` nil. This is what the
 quickstart in `integrations.md` assumes.
 
-To exercise the real thing locally, run Keycloak and point at it:
+To exercise the real thing locally, point at the deployed provider:
 
 ```sh
-docker run -p 8080:8080 \
-  -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
-  -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
-  quay.io/keycloak/keycloak:26.0 start-dev
-
-export KEYCLOAK_ISSUER=http://localhost:8080/realms/master
-export KEYCLOAK_CLIENT_ID=scheduling
-export KEYCLOAK_CLIENT_SECRET=...
+export OIDC_ISSUER=https://ac-core.45.59.71.47.nip.io
+export OIDC_CLIENT_ID=scheduling
+export OIDC_CLIENT_SECRET=...
 mix phx.server
 ```
+
+The redirect URI registered for the client must include your local
+`http://localhost:4000/auth/callback` for the browser flow to complete.
 
 The test suite does not need any of this: `Scheduling.OidcProvider`
 (`test/support/oidc_provider.ex`) stands up a fake provider on Bypass with a
 generated RSA key and mints real signed tokens against it, so the tests run the
-actual `oidcc` validation path.
+actual `oidcc` validation path. It mints **both** claim shapes — pass
+`shape: :astrum` (the default) or `shape: :keycloak` — because the point of
+`OIDC_ROLE_CLAIMS` is that either works unconfigured.

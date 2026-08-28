@@ -26,9 +26,10 @@ defmodule SchedulingWeb.Plugs.BrowserAuthTest do
     identity =
       %{
         "sub" => "user-1",
-        "preferred_username" => "acasey",
+        "email" => "acasey@example.org",
+        "sid" => "session-1",
         "name" => "A. Casey",
-        "realm_access" => %{"roles" => roles}
+        "astrum_roles" => roles
       }
       |> Map.merge(overrides)
       |> Identity.from_claims("scheduling")

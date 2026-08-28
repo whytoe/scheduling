@@ -1,9 +1,13 @@
 defmodule Scheduling.Auth do
   @moduledoc """
-  OpenID Connect configuration for the Keycloak (or any OIDC-compliant)
-  identity provider.
+  OpenID Connect configuration for the deployment's identity provider.
 
-  Two surfaces authenticate against the same realm:
+  Provider-neutral: everything here goes through OIDC discovery and the
+  provider's JWKS. The only place a provider's individuality shows through is
+  *where it puts roles and tenancy in the token*, and that is configuration
+  (`role_claims/0`, `org_claim/0`, `tenant_claim/0`) rather than code.
+
+  Two surfaces authenticate against the same issuer:
 
     * **Browser SSO** — operators sign in to the LiveView UI via the
       authorization-code flow with PKCE. See `SchedulingWeb.AuthController`.
@@ -28,11 +32,15 @@ defmodule Scheduling.Auth do
 
   ## Roles
 
-  Roles come from the token's claims — there is no local users table. Keycloak
-  publishes them in two places and we take the union:
+  Roles come from the token's claims — there is no local users table. OIDC
+  does not standardise where they live, so `role_claims/0` holds a list of
+  dotted claim paths and every one present on the token is unioned. The
+  default covers the shapes we have met:
 
-      realm_access.roles                      # realm roles
-      resource_access.<client_id>.roles       # client roles for this client
+      astrum_roles                        # Astrum core-api
+      roles                               # the plain case
+      realm_access.roles                  # Keycloak realm roles
+      resource_access.<client_id>.roles   # Keycloak client roles
 
   Four roles are recognised (see `Scheduling.Auth.Identity`):
 
@@ -81,10 +89,11 @@ defmodule Scheduling.Auth do
   @doc """
   Audience values accepted on API access tokens, beyond the client id itself.
 
-  Keycloak only puts a client in an access token's `aud` when that client has
-  an audience mapper, so a token minted for the bridge may carry
+  A provider does not necessarily put *us* in the `aud` of a token minted for
+  another client — Keycloak needs an explicit audience mapper, and other
+  providers vary — so a token from the check-in bridge may carry
   `aud: "scheduling-api"` rather than this app's client id. List those values
-  here (`KEYCLOAK_API_AUDIENCES`, comma-separated).
+  here (`OIDC_API_AUDIENCES`, comma-separated).
   """
   @spec trusted_audiences() :: [String.t()]
   def trusted_audiences do
@@ -106,6 +115,54 @@ defmodule Scheduling.Auth do
   @doc "Scopes requested during the browser authorization-code flow."
   @spec scopes() :: [String.t()]
   def scopes, do: get(:scopes) || ["openid", "profile", "email", "roles"]
+
+  @doc """
+  Dotted claim paths searched for roles, unioned. `<client_id>` in a path is
+  substituted with `client_id/0`. Override with `OIDC_ROLE_CLAIMS`.
+  """
+  @spec role_claims() :: [String.t()]
+  def role_claims do
+    get(:role_claims) ||
+      ["astrum_roles", "roles", "realm_access.roles", "resource_access.<client_id>.roles"]
+  end
+
+  @doc """
+  Claim naming the identity's organisation. Captured on the identity but not
+  yet enforced — see `docs/auth.md` §"What is not covered".
+  """
+  @spec org_claim() :: String.t()
+  def org_claim, do: get(:org_claim) || "astrum_org"
+
+  @doc "Claim naming the organisation's stable id."
+  @spec org_id_claim() :: String.t()
+  def org_id_claim, do: get(:org_id_claim) || "astrum_org_id"
+
+  @doc "Claim naming the tenant this identity belongs to."
+  @spec tenant_claim() :: String.t()
+  def tenant_claim, do: get(:tenant_claim) || "astrum_tenant"
+
+  @doc """
+  Values merged over the provider's discovery document before `oidcc` validates
+  it, for filling in fields a provider omits.
+
+  `oidcc` enforces the fields OIDC Discovery 1.0 §3 marks REQUIRED and refuses
+  to start without them. Astrum core-api omits `subject_types_supported`, so
+  without this the provider worker crash-loops at boot and every request
+  returns `503 provider_unavailable`.
+
+  The default supplies that one field as `["public"]`. Nothing in this app
+  reads it — it describes whether the provider issues pairwise `sub` values,
+  which only matters to a client correlating subjects across relying parties —
+  so filling it in is inert beyond satisfying the validation.
+
+  **This is a workaround for a non-conformant document, not a feature.** The
+  right fix is for the provider to publish the field; drop the override
+  (`OIDC_DISCOVERY_OVERRIDES={}`) once it does.
+  """
+  @spec discovery_overrides() :: map()
+  def discovery_overrides do
+    get(:discovery_overrides) || %{"subject_types_supported" => ["public"]}
+  end
 
   @doc """
   How long a browser session is trusted before the user is bounced back

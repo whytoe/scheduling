@@ -19,10 +19,32 @@ defmodule Scheduling.Auth.TokensTest do
     end
 
     test "picks up client roles as well as realm roles", ctx do
-      token = access_token(ctx, %{}, roles: ["viewer"], client_roles: ["admin"])
+      token = access_token(ctx, %{}, shape: :keycloak, roles: ["viewer"], client_roles: ["admin"])
 
       assert {:ok, identity} = Tokens.validate(token)
       assert Enum.sort(identity.roles) == ["admin", "viewer"]
+    end
+
+    test "accepts a Keycloak-shaped token without configuration", ctx do
+      token = access_token(ctx, %{}, shape: :keycloak, roles: ["admin"])
+
+      assert {:ok, identity} = Tokens.validate(token)
+      assert identity.roles == ["admin"]
+      assert identity.type == :user
+    end
+
+    test "carries the org and tenant claims through validation", ctx do
+      assert {:ok, identity} = Tokens.validate(access_token(ctx))
+
+      assert identity.org == "Northside Clinic"
+      assert identity.tenant == "northside"
+    end
+
+    test "identifies a Keycloak service-account token as a service", ctx do
+      assert {:ok, identity} = Tokens.validate(service_token(ctx, %{}, shape: :keycloak))
+
+      assert identity.type == :service
+      assert Identity.actor(identity) == {"service", "intake-bridge"}
     end
 
     test "identifies a client-credentials token as a service", ctx do

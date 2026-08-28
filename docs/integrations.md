@@ -54,7 +54,7 @@ Integrators authenticate with an OAuth 2.0 access token from the deployment's
 OIDC realm:
 
 ```sh
-TOKEN=$(curl -s -X POST "$KEYCLOAK_ISSUER/protocol/openid-connect/token" \
+TOKEN=$(curl -s -X POST "$OIDC_ISSUER/oauth/token" \
   -d grant_type=client_credentials \
   -d client_id=intake-bridge -d client_secret=... | jq -r .access_token)
 
@@ -468,7 +468,7 @@ container run -d --name scheduling-app --network scheduling \
   -p 4000:4000 scheduling-rig:latest
 ```
 
-(No `KEYCLOAK_*` variables here, so auth is off and the endpoints below need
+(No `OIDC_*` variables here, so auth is off and the endpoints below need
 no token — see `auth.md` §"Local development". A `:prod` release refuses to
 boot this way unless `AUTH_DISABLED=true` is also set.)
 

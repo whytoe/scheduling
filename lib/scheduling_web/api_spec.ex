@@ -43,7 +43,7 @@ defmodule SchedulingWeb.ApiSpec do
         the deployment's OpenID Connect provider. Integrations use the
         client-credentials grant:
 
-            curl -s -X POST "$ISSUER/protocol/openid-connect/token" \\
+            curl -s -X POST "$OIDC_ISSUER/oauth/token" \\
               -d grant_type=client_credentials \\
               -d client_id=intake-bridge \\
               -d client_secret=...
@@ -56,8 +56,9 @@ defmodule SchedulingWeb.ApiSpec do
 
         ## Roles
 
-        The token's roles decide what it may do. Roles are read from
-        `realm_access.roles` and `resource_access.<client_id>.roles`.
+        The token's roles decide what it may do. They are read from every
+        configured claim path that is present — `astrum_roles` by default,
+        plus the plain `roles` and Keycloak's two placements.
 
         | Role       | May                                                        |
         |------------|------------------------------------------------------------|

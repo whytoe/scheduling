@@ -34,7 +34,12 @@ config :scheduling, Scheduling.Compliance,
   http_timeout_ms: String.to_integer(System.get_env("INTAKE_HTTP_TIMEOUT_MS", "5000"))
 
 # ---------------------------------------------------------------------------
-# Keycloak (or any OIDC provider) — browser SSO and API bearer tokens.
+# OpenID Connect — browser SSO and API bearer tokens.
+#
+# Provider-neutral: point OIDC_ISSUER at any provider that publishes a
+# discovery document. Verified against Astrum core-api
+# (https://ac-core.../.well-known/openid-configuration); the role/org claim
+# defaults below match it, and also cover Keycloak.
 #
 # Auth turns on when issuer + client id + secret are all present. Leaving them
 # unset keeps a local checkout usable without an IdP, exactly like the intake
@@ -44,25 +49,42 @@ config :scheduling, Scheduling.Compliance,
 # 41 API endpoints become public. So the :prod block below refuses to boot
 # without it unless AUTH_DISABLED=true says so on purpose.
 # ---------------------------------------------------------------------------
+comma_list = fn var, default ->
+  var
+  |> System.get_env(default)
+  |> String.split(",", trim: true)
+  |> Enum.map(&String.trim/1)
+  |> Enum.reject(&(&1 == ""))
+end
+
 config :scheduling, Scheduling.Auth,
-  issuer: System.get_env("KEYCLOAK_ISSUER"),
-  client_id: System.get_env("KEYCLOAK_CLIENT_ID"),
-  client_secret: System.get_env("KEYCLOAK_CLIENT_SECRET"),
-  # Extra `aud` values accepted on API access tokens. Keycloak only puts a
-  # client in `aud` when an audience mapper says to, so a token minted for the
-  # check-in bridge may name "scheduling-api" rather than this app's client id.
-  trusted_audiences:
-    "KEYCLOAK_API_AUDIENCES"
-    |> System.get_env("")
-    |> String.split(",", trim: true)
-    |> Enum.map(&String.trim/1)
-    |> Enum.reject(&(&1 == "")),
+  issuer: System.get_env("OIDC_ISSUER"),
+  client_id: System.get_env("OIDC_CLIENT_ID"),
+  client_secret: System.get_env("OIDC_CLIENT_SECRET"),
+  # Extra `aud` values accepted on API access tokens. A provider does not
+  # necessarily name us in the `aud` of a token minted for another client, so
+  # a token from the check-in bridge may carry "scheduling-api" instead.
+  trusted_audiences: comma_list.("OIDC_API_AUDIENCES", ""),
   # Pinned rather than read from the token header — see Scheduling.Auth.Tokens.
-  signing_algs:
-    "KEYCLOAK_SIGNING_ALGS"
-    |> System.get_env("RS256")
-    |> String.split(",", trim: true)
-    |> Enum.map(&String.trim/1),
+  signing_algs: comma_list.("OIDC_SIGNING_ALGS", "RS256"),
+  # Dotted claim paths searched for roles; every one present is unioned.
+  # `<client_id>` is substituted with OIDC_CLIENT_ID.
+  role_claims:
+    comma_list.(
+      "OIDC_ROLE_CLAIMS",
+      "astrum_roles,roles,realm_access.roles,resource_access.<client_id>.roles"
+    ),
+  # Fields merged over the provider's discovery document. Astrum core-api omits
+  # `subject_types_supported`, which OIDC Discovery marks REQUIRED and oidcc
+  # enforces — without this the provider worker crash-loops at boot. Set
+  # OIDC_DISCOVERY_OVERRIDES={} once the provider publishes the field.
+  discovery_overrides:
+    "OIDC_DISCOVERY_OVERRIDES"
+    |> System.get_env(~s({"subject_types_supported":["public"]}))
+    |> Jason.decode!(),
+  org_claim: System.get_env("OIDC_ORG_CLAIM", "astrum_org"),
+  org_id_claim: System.get_env("OIDC_ORG_ID_CLAIM", "astrum_org_id"),
+  tenant_claim: System.get_env("OIDC_TENANT_CLAIM", "astrum_tenant"),
   session_ttl_seconds: String.to_integer(System.get_env("AUTH_SESSION_TTL_SECONDS", "28800"))
 
 if config_env() == :prod do
@@ -93,11 +115,11 @@ if config_env() == :prod do
       raise """
       Authentication is not configured.
 
-      Set KEYCLOAK_ISSUER, KEYCLOAK_CLIENT_ID and KEYCLOAK_CLIENT_SECRET, e.g.
+      Set OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CLIENT_SECRET, e.g.
 
-          KEYCLOAK_ISSUER=https://sso.example.org/realms/clinic
-          KEYCLOAK_CLIENT_ID=scheduling
-          KEYCLOAK_CLIENT_SECRET=...
+          OIDC_ISSUER=https://ac-core.45.59.71.47.nip.io
+          OIDC_CLIENT_ID=scheduling
+          OIDC_CLIENT_SECRET=...
 
       To run without authentication on purpose, set AUTH_DISABLED=true.
       """
