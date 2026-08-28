@@ -39,6 +39,7 @@ defmodule SchedulingWeb.Plugs.BrowserAuth do
   alias Scheduling.Auth
   alias Scheduling.Auth.Identity
   alias Scheduling.Auth.Scope
+  alias Scheduling.Auth.SessionRevocation
 
   @identity_key "auth_identity"
   @return_to_key :auth_return_to
@@ -69,14 +70,21 @@ defmodule SchedulingWeb.Plugs.BrowserAuth do
 
   @doc """
   Builds a scope from a serialised session identity, or `nil` when there is
-  none or it has expired. Shared with `SchedulingWeb.AuthHooks` so a LiveView
-  reaches the same verdict as the plug pipeline.
+  none, it has expired, or the identity provider has revoked it.
+
+  Shared with `SchedulingWeb.AuthHooks` so a LiveView reaches the same verdict
+  as the plug pipeline — which is why the revocation check belongs here and
+  nowhere else. A revoked session is indistinguishable from an expired one to
+  everything downstream.
   """
   @spec scope_from_session(term()) :: Scope.t() | nil
   def scope_from_session(data) do
-    case Identity.from_session(data) do
-      nil -> nil
-      identity -> if expired?(identity), do: nil, else: Scope.for_identity(identity)
+    with %Identity{} = identity <- Identity.from_session(data),
+         false <- expired?(identity),
+         false <- SessionRevocation.revoked?(identity) do
+      Scope.for_identity(identity)
+    else
+      _ -> nil
     end
   end
 

@@ -27,6 +27,15 @@ defmodule SchedulingWeb.Router do
     plug BrowserAuth, {:require_role, ["admin"]}
   end
 
+  # Back-channel logout is posted by the identity provider, server-to-server.
+  # It gets its own pipeline because it fits neither of the others: no session,
+  # no cookies, and therefore no CSRF token — running it through `:browser`
+  # would mean weakening `protect_from_forgery` for everything. Authentication
+  # is the signature on the logout token itself, checked in the controller.
+  pipeline :oidc_backchannel do
+    plug :accepts, ["json", "html"]
+  end
+
   pipeline :api do
     plug :accepts, ["json"]
     plug OpenApiSpex.Plug.PutApiSpec, module: SchedulingWeb.ApiSpec
@@ -58,6 +67,12 @@ defmodule SchedulingWeb.Router do
     get "/auth/callback", AuthController, :callback
     get "/auth/logout", AuthController, :logout
     get "/auth/signed_out", AuthController, :signed_out
+  end
+
+  scope "/", SchedulingWeb do
+    pipe_through :oidc_backchannel
+
+    post "/auth/backchannel-logout", BackchannelLogoutController, :create
   end
 
   # The operator surface. `live_session` re-runs the auth hook on every mount,

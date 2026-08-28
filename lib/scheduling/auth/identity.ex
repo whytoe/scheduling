@@ -71,6 +71,7 @@ defmodule Scheduling.Auth.Identity do
           org: String.t() | nil,
           org_id: String.t() | nil,
           tenant: String.t() | nil,
+          sid: String.t() | nil,
           expires_at: integer() | nil
         }
 
@@ -85,6 +86,7 @@ defmodule Scheduling.Auth.Identity do
     :org,
     :org_id,
     :tenant,
+    :sid,
     :expires_at
   ]
 
@@ -109,6 +111,9 @@ defmodule Scheduling.Auth.Identity do
       org: claim(claims, Auth.org_claim()),
       org_id: claim(claims, Auth.org_id_claim()),
       tenant: claim(claims, Auth.tenant_claim()),
+      # Kept so back-channel logout can name this exact session later; see
+      # `Scheduling.Auth.SessionRevocation`.
+      sid: claim(claims, "sid"),
       expires_at: claim(claims, "exp")
     }
   end
@@ -135,6 +140,7 @@ defmodule Scheduling.Auth.Identity do
       "org" => identity.org,
       "org_id" => identity.org_id,
       "tenant" => identity.tenant,
+      "sid" => identity.sid,
       "exp" => identity.expires_at
     }
   end
@@ -153,6 +159,7 @@ defmodule Scheduling.Auth.Identity do
       org: data["org"],
       org_id: data["org_id"],
       tenant: data["tenant"],
+      sid: data["sid"],
       expires_at: data["exp"]
     }
   end
