@@ -32,8 +32,14 @@ defmodule SchedulingWeb.Plugs.ApiAuth do
   | No / malformed Authorization      | 401    | `unauthorized`         |
   | Bad signature, issuer, audience   | 401    | `invalid_token`        |
   | Expired token                     | 401    | `token_expired`        |
+  | Valid token, wrong organisation   | 403    | `forbidden`            |
   | Valid token, insufficient role    | 403    | `forbidden`            |
   | IdP unreachable                   | 503    | `provider_unavailable` |
+
+  The organisation check (`Scheduling.Auth.org_permitted?/1`) runs during
+  authentication rather than authorization: which tenant a token belongs to is
+  not a question about what it may do here, it is a question about whether it
+  is talking to the right deployment at all.
 
   401s carry a `WWW-Authenticate: Bearer` header per RFC 6750 so a generated
   client can tell "you need a token" from "your token is not good enough".
@@ -73,11 +79,26 @@ defmodule SchedulingWeb.Plugs.ApiAuth do
 
   defp authenticate(conn) do
     with {:ok, token} <- bearer_token(conn),
-         {:ok, identity} <- Tokens.validate(token) do
+         {:ok, identity} <- Tokens.validate(token),
+         :ok <- check_org(identity) do
       assign(conn, :current_identity, identity)
     else
       {:error, :missing} ->
         deny(conn, 401, "unauthorized", "A bearer token is required")
+
+      {:error, {:wrong_org, org_id}} ->
+        # The token is genuine — it just belongs to another tenant. Echoing the
+        # org id we read back is the caller's own data, and it separates "wrong
+        # organisation" from "our org claim mapping is misconfigured", which
+        # look identical from the outside otherwise. The expected value is not
+        # echoed: that would leak this deployment's tenant to any valid token.
+        deny(
+          conn,
+          403,
+          "forbidden",
+          "This token's organisation is not the one this deployment serves",
+          %{token_org_id: org_id}
+        )
 
       {:error, :token_expired} ->
         deny(conn, 401, "token_expired", "The access token has expired")
@@ -109,6 +130,12 @@ defmodule SchedulingWeb.Plugs.ApiAuth do
         %{required: required_roles(requirement), granted: identity.roles}
       )
     end
+  end
+
+  # Runs after the signature checks, so a token is only ever told it is in the
+  # wrong organisation once we have established it is genuinely ours to read.
+  defp check_org(%Identity{org_id: org_id}) do
+    if Auth.org_permitted?(org_id), do: :ok, else: {:error, {:wrong_org, org_id}}
   end
 
   defp permitted?(identity, :require_read), do: Identity.can_read?(identity)

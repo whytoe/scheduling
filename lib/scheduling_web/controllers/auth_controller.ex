@@ -167,27 +167,47 @@ defmodule SchedulingWeb.AuthController do
   end
 
   defp sign_in(conn, %Identity{} = identity) do
-    if Identity.can_read?(identity) do
-      Logger.info("Signed in #{identity.subject} with roles #{inspect(identity.roles)}")
+    cond do
+      # Organisation before roles: someone from another tenant should be told
+      # they are at the wrong deployment, not that their roles are wrong here.
+      not Auth.org_permitted?(identity.org_id) ->
+        Logger.warning(
+          "Denied #{identity.subject}: organisation #{inspect(identity.org_id)} is not the one this deployment serves"
+        )
 
-      # Read before log_in — renewing the session drops the remembered path.
-      return_to = BrowserAuth.take_return_to(conn)
+        conn
+        |> put_flash(
+          :error,
+          gettext(
+            "Your account belongs to a different organisation than this scheduling system serves."
+          )
+        )
+        |> redirect(to: ~p"/auth/signed_out")
 
-      conn
-      |> BrowserAuth.log_in(identity)
-      |> put_flash(:info, gettext("Signed in as %{name}", name: Identity.label(identity)))
-      |> redirect(to: return_to)
-    else
       # Authenticated against the realm but granted nothing here. Saying so
       # plainly beats an empty board that looks broken.
-      Logger.warning("Denied #{identity.subject}: no recognised role")
+      not Identity.can_read?(identity) ->
+        Logger.warning("Denied #{identity.subject}: no recognised role")
 
-      conn
-      |> put_flash(
-        :error,
-        gettext("Your account has no Scheduling role assigned. Ask an administrator for access.")
-      )
-      |> redirect(to: ~p"/auth/signed_out")
+        conn
+        |> put_flash(
+          :error,
+          gettext(
+            "Your account has no Scheduling role assigned. Ask an administrator for access."
+          )
+        )
+        |> redirect(to: ~p"/auth/signed_out")
+
+      true ->
+        Logger.info("Signed in #{identity.subject} with roles #{inspect(identity.roles)}")
+
+        # Read before log_in — renewing the session drops the remembered path.
+        return_to = BrowserAuth.take_return_to(conn)
+
+        conn
+        |> BrowserAuth.log_in(identity)
+        |> put_flash(:info, gettext("Signed in as %{name}", name: Identity.label(identity)))
+        |> redirect(to: return_to)
     end
   end
 

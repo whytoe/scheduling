@@ -82,6 +82,10 @@ config :scheduling, Scheduling.Auth,
     "OIDC_DISCOVERY_OVERRIDES"
     |> System.get_env(~s({"subject_types_supported":["public"]}))
     |> Jason.decode!(),
+  # The one organisation this deployment serves. The provider is multi-tenant;
+  # this app is not. A token from any other org is refused on both surfaces
+  # even when its roles would permit the call. Unset disables the check.
+  expected_org_id: System.get_env("ASTRUM_ORG_ID"),
   org_claim: System.get_env("OIDC_ORG_CLAIM", "astrum_org"),
   org_id_claim: System.get_env("OIDC_ORG_ID_CLAIM", "astrum_org_id"),
   tenant_claim: System.get_env("OIDC_TENANT_CLAIM", "astrum_tenant"),
