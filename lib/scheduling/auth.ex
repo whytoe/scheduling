@@ -57,9 +57,18 @@ defmodule Scheduling.Auth do
   ## Tenancy
 
   The provider is multi-tenant; a deployment of this app serves exactly one
-  organisation. When `expected_org_id/0` is set, a token whose org id does not
-  match is refused on both surfaces regardless of its roles — see
-  `org_permitted?/1`.
+  tenant. ac-core nests **organization → practice → location** and scopes every
+  `/v1` read to the caller's practice, so the practice is the level that
+  matches how the data is partitioned.
+
+  When `expected_tenancy_id/0` is set, a token whose id does not match is
+  refused on both surfaces regardless of its roles — see
+  `tenancy_permitted?/1`. Which claim carries that id is configurable
+  (`tenancy_claim/0`), because ac-core does not advertise a practice claim by
+  name and the mapping is still unconfirmed.
+
+  This is an **authentication** boundary, not a data one: it keeps other
+  tenants out, but no query filters by tenant.
   """
 
   @provider_name Scheduling.Auth.Provider
@@ -145,27 +154,46 @@ defmodule Scheduling.Auth do
   def org_id_claim, do: get(:org_id_claim) || "astrum_org_id"
 
   @doc """
-  The single organisation this deployment serves, as the stable org id read
-  from `org_id_claim/0`.
+  Which claim carries the id this deployment is scoped to.
 
-  `nil` (the default) disables the check, matching how the rest of this module
-  behaves when unconfigured. Set `ASTRUM_ORG_ID` to turn it on.
+  ac-core nests **organization → practice → location**, and every `/v1` read is
+  "scoped to the caller's practice[s]" — so a *practice* is the unit that
+  matches how the data is actually partitioned, and a scheduling deployment
+  serves one.
+
+  Which claim carries the practice id is **not yet confirmed**: ac-core's
+  `claims_supported` advertises `astrum_org`, `astrum_org_id`, `astrum_tenant`
+  and `astrum_location`, but nothing named for a practice. So this is
+  configurable — `OIDC_TENANCY_CLAIM` — and defaults to `astrum_org_id`, the
+  one we have actually seen. Point it at whichever claim turns out to carry the
+  practice and the check moves down a level without a code change.
   """
-  @spec expected_org_id() :: String.t() | nil
-  def expected_org_id, do: get(:expected_org_id)
+  @spec tenancy_claim() :: String.t()
+  def tenancy_claim, do: get(:tenancy_claim) || "astrum_org_id"
 
   @doc """
-  True when an identity carrying `org_id` belongs to the organisation this
-  deployment serves.
+  The single tenant this deployment serves, as the id expected in
+  `tenancy_claim/0`.
+
+  `nil` (the default) disables the check, matching how the rest of this module
+  behaves when unconfigured. Set `SCHEDULING_TENANCY_ID` to turn it on.
+  """
+  @spec expected_tenancy_id() :: String.t() | nil
+  def expected_tenancy_id, do: get(:expected_tenancy_id)
+
+  @doc """
+  True when an identity's tenancy id is the one this deployment serves.
 
   The provider is multi-tenant; a scheduling deployment is not. A token from
-  another organisation is refused on both surfaces even when its roles would
+  another tenant is refused on both surfaces even when its roles would
   otherwise permit the call — otherwise a valid operator at one clinic could
   read another clinic's board.
 
-  A token with **no** org id is refused too when one is expected. That case is
-  either a claim-mapping mistake or a token from somewhere that does not carry
-  tenancy at all, and neither is something to wave through.
+  A token with **no** tenancy id is refused too when one is expected. That case
+  is either a claim-mapping mistake or a token from somewhere that does not
+  carry tenancy at all, and neither is something to wave through. Note the
+  failure mode: if `tenancy_claim/0` names a claim the provider does not send,
+  *everyone* is refused rather than only outsiders.
 
   Takes the id rather than the `Scheduling.Auth.Identity` struct to keep this
   module free of a compile-time dependency on `Identity`, which already
@@ -173,11 +201,11 @@ defmodule Scheduling.Auth do
   `SchedulingWeb.AuthController` call this, so the two surfaces cannot drift
   apart on what "permitted here" means.
   """
-  @spec org_permitted?(String.t() | nil) :: boolean()
-  def org_permitted?(org_id) do
-    case expected_org_id() do
+  @spec tenancy_permitted?(String.t() | nil) :: boolean()
+  def tenancy_permitted?(tenancy_id) do
+    case expected_tenancy_id() do
       nil -> true
-      expected -> org_id == expected
+      expected -> tenancy_id == expected
     end
   end
 

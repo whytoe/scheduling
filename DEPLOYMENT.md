@@ -97,7 +97,8 @@ Optional:
 | `OIDC_ROLE_CLAIMS`  | `astrum_roles,roles,realm_access.roles,resource_access.<client_id>.roles` | Dotted claim paths searched for roles; all present are unioned. |
 | `OIDC_DISCOVERY_OVERRIDES` | `{"subject_types_supported":["public"]}` | JSON merged over the provider's discovery document. The default works around `ac-core` omitting a field OIDC Discovery marks REQUIRED; without it the app cannot boot. See `docs/auth.md`. |
 | `OIDC_ORG_CLAIM` / `OIDC_ORG_ID_CLAIM` / `OIDC_TENANT_CLAIM` | `astrum_org` / `astrum_org_id` / `astrum_tenant` | Tenancy claims captured on the identity. |
-| `ASTRUM_ORG_ID`     | unset        | Restricts the deployment to one organisation: a token naming a different `astrum_org_id` is refused. Use the opaque org id, not the display name. Unset = no check. |
+| `SCHEDULING_TENANCY_ID` | unset     | Restricts the deployment to one tenant: a token whose tenancy id differs is refused. Unset = no check. |
+| `OIDC_TENANCY_CLAIM` | `astrum_org_id` | Which claim carries the tenancy id. ac-core scopes data by *practice* but advertises no practice claim, so confirm against a real token before setting `SCHEDULING_TENANCY_ID` — a wrong claim name refuses everyone. See `docs/auth.md`. |
 | `AUTH_SESSION_TTL_SECONDS` | `28800` (8h) | How long a browser session is trusted before re-auth.  |
 | `AUTH_DISABLED`     | unset        | `true` allows a prod boot with no authentication. See above.  |
 

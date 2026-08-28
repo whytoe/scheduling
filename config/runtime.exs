@@ -85,7 +85,13 @@ config :scheduling, Scheduling.Auth,
   # The one organisation this deployment serves. The provider is multi-tenant;
   # this app is not. A token from any other org is refused on both surfaces
   # even when its roles would permit the call. Unset disables the check.
-  expected_org_id: System.get_env("ASTRUM_ORG_ID"),
+  # Which claim carries the id this deployment is scoped to, and what that id
+  # must be. ac-core nests organization -> practice -> location and scopes /v1
+  # reads by practice, so a practice is the right level — but ac-core does not
+  # advertise a practice claim by name, so the claim is configurable and
+  # defaults to the one we have confirmed exists. See docs/auth.md.
+  tenancy_claim: System.get_env("OIDC_TENANCY_CLAIM", "astrum_org_id"),
+  expected_tenancy_id: System.get_env("SCHEDULING_TENANCY_ID"),
   org_claim: System.get_env("OIDC_ORG_CLAIM", "astrum_org"),
   org_id_claim: System.get_env("OIDC_ORG_ID_CLAIM", "astrum_org_id"),
   tenant_claim: System.get_env("OIDC_TENANT_CLAIM", "astrum_tenant"),

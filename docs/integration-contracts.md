@@ -111,7 +111,57 @@ Goal: accept the requirement details that drive capability matching.
 4. **Dispatch** `sc-bd8` (check-in ingest: webhook handler + REST reconcile +
    matching) and `sc-5ed` (forms requirement pull) as fast-followers.
 
+## Update 2026-08-28: the ac-core spec has arrived
+
+`docs/ac-core-swagger.json` is the real document ("Avenue D Core API" v1.0.0,
+107 paths), vendored per this record's own decision to consume the published
+spec rather than build against guesses. Reconciling it against the working
+assumptions above:
+
+**Confirmed.** ac-core is the platform's registry for patients, providers,
+organisations, practices and locations, reached with an OAuth
+client-credentials token and a per-route scope. Two parallel surfaces exist:
+`/admin/*` and unversioned paths for first-party staff-cookie callers, and
+`/v1/*` for integrators. **We use `/v1/*` only.**
+
+**Corrected — the hierarchy is three levels, not two.**
+
+    organization → practice → location
+
+Every `/v1` read is "scoped to the caller's practice[s]". A scheduling
+deployment therefore serves **one practice**, not one organisation, and
+`Scheduling.Auth`'s tenancy check moved to a configurable claim to match.
+
+**Corrected — a location is a site, not a room.** `GET /v1/locations` returns
+`{id, practiceId, name, address, timezone, active}`. A scheduling *office* is a
+room or service point with an intake capacity. They are different granularities,
+so offices are **not** a projection of locations: an office gains a nullable
+`core_location_id` naming the site it sits in, and several offices may share
+one.
+
+**Patient shape** (`GET /v1/patients/{id}`): `id`, `practiceId`, `mrn`,
+`firstName`, `lastName`, `dateOfBirth`, `phone`, `email`. **PII only — no
+clinical fields**, which is what makes projecting it compatible with
+`data-boundary.md`. We take `id`, `practiceId` and the names, and drop the
+rest at the client boundary.
+
+> ⚠️ Every response object in the spec is `additionalProperties: true`, so the
+> live API may return fields the document does not list. Projection must be an
+> explicit allowlist, never a merge — otherwise an undocumented clinical field
+> would land in this database silently.
+
+Useful endpoints beyond the above: `POST /v1/patients/search`,
+`POST /v1/patients/batch`, `GET /v1/practices`, `GET /v1/audit-logs`,
+`POST /oauth/introspect`, `POST /oauth/revoke`.
+
+**Still open.** The values ac-core puts in `astrum_roles`, and whether
+`astrum_apps` is an entitlement list — the spec's only `roles` reference is an
+untyped array on `POST /staff/provision`, so a real token is still needed.
+
+**Still missing.** The ac-checkin spec. `sc-bd8` remains held on it.
+
 ## Dependency status
 
-- `sc-7hs` (this decision) — recorded; waiting on the external spec.
-- `sc-bd8`, `sc-5ed` — held pending the spec.
+- `sc-7hs` (this decision) — the ac-core half is resolved; see the update above.
+- `sc-bd8` — still held, pending the **ac-checkin** spec.
+- `sc-5ed` — effectively delivered.
