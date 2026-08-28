@@ -14,8 +14,13 @@ defmodule SchedulingWeb.BoardLiveTest do
     Repo.insert!(Patient.changeset(%Patient{}, %{name: name}))
   end
 
+  # Names are suffixed because `capabilities.name` is uniquely indexed and these
+  # test files run async. Two tests inserting "MRI" and "XRay" in opposite
+  # orders each wait on the other's index lock — a genuine Postgres deadlock
+  # (40P01), and the source of a long-running intermittent CI failure.
   defp capability_fixture(name) do
-    Repo.insert!(Capability.changeset(%Capability{}, %{name: name}))
+    unique = "#{name}-#{System.unique_integer([:positive])}"
+    Repo.insert!(Capability.changeset(%Capability{}, %{name: unique}))
   end
 
   defp office_fixture(name, capacity, capability_ids) do
@@ -111,24 +116,8 @@ defmodule SchedulingWeb.BoardLiveTest do
       assert has_element?(live, "#board-waiting-count", "1")
     end
 
-    test "new sign-ins get the arrival animation; existing cards and first paint do not",
-         %{conn: conn} do
-      _office = office_fixture("Room A", 3, [])
-      early = waiting_entry("Early Bird", [])
-
-      {:ok, live, _html} = live(conn, ~p"/board")
-      # No arrival animation on the initial paint.
-      refute has_element?(live, "#w-#{early.id}.is-arriving")
-
-      # A new patient signs in after mount and the board is notified live.
-      late = waiting_entry("Late Arrival", [])
-      Phoenix.PubSub.broadcast(Scheduling.PubSub, Queue.board_topic(), {:board_changed, :arrival})
-      render(live)
-
-      # Only the newly-arrived card animates in.
-      assert has_element?(live, "#w-#{late.id}.is-arriving")
-      refute has_element?(live, "#w-#{early.id}.is-arriving")
-    end
+    # The arrival-animation test lives in board_arrival_test.exs — it cannot run
+    # async. See the moduledoc there.
   end
 
   describe "completion + re-queue actions" do

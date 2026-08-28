@@ -14,8 +14,13 @@ defmodule SchedulingWeb.RoutingDecisionLiveTest do
     Repo.insert!(Patient.changeset(%Patient{}, %{name: name}))
   end
 
+  # Names are suffixed because `capabilities.name` is uniquely indexed and these
+  # test files run async. Two tests inserting "MRI" and "XRay" in opposite
+  # orders each wait on the other's index lock — a genuine Postgres deadlock
+  # (40P01), and the source of a long-running intermittent CI failure.
   defp capability_fixture(name) do
-    Repo.insert!(Capability.changeset(%Capability{}, %{name: name}))
+    unique = "#{name}-#{System.unique_integer([:positive])}"
+    Repo.insert!(Capability.changeset(%Capability{}, %{name: unique}))
   end
 
   defp office_fixture(name, capacity, capability_ids) do

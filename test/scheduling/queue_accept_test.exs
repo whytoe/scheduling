@@ -14,8 +14,13 @@ defmodule Scheduling.QueueAcceptTest do
     Repo.insert!(Patient.changeset(%Patient{}, %{name: name}))
   end
 
+  # Names are suffixed because `capabilities.name` is uniquely indexed and these
+  # test files run async. Two tests inserting "MRI" and "XRay" in opposite
+  # orders each wait on the other's index lock — a genuine Postgres deadlock
+  # (40P01), and the source of a long-running intermittent CI failure.
   defp capability_fixture(name) do
-    Repo.insert!(Capability.changeset(%Capability{}, %{name: name}))
+    unique = "#{name}-#{System.unique_integer([:positive])}"
+    Repo.insert!(Capability.changeset(%Capability{}, %{name: unique}))
   end
 
   defp office_fixture(name, capacity, capability_ids) do
@@ -155,7 +160,7 @@ defmodule Scheduling.QueueAcceptTest do
       assert decision.patient_name == "Jane Doe"
       assert decision.chosen_office_id == tight.id
       assert decision.chosen_office_name == "Tight Room"
-      assert decision.required_capabilities == ["XRay"]
+      assert decision.required_capabilities == [xray.name]
       assert decision.eligible_offices == ["Tight Room", "Loose Room"]
       assert decision.accepted_by == "front-desk"
       assert decision.rationale =~ "Tight Room"
@@ -173,7 +178,7 @@ defmodule Scheduling.QueueAcceptTest do
       assert decision.queue_entry_id == entry.id
       assert is_nil(decision.chosen_office_id)
       assert is_nil(decision.chosen_office_name)
-      assert decision.required_capabilities == ["MRI"]
+      assert decision.required_capabilities == [mri.name]
       assert decision.eligible_offices == []
       assert decision.rationale =~ "No eligible office"
     end

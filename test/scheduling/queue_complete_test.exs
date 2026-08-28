@@ -11,8 +11,13 @@ defmodule Scheduling.QueueCompleteTest do
     Repo.insert!(Patient.changeset(%Patient{}, %{name: name}))
   end
 
+  # Names are suffixed because `capabilities.name` is uniquely indexed and these
+  # test files run async. Two tests inserting "MRI" and "XRay" in opposite
+  # orders each wait on the other's index lock — a genuine Postgres deadlock
+  # (40P01), and the source of a long-running intermittent CI failure.
   defp capability_fixture(name) do
-    Repo.insert!(Capability.changeset(%Capability{}, %{name: name}))
+    unique = "#{name}-#{System.unique_integer([:positive])}"
+    Repo.insert!(Capability.changeset(%Capability{}, %{name: unique}))
   end
 
   defp office_fixture(name, capacity, capability_ids) do
@@ -141,7 +146,7 @@ defmodule Scheduling.QueueCompleteTest do
       assert {:ok, requeued} = Queue.requeue(assigned, required_capabilities: [mri])
 
       names = requeued.required_capabilities |> Enum.map(& &1.name) |> Enum.sort()
-      assert names == ["MRI"]
+      assert names == [mri.name]
     end
 
     test "re-routes to a different best-fit office after re-queue with new needs" do

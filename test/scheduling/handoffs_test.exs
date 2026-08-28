@@ -13,8 +13,13 @@ defmodule Scheduling.HandoffsTest do
     Repo.insert!(Patient.changeset(%Patient{}, %{name: name}))
   end
 
+  # Names are suffixed because `capabilities.name` is uniquely indexed and these
+  # test files run async. Two tests inserting "MRI" and "XRay" in opposite
+  # orders each wait on the other's index lock — a genuine Postgres deadlock
+  # (40P01), and the source of a long-running intermittent CI failure.
   defp capability_fixture(name) do
-    Repo.insert!(Capability.changeset(%Capability{}, %{name: name}))
+    unique = "#{name}-#{System.unique_integer([:positive])}"
+    Repo.insert!(Capability.changeset(%Capability{}, %{name: unique}))
   end
 
   defp office_fixture(name, capacity, capability_ids) do
@@ -51,16 +56,20 @@ defmodule Scheduling.HandoffsTest do
 
       {:ok, _assigned, _result} = Queue.accept(entry)
 
-      # Scoped to the target office and on the board-wide topic.
-      assert_receive {:handoff_created, %Handoff{} = scoped}
-      assert_receive {:handoff_created, %Handoff{} = board}
+      # Scoped to the target office and on the board-wide topic. Both matches
+      # pin office_id: subscribe_handoffs/0 is a global topic and PubSub is not
+      # sandboxed, so a concurrent test's handoff can land in this mailbox
+      # first. `assert_receive` matches selectively, so pinning skips it.
+      office_id = office.id
+      assert_receive {:handoff_created, %Handoff{office_id: ^office_id} = scoped}
+      assert_receive {:handoff_created, %Handoff{office_id: ^office_id} = board}
       assert scoped.id == board.id
 
       assert scoped.office_id == office.id
       assert scoped.status == :pending
       assert scoped.patient_name == "Jane Doe"
       assert scoped.office_name == "Room A"
-      assert scoped.required_capabilities == ["XRay"]
+      assert scoped.required_capabilities == [xray.name]
       assert scoped.patient_id == entry.patient_id
       assert scoped.queue_entry_id == entry.id
     end
@@ -116,7 +125,9 @@ defmodule Scheduling.HandoffsTest do
       refute is_nil(acknowledged.acknowledged_at)
       assert acknowledged.acknowledged_by == "clinical"
 
-      assert_receive {:handoff_acknowledged, %Handoff{} = acked}
+      # Pinned for the same reason as above — this is the global topic.
+      handoff_id = handoff.id
+      assert_receive {:handoff_acknowledged, %Handoff{id: ^handoff_id} = acked}
       assert acked.id == handoff.id
 
       assert Handoffs.list_pending_for_office(office.id) == []

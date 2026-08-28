@@ -3,13 +3,17 @@ defmodule SchedulingWeb.OfficeLiveTest do
 
   import Phoenix.LiveViewTest
 
-  alias Scheduling.Catalog
   alias Scheduling.Offices
   alias Scheduling.Repo
   alias Scheduling.Catalog.Capability
 
+  # Names are suffixed because `capabilities.name` is uniquely indexed and these
+  # test files run async. Two tests inserting "MRI" and "XRay" in opposite
+  # orders each wait on the other's index lock — a genuine Postgres deadlock
+  # (40P01), and the source of a long-running intermittent CI failure.
   defp capability_fixture(name) do
-    Repo.insert!(Capability.changeset(%Capability{}, %{name: name}))
+    unique = "#{name}-#{System.unique_integer([:positive])}"
+    Repo.insert!(Capability.changeset(%Capability{}, %{name: unique}))
   end
 
   defp office_fixture(attrs) do
@@ -52,7 +56,7 @@ defmodule SchedulingWeb.OfficeLiveTest do
       assert [office] = Offices.list_offices()
       assert office.name == "Room B"
       assert office.intake_capacity == 5
-      assert Enum.map(office.capabilities, & &1.name) == ["XRay"]
+      assert Enum.map(office.capabilities, & &1.name) == [xray.name]
     end
 
     test "shows validation errors for invalid input", %{conn: conn} do
@@ -72,7 +76,7 @@ defmodule SchedulingWeb.OfficeLiveTest do
   describe "edit office: add and remove capabilities" do
     test "adds a capability to an existing office", %{conn: conn} do
       xray = capability_fixture("XRay")
-      _lab = capability_fixture("Lab")
+      lab = capability_fixture("Lab")
 
       office =
         office_fixture(%{
@@ -82,8 +86,6 @@ defmodule SchedulingWeb.OfficeLiveTest do
         })
 
       {:ok, live, _html} = live(conn, ~p"/offices/#{office}/edit")
-
-      lab = Enum.find(Catalog.list_capabilities(), &(&1.name == "Lab"))
 
       live
       |> form("#office-form",
@@ -99,7 +101,7 @@ defmodule SchedulingWeb.OfficeLiveTest do
 
       reloaded = Offices.get_office!(office.id)
       names = reloaded.capabilities |> Enum.map(& &1.name) |> Enum.sort()
-      assert names == ["Lab", "XRay"]
+      assert names == Enum.sort([lab.name, xray.name])
     end
 
     test "removes all capabilities from an office", %{conn: conn} do
