@@ -16,7 +16,8 @@ defmodule SchedulingWeb.Api.QueueEntriesAcceptErrorTest do
 
   test "accept with no eligible office returns the unified error envelope", %{conn: conn} do
     patient = Repo.insert!(Patient.changeset(%Patient{}, %{name: "Jane Doe"}))
-    mri = Repo.insert!(Capability.changeset(%Capability{}, %{name: "MRI"}))
+    name = "MRI-#{System.unique_integer([:positive])}"
+    mri = Repo.insert!(Capability.changeset(%Capability{}, %{name: name}))
 
     entry =
       %QueueEntry{}

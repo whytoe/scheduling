@@ -124,6 +124,14 @@ defmodule SchedulingWeb.BoardLive.Index do
     end
   end
 
+  # How long the `is-arriving` class stays on a card — long enough for the CSS
+  # animation to play out. Configurable so tests can hold it open: at the
+  # 450ms default the highlight can expire between the broadcast and the
+  # assertion on a loaded machine, which made the arrival test flaky.
+  defp arrival_highlight_ms do
+    Application.get_env(:scheduling, :arrival_highlight_ms, 450)
+  end
+
   defp load_board(socket, animate?) do
     loads = Queue.current_loads()
     pending = Handoffs.list_pending()
@@ -191,7 +199,7 @@ defmodule SchedulingWeb.BoardLive.Index do
     arrived_a = if animate?, do: active_ids -- socket.assigns.prev_active_ids, else: []
 
     if arrived_w != [] or arrived_i != [] or arrived_a != [] do
-      Process.send_after(self(), :clear_arrived, 450)
+      Process.send_after(self(), :clear_arrived, arrival_highlight_ms())
     end
 
     socket
@@ -270,7 +278,7 @@ defmodule SchedulingWeb.BoardLive.Index do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} active={:board} wide>
+    <Layouts.app flash={@flash} current_scope={@current_scope} active={:board} wide>
       <.page_head title="Shared board" live>
         <:subtitle>
           One source of truth for front desk and clinical staff. Every change pushes

@@ -76,7 +76,7 @@ defmodule SchedulingWeb.VisitEventLive.Index do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} active={:visit_events}>
+    <Layouts.app flash={@flash} current_scope={@current_scope} active={:visit_events}>
       <.page_head title="Visit events">
         <:subtitle>
           The lifecycle timeline grouped by visit: sign-in → acknowledged → completion,

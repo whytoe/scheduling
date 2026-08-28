@@ -5,8 +5,12 @@ defmodule SchedulingWeb.CapabilityLiveTest do
 
   alias Scheduling.Catalog
 
+  # Suffixed to avoid unique-index deadlocks between async test files — see the
+  # note in test/scheduling/queue_accept_test.exs.
   defp capability_fixture(name) do
-    {:ok, cap} = Catalog.create_capability(%{"name" => name})
+    {:ok, cap} =
+      Catalog.create_capability(%{"name" => "#{name}-#{System.unique_integer([:positive])}"})
+
     cap
   end
 
@@ -50,16 +54,16 @@ defmodule SchedulingWeb.CapabilityLiveTest do
 
   describe "delete" do
     test "deletes a capability after confirmation", %{conn: conn} do
-      capability_fixture("Audiology")
+      cap = capability_fixture("Audiology")
 
       {:ok, live, _html} = live(conn, ~p"/capabilities")
 
-      live |> element("button[aria-label='Delete Audiology']") |> render_click()
+      live |> element("button[aria-label='Delete #{cap.name}']") |> render_click()
       assert render(live) =~ "will be removed"
 
       live |> element("#delete-capability button", "Delete capability") |> render_click()
 
-      refute has_element?(live, ".grid-cards", "Audiology")
+      refute has_element?(live, ".grid-cards", cap.name)
       assert Catalog.list_capabilities() == []
     end
   end

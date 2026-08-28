@@ -14,6 +14,9 @@ defmodule SchedulingWeb.HealthController do
         "against the database succeeded; `503 {\"status\":\"degraded\"}` when " <>
         "the database is unreachable. Suitable as both a liveness and a " <>
         "readiness probe.",
+    # Overrides the document-level bearer requirement: a liveness probe that
+    # needs a token is a liveness probe that reports the IdP's health too.
+    security: [],
     responses: [
       ok: {"App is healthy", "application/json", Schemas.HealthResponse},
       service_unavailable: {"Database unreachable", "application/json", Schemas.HealthResponse}

@@ -68,11 +68,15 @@ defmodule Scheduling.QueueTest do
     end
   end
 
+  defp unique(name), do: "#{name}-#{System.unique_integer([:positive])}"
+
   describe "required capabilities (BOTH model override)" do
     test "an explicit set of required capabilities can be set per entry" do
       patient = patient_fixture()
-      {:ok, xray} = Repo.insert(Capability.changeset(%Capability{}, %{name: "XRay"}))
-      {:ok, mri} = Repo.insert(Capability.changeset(%Capability{}, %{name: "MRI"}))
+      # Suffixed: capabilities.name is uniquely indexed and these files run
+      # async, so a fixed pair of names deadlocks on the index (40P01).
+      {:ok, xray} = Repo.insert(Capability.changeset(%Capability{}, %{name: unique("XRay")}))
+      {:ok, mri} = Repo.insert(Capability.changeset(%Capability{}, %{name: unique("MRI")}))
 
       {:ok, entry} =
         Repo.insert(QueueEntry.changeset(%QueueEntry{}, %{patient_id: patient.id}))
@@ -89,7 +93,7 @@ defmodule Scheduling.QueueTest do
         |> Enum.map(& &1.name)
         |> Enum.sort()
 
-      assert names == ["MRI", "XRay"]
+      assert names == Enum.sort([mri.name, xray.name])
     end
 
     test "setting required capabilities replaces the previous set" do

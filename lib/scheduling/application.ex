@@ -7,16 +7,20 @@ defmodule Scheduling.Application do
 
   @impl true
   def start(_type, _args) do
-    children = [
-      SchedulingWeb.Telemetry,
-      Scheduling.Repo,
-      {DNSCluster, query: Application.get_env(:scheduling, :dns_cluster_query) || :ignore},
-      {Phoenix.PubSub, name: Scheduling.PubSub},
-      # Start a worker by calling: Scheduling.Worker.start_link(arg)
-      # {Scheduling.Worker, arg},
-      # Start to serve requests, typically the last entry
-      SchedulingWeb.Endpoint
-    ]
+    children =
+      [
+        SchedulingWeb.Telemetry,
+        Scheduling.Repo,
+        {DNSCluster, query: Application.get_env(:scheduling, :dns_cluster_query) || :ignore},
+        {Phoenix.PubSub, name: Scheduling.PubSub},
+        # OIDC discovery + JWKS for SSO and API tokens. nil when auth is
+        # unconfigured, which is the local-dev default. Started before the
+        # endpoint so the first request already has keys to validate against.
+        Scheduling.Auth.Provider.child_spec_if_enabled(),
+        # Start to serve requests, typically the last entry
+        SchedulingWeb.Endpoint
+      ]
+      |> Enum.reject(&is_nil/1)
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options

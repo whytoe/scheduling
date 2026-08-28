@@ -5,6 +5,9 @@ defmodule SchedulingWeb.Layouts do
   """
   use SchedulingWeb, :html
 
+  alias Scheduling.Auth.Identity
+  alias Scheduling.Auth.Scope
+
   # Embed all files in layouts/* within this module.
   # The default root.html.heex file contains the HTML
   # skeleton of your application, namely HTML headers
@@ -40,19 +43,22 @@ defmodule SchedulingWeb.Layouts do
 
   slot :inner_block, required: true
 
+  # The last three are the catalog screens, which the router puts behind the
+  # admin `live_session`. They are dropped from the nav for everyone else —
+  # a tab that always 403s is worse than no tab.
   @nav [
-    {:board, "Board", "hero-squares-2x2", "/board"},
-    {:queue, "Queue", "hero-queue-list", "/queue"},
-    {:decisions, "Decisions", "hero-document-magnifying-glass", "/decisions"},
-    {:visit_events, "Visit events", "hero-clock", "/visit_events"},
-    {:visits, "Visits", "hero-rectangle-stack", "/visits"},
-    {:offices, "Offices", "hero-building-office", "/offices"},
-    {:capabilities, "Capabilities", "hero-beaker", "/capabilities"},
-    {:diagnoses, "Diagnoses", "hero-clipboard-document-list", "/diagnoses"}
+    {:board, "Board", "hero-squares-2x2", "/board", nil},
+    {:queue, "Queue", "hero-queue-list", "/queue", nil},
+    {:decisions, "Decisions", "hero-document-magnifying-glass", "/decisions", nil},
+    {:visit_events, "Visit events", "hero-clock", "/visit_events", nil},
+    {:visits, "Visits", "hero-rectangle-stack", "/visits", nil},
+    {:offices, "Offices", "hero-building-office", "/offices", "admin"},
+    {:capabilities, "Capabilities", "hero-beaker", "/capabilities", "admin"},
+    {:diagnoses, "Diagnoses", "hero-clipboard-document-list", "/diagnoses", "admin"}
   ]
 
   def app(assigns) do
-    assigns = assign(assigns, :nav, @nav)
+    assigns = assign(assigns, :nav, visible_nav(assigns[:current_scope]))
 
     ~H"""
     <div class="app">
@@ -63,7 +69,7 @@ defmodule SchedulingWeb.Layouts do
         </.link>
         <nav class="navbar__nav" aria-label={gettext("Primary")}>
           <.link
-            :for={{id, label, icon, path} <- @nav}
+            :for={{id, label, icon, path, _role} <- @nav}
             navigate={path}
             class={["navlink", @active == id && "navlink--active"]}
             aria-current={@active == id && "page"}
@@ -75,6 +81,7 @@ defmodule SchedulingWeb.Layouts do
             <.icon name="hero-arrow-top-right-on-square" class="navlink__ext size-3" />
           </a>
         </nav>
+        <.user_menu scope={@current_scope} />
         <.theme_toggle />
       </header>
 
@@ -85,6 +92,51 @@ defmodule SchedulingWeb.Layouts do
 
     <.flash_group flash={@flash} />
     """
+  end
+
+  # With auth off there is no scope to check, so everything shows — same
+  # principle as the plugs, which pass everything through in that mode.
+  defp visible_nav(nil) do
+    if Scheduling.Auth.enabled?(), do: Enum.filter(@nav, &is_nil(elem(&1, 4))), else: @nav
+  end
+
+  defp visible_nav(scope) do
+    Enum.filter(@nav, fn {_id, _label, _icon, _path, role} ->
+      is_nil(role) or Scope.has_role?(scope, role)
+    end)
+  end
+
+  @doc """
+  Who is signed in, and the way out.
+
+  Renders nothing when `scope` is nil — that is the auth-disabled case, where
+  a "sign out" control would lead somewhere that immediately bounces back.
+
+  The role is shown next to the name because this app's screens differ by
+  role: an operator who cannot see the Offices tab should be able to tell at a
+  glance that this is their account, not a broken page.
+  """
+  attr :scope, :map, default: nil
+
+  def user_menu(assigns) do
+    ~H"""
+    <div :if={@scope} class="navbar__user">
+      <span class="navbar__user-name" title={@scope.identity.email}>
+        <.icon name="hero-user-circle" class="size-4" />{Identity.label(@scope.identity)}
+      </span>
+      <span :if={primary_role(@scope)} class="chip">{primary_role(@scope)}</span>
+      <.link href={~p"/auth/logout"} class="navlink" title={gettext("Sign out")}>
+        <.icon name="hero-arrow-left-on-rectangle" class="size-4" />
+        <span class="sr-only">{gettext("Sign out")}</span>
+      </.link>
+    </div>
+    """
+  end
+
+  # The most privileged recognised role, so the chip reads "admin" rather than
+  # whichever role happened to sort first on the token.
+  defp primary_role(scope) do
+    Enum.find(Identity.known_roles(), &Scope.has_role?(scope, &1))
   end
 
   @doc """

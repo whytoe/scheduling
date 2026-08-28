@@ -163,7 +163,7 @@ defmodule SchedulingWeb.DiagnosisLive.Index do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} active={:diagnoses}>
+    <Layouts.app flash={@flash} current_scope={@current_scope} active={:diagnoses}>
       <.page_head title="Diagnoses">
         <:subtitle>
           Each diagnosis carries default required capabilities and required form types.

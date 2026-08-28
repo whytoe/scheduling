@@ -128,7 +128,7 @@ defmodule SchedulingWeb.CapabilityLive.Index do
     assigns = assign(assigns, :rows, filtered(assigns.capabilities, assigns.query))
 
     ~H"""
-    <Layouts.app flash={@flash} active={:capabilities}>
+    <Layouts.app flash={@flash} current_scope={@current_scope} active={:capabilities}>
       <.page_head title="Capabilities">
         <:subtitle>
           The catalog every office and diagnosis draws from. The layout is built to stay

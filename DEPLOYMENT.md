@@ -72,6 +72,16 @@ bake them into the image or commit them to the repo.
 | `DATABASE_URL`     | PostgreSQL connection string, e.g. `ecto://user:pass@host:5432/scheduling_prod` |
 | `SECRET_KEY_BASE`  | Phoenix session / cookie signing key (64+ bytes). Generate with `mix phx.gen.secret` or `openssl rand -base64 48`. |
 | `PHX_HOST`         | Public hostname, e.g. `scheduling.example.com`. Used for URL generation. |
+| `OIDC_ISSUER`      | OIDC issuer URL, e.g. `https://ac-core.45.59.71.47.nip.io`.          |
+| `OIDC_CLIENT_ID`   | OAuth client id for this app, e.g. `scheduling`.                     |
+| `OIDC_CLIENT_SECRET` | That client's secret.                                              |
+
+**A `:prod` release refuses to boot without the three `OIDC_*` variables.**
+Without them every screen and all 41 API endpoints are public, including
+patient data. If that is genuinely what you want — the app sits on a private
+network, or a reverse proxy authenticates in front of it — set
+`AUTH_DISABLED=true`, which allows the boot and logs a warning. See
+`docs/auth.md` for realm setup.
 
 Optional:
 
@@ -82,6 +92,13 @@ Optional:
 | `POOL_SIZE`         | `10`         | Ecto connection pool size.                                    |
 | `ECTO_IPV6`         | unset        | Set to `true`/`1` if the database host requires IPv6.         |
 | `DNS_CLUSTER_QUERY` | unset        | Optional libcluster-style DNS-based clustering hostname.      |
+| `OIDC_API_AUDIENCES` | unset    | Extra comma-separated `aud` values accepted on API access tokens. Needed when an integration's tokens carry an audience other than `OIDC_CLIENT_ID`. |
+| `OIDC_SIGNING_ALGS` | `RS256`   | Comma-separated JWS algorithms accepted on access tokens.     |
+| `OIDC_ROLE_CLAIMS`  | `astrum_roles,roles,realm_access.roles,resource_access.<client_id>.roles` | Dotted claim paths searched for roles; all present are unioned. |
+| `OIDC_DISCOVERY_OVERRIDES` | `{"subject_types_supported":["public"]}` | JSON merged over the provider's discovery document. The default works around `ac-core` omitting a field OIDC Discovery marks REQUIRED; without it the app cannot boot. See `docs/auth.md`. |
+| `OIDC_ORG_CLAIM` / `OIDC_ORG_ID_CLAIM` / `OIDC_TENANT_CLAIM` | `astrum_org` / `astrum_org_id` / `astrum_tenant` | Tenancy claims captured on the identity. |
+| `AUTH_SESSION_TTL_SECONDS` | `28800` (8h) | How long a browser session is trusted before re-auth.  |
+| `AUTH_DISABLED`     | unset        | `true` allows a prod boot with no authentication. See above.  |
 
 ---
 

@@ -99,7 +99,7 @@ defmodule SchedulingWeb.RoutingDecisionLive.Index do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} active={:decisions}>
+    <Layouts.app flash={@flash} current_scope={@current_scope} active={:decisions}>
       <.page_head title="Routing decisions">
         <:subtitle>
           Every matcher run, reverse-chronological. Each row reveals the rationale and

@@ -5,8 +5,13 @@ defmodule Scheduling.OfficesContextTest do
   alias Scheduling.Offices
   alias Scheduling.Catalog.Capability
 
+  # Names are suffixed because `capabilities.name` is uniquely indexed and these
+  # test files run async. Two tests inserting "MRI" and "XRay" in opposite
+  # orders each wait on the other's index lock — a genuine Postgres deadlock
+  # (40P01), and the source of a long-running intermittent CI failure.
   defp capability_fixture(name) do
-    Repo.insert!(Capability.changeset(%Capability{}, %{name: name}))
+    unique = "#{name}-#{System.unique_integer([:positive])}"
+    Repo.insert!(Capability.changeset(%Capability{}, %{name: unique}))
   end
 
   describe "list_offices/0 and get_office!/1" do
@@ -22,11 +27,11 @@ defmodule Scheduling.OfficesContextTest do
 
       assert [listed] = Offices.list_offices()
       assert listed.id == office.id
-      assert Enum.map(listed.capabilities, & &1.name) == ["XRay"]
+      assert Enum.map(listed.capabilities, & &1.name) == [xray.name]
 
       fetched = Offices.get_office!(office.id)
       assert fetched.name == "Room A"
-      assert Enum.map(fetched.capabilities, & &1.name) == ["XRay"]
+      assert Enum.map(fetched.capabilities, & &1.name) == [xray.name]
     end
   end
 
@@ -50,7 +55,7 @@ defmodule Scheduling.OfficesContextTest do
                })
 
       names = office.capabilities |> Enum.map(& &1.name) |> Enum.sort()
-      assert names == ["Lab", "XRay"]
+      assert names == Enum.sort([lab.name, xray.name])
     end
 
     test "rejects missing name" do
@@ -79,7 +84,7 @@ defmodule Scheduling.OfficesContextTest do
         })
 
       {:ok, updated} = Offices.update_office(office, %{"capability_ids" => [lab.id]})
-      assert Enum.map(updated.capabilities, & &1.name) == ["Lab"]
+      assert Enum.map(updated.capabilities, & &1.name) == [lab.name]
     end
 
     test "clears all capabilities with an empty list" do
@@ -108,7 +113,7 @@ defmodule Scheduling.OfficesContextTest do
 
       {:ok, updated} = Offices.update_office(office, %{"intake_capacity" => 4})
       assert updated.intake_capacity == 4
-      assert Enum.map(updated.capabilities, & &1.name) == ["XRay"]
+      assert Enum.map(updated.capabilities, & &1.name) == [xray.name]
     end
   end
 
@@ -122,11 +127,14 @@ defmodule Scheduling.OfficesContextTest do
 
   describe "list_capabilities/0" do
     test "returns the catalog ordered by name" do
-      capability_fixture("XRay")
-      capability_fixture("CT Scan")
-      capability_fixture("Lab")
+      xray = capability_fixture("XRay")
+      ct = capability_fixture("CT Scan")
+      lab = capability_fixture("Lab")
 
-      assert Catalog.list_capabilities() |> Enum.map(& &1.name) == ["CT Scan", "Lab", "XRay"]
+      # The unique suffix does not disturb the alphabetical grouping the
+      # ordering guarantee is about.
+      assert Catalog.list_capabilities() |> Enum.map(& &1.name) ==
+               [ct.name, lab.name, xray.name]
     end
   end
 end
