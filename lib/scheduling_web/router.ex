@@ -1,6 +1,9 @@
 defmodule SchedulingWeb.Router do
   use SchedulingWeb, :router
 
+  alias SchedulingWeb.Plugs.ApiAuth
+  alias SchedulingWeb.Plugs.BrowserAuth
+
   pipeline :browser do
     plug :accepts, ["html"]
     plug :fetch_session
@@ -8,6 +11,20 @@ defmodule SchedulingWeb.Router do
     plug :put_root_layout, html: {SchedulingWeb.Layouts, :root}
     plug :protect_from_forgery
     plug :put_secure_browser_headers
+    plug BrowserAuth, :fetch_current_scope
+  end
+
+  # Signed-in operators only. `:browser` has already put `current_scope` on the
+  # conn; this turns its absence into a redirect through the IdP.
+  pipeline :require_operator do
+    plug BrowserAuth, :require_authenticated
+  end
+
+  # Catalog CRUD (offices, capabilities, diagnoses) reshapes how every future
+  # patient is routed, so it is admin-gated rather than open to any operator.
+  pipeline :require_admin do
+    plug BrowserAuth, :require_authenticated
+    plug BrowserAuth, {:require_role, ["admin"]}
   end
 
   pipeline :api do
@@ -15,31 +32,73 @@ defmodule SchedulingWeb.Router do
     plug OpenApiSpex.Plug.PutApiSpec, module: SchedulingWeb.ApiSpec
   end
 
+  # Reads: any recognised role.
+  pipeline :api_read do
+    plug ApiAuth, :require_read
+  end
+
+  # Writes: operator or service (admin implicitly). This is the pipeline the
+  # intake bridge and the check-in app authenticate against.
+  pipeline :api_write do
+    plug ApiAuth, :require_write
+  end
+
+  # Catalog and subscription management over the API — same bar as the UI.
+  pipeline :api_admin do
+    plug ApiAuth, :require_admin
+  end
+
+  # Public: the SSO handshake itself, plus the page a signed-out operator
+  # lands on. Nothing here may require a scope — that would be a redirect loop.
   scope "/", SchedulingWeb do
     pipe_through :browser
 
     get "/", PageController, :home
-    live "/board", BoardLive.Index, :index
+    get "/auth/login", AuthController, :login
+    get "/auth/callback", AuthController, :callback
+    get "/auth/logout", AuthController, :logout
+    get "/auth/signed_out", AuthController, :signed_out
+  end
 
-    live "/queue", QueueLive.Index, :index
+  # The operator surface. `live_session` re-runs the auth hook on every mount,
+  # including the websocket one, so a socket cannot outlive its authorization.
+  scope "/", SchedulingWeb do
+    pipe_through [:browser, :require_operator]
 
-    live "/decisions", RoutingDecisionLive.Index, :index
+    live_session :authenticated,
+      on_mount: [{SchedulingWeb.AuthHooks, :require_authenticated}] do
+      live "/board", BoardLive.Index, :index
 
-    live "/visit_events", VisitEventLive.Index, :index
+      live "/queue", QueueLive.Index, :index
 
-    live "/visits", VisitLive.Index, :index
+      live "/decisions", RoutingDecisionLive.Index, :index
 
-    live "/offices", OfficeLive.Index, :index
-    live "/offices/new", OfficeLive.Index, :new
-    live "/offices/:id/edit", OfficeLive.Index, :edit
+      live "/visit_events", VisitEventLive.Index, :index
 
-    live "/capabilities", CapabilityLive.Index, :index
-    live "/capabilities/new", CapabilityLive.Index, :new
-    live "/capabilities/:id/edit", CapabilityLive.Index, :edit
+      live "/visits", VisitLive.Index, :index
+    end
+  end
 
-    live "/diagnoses", DiagnosisLive.Index, :index
-    live "/diagnoses/new", DiagnosisLive.Index, :new
-    live "/diagnoses/:id/edit", DiagnosisLive.Index, :edit
+  # Catalog administration. A separate `live_session` because the role bar is
+  # higher: LiveView only skips re-running hooks within one session, so this
+  # boundary cannot be crossed by live navigation from the operator screens.
+  scope "/", SchedulingWeb do
+    pipe_through [:browser, :require_admin]
+
+    live_session :admin,
+      on_mount: [{SchedulingWeb.AuthHooks, {:require_role, ["admin"]}}] do
+      live "/offices", OfficeLive.Index, :index
+      live "/offices/new", OfficeLive.Index, :new
+      live "/offices/:id/edit", OfficeLive.Index, :edit
+
+      live "/capabilities", CapabilityLive.Index, :index
+      live "/capabilities/new", CapabilityLive.Index, :new
+      live "/capabilities/:id/edit", CapabilityLive.Index, :edit
+
+      live "/diagnoses", DiagnosisLive.Index, :index
+      live "/diagnoses/new", DiagnosisLive.Index, :new
+      live "/diagnoses/:id/edit", DiagnosisLive.Index, :edit
+    end
   end
 
   # Spec-discovery + health stay UNVERSIONED. They evolve independently of
@@ -51,87 +110,102 @@ defmodule SchedulingWeb.Router do
     get "/health", HealthController, :index
   end
 
+  # ---------------------------------------------------------------------------
+  # /api/v1 — grouped by the role each call requires, not by resource.
+  #
+  # Splitting by resource would mean two scope blocks per resource (reads and
+  # writes need different pipelines), so grouping by permission keeps the file
+  # readable and puts the access rule in one place per tier instead of eleven.
+  # `docs/integrations.md` documents the surface resource-by-resource.
+  # ---------------------------------------------------------------------------
+
+  # READ — any recognised role (`viewer`, `operator`, `service`, `admin`).
   scope "/api/v1", SchedulingWeb do
-    pipe_through :api
+    pipe_through [:api, :api_read]
 
-    scope "/capabilities", Api do
-      get "/", CapabilityController, :index
-      post "/", CapabilityController, :create
-      get "/:id", CapabilityController, :show
-      put "/:id", CapabilityController, :update
-      patch "/:id", CapabilityController, :update
-      delete "/:id", CapabilityController, :delete
-    end
+    scope "/", Api do
+      get "/capabilities", CapabilityController, :index
+      get "/capabilities/:id", CapabilityController, :show
 
-    scope "/diagnoses", Api do
-      get "/", DiagnosisController, :index
-      post "/", DiagnosisController, :create
-      get "/:id", DiagnosisController, :show
-      put "/:id", DiagnosisController, :update
-      patch "/:id", DiagnosisController, :update
-      delete "/:id", DiagnosisController, :delete
-    end
+      get "/diagnoses", DiagnosisController, :index
+      get "/diagnoses/:id", DiagnosisController, :show
 
-    scope "/patients", Api do
-      get "/", PatientController, :index
-      post "/", PatientController, :create
-      get "/:id", PatientController, :show
-      put "/:id", PatientController, :update
-      patch "/:id", PatientController, :update
-      delete "/:id", PatientController, :delete
-    end
+      get "/patients", PatientController, :index
+      get "/patients/:id", PatientController, :show
 
-    scope "/offices", Api do
-      get "/", OfficeController, :index
-      post "/", OfficeController, :create
-      get "/:id", OfficeController, :show
-      put "/:id", OfficeController, :update
-      patch "/:id", OfficeController, :update
-      delete "/:id", OfficeController, :delete
-    end
+      get "/offices", OfficeController, :index
+      get "/offices/:id", OfficeController, :show
 
-    scope "/queue_entries", Api do
-      get "/", QueueEntryController, :index
-      post "/", QueueEntryController, :create
-      get "/:id", QueueEntryController, :show
-      post "/:id/accept", QueueEntryController, :accept
-      post "/:id/complete", QueueEntryController, :complete
-      post "/:id/requeue", QueueEntryController, :requeue
-    end
+      get "/queue_entries", QueueEntryController, :index
+      get "/queue_entries/:id", QueueEntryController, :show
 
-    scope "/handoffs", Api do
-      get "/", HandoffController, :index
-      get "/:id", HandoffController, :show
-      post "/:id/acknowledge", HandoffController, :acknowledge
-    end
+      get "/handoffs", HandoffController, :index
+      get "/handoffs/:id", HandoffController, :show
 
-    scope "/routing_decisions", Api do
-      get "/", RoutingDecisionController, :index
-      get "/:id", RoutingDecisionController, :show
-    end
+      get "/routing_decisions", RoutingDecisionController, :index
+      get "/routing_decisions/:id", RoutingDecisionController, :show
 
-    scope "/visit_events", Api do
-      get "/", VisitEventController, :index
-      get "/:id", VisitEventController, :show
-    end
+      get "/visit_events", VisitEventController, :index
+      get "/visit_events/:id", VisitEventController, :show
 
-    scope "/visits", Api do
-      get "/", VisitController, :index
-      post "/", VisitController, :create
-      get "/:id", VisitController, :show
-      post "/:id/end", VisitController, :end_visit
-    end
-
-    scope "/webhook_subscriptions", Api do
-      get "/", WebhookSubscriptionController, :index
-      post "/", WebhookSubscriptionController, :create
-      get "/:id", WebhookSubscriptionController, :show
-      put "/:id", WebhookSubscriptionController, :update
-      patch "/:id", WebhookSubscriptionController, :update
-      delete "/:id", WebhookSubscriptionController, :delete
+      get "/visits", VisitController, :index
+      get "/visits/:id", VisitController, :show
     end
 
     get "/board", Api.BoardController, :show
+  end
+
+  # WRITE — `operator` or `service` (and `admin`, which satisfies everything).
+  # The patient-flow operations: this is what the check-in / queueing app and
+  # the intake bridge call.
+  scope "/api/v1", SchedulingWeb.Api, as: :api do
+    pipe_through [:api, :api_write]
+
+    post "/patients", PatientController, :create
+    put "/patients/:id", PatientController, :update
+    patch "/patients/:id", PatientController, :update
+
+    post "/queue_entries", QueueEntryController, :create
+    post "/queue_entries/:id/accept", QueueEntryController, :accept
+    post "/queue_entries/:id/complete", QueueEntryController, :complete
+    post "/queue_entries/:id/requeue", QueueEntryController, :requeue
+
+    post "/handoffs/:id/acknowledge", HandoffController, :acknowledge
+
+    post "/visits", VisitController, :create
+    post "/visits/:id/end", VisitController, :end_visit
+  end
+
+  # ADMIN — catalog changes reshape how every future patient is routed, and a
+  # webhook subscription is an outbound data path. Both are admin-only, matching
+  # the UI's admin `live_session`. Patient deletion sits here for the same
+  # reason: it is destructive and never part of the normal check-in flow.
+  scope "/api/v1", SchedulingWeb.Api, as: :api_admin do
+    pipe_through [:api, :api_admin]
+
+    post "/capabilities", CapabilityController, :create
+    put "/capabilities/:id", CapabilityController, :update
+    patch "/capabilities/:id", CapabilityController, :update
+    delete "/capabilities/:id", CapabilityController, :delete
+
+    post "/diagnoses", DiagnosisController, :create
+    put "/diagnoses/:id", DiagnosisController, :update
+    patch "/diagnoses/:id", DiagnosisController, :update
+    delete "/diagnoses/:id", DiagnosisController, :delete
+
+    post "/offices", OfficeController, :create
+    put "/offices/:id", OfficeController, :update
+    patch "/offices/:id", OfficeController, :update
+    delete "/offices/:id", OfficeController, :delete
+
+    delete "/patients/:id", PatientController, :delete
+
+    get "/webhook_subscriptions", WebhookSubscriptionController, :index
+    post "/webhook_subscriptions", WebhookSubscriptionController, :create
+    get "/webhook_subscriptions/:id", WebhookSubscriptionController, :show
+    put "/webhook_subscriptions/:id", WebhookSubscriptionController, :update
+    patch "/webhook_subscriptions/:id", WebhookSubscriptionController, :update
+    delete "/webhook_subscriptions/:id", WebhookSubscriptionController, :delete
   end
 
   scope "/api" do

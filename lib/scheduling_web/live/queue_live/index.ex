@@ -155,7 +155,7 @@ defmodule SchedulingWeb.QueueLive.Index do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} active={:queue} wide>
+    <Layouts.app flash={@flash} current_scope={@current_scope} active={:queue} wide>
       <.page_head title="Accept queue">
         <:subtitle>
           Keyboard-first. Arrow keys move the selection, Enter accepts — the matcher

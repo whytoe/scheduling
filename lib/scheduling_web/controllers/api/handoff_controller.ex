@@ -8,6 +8,7 @@ defmodule SchedulingWeb.Api.HandoffController do
   use OpenApiSpex.ControllerSpecs
 
   alias Scheduling.Handoffs
+  alias SchedulingWeb.Api.Actor
   alias SchedulingWeb.Schemas
 
   action_fallback SchedulingWeb.Api.FallbackController
@@ -77,10 +78,8 @@ defmodule SchedulingWeb.Api.HandoffController do
 
   def acknowledge(conn, %{"id" => id} = params) do
     opts =
-      []
+      Actor.opts(conn, params)
       |> maybe_put(:acknowledged_by, Map.get(params, "acknowledged_by"))
-      |> maybe_put(:actor_type, Map.get(params, "actor_type"))
-      |> maybe_put(:actor_id, Map.get(params, "actor_id"))
 
     with {:ok, handoff} <- fetch(id),
          {:ok, acked} <- Handoffs.acknowledge(handoff, opts) do

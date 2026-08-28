@@ -33,6 +33,38 @@ config :scheduling, Scheduling.Compliance,
   api_key: System.get_env("INTAKE_API_KEY"),
   http_timeout_ms: String.to_integer(System.get_env("INTAKE_HTTP_TIMEOUT_MS", "5000"))
 
+# ---------------------------------------------------------------------------
+# Keycloak (or any OIDC provider) — browser SSO and API bearer tokens.
+#
+# Auth turns on when issuer + client id + secret are all present. Leaving them
+# unset keeps a local checkout usable without an IdP, exactly like the intake
+# compliance gate above.
+#
+# Unlike that gate, though, unconfigured auth fails OPEN — every screen and all
+# 41 API endpoints become public. So the :prod block below refuses to boot
+# without it unless AUTH_DISABLED=true says so on purpose.
+# ---------------------------------------------------------------------------
+config :scheduling, Scheduling.Auth,
+  issuer: System.get_env("KEYCLOAK_ISSUER"),
+  client_id: System.get_env("KEYCLOAK_CLIENT_ID"),
+  client_secret: System.get_env("KEYCLOAK_CLIENT_SECRET"),
+  # Extra `aud` values accepted on API access tokens. Keycloak only puts a
+  # client in `aud` when an audience mapper says to, so a token minted for the
+  # check-in bridge may name "scheduling-api" rather than this app's client id.
+  trusted_audiences:
+    "KEYCLOAK_API_AUDIENCES"
+    |> System.get_env("")
+    |> String.split(",", trim: true)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == "")),
+  # Pinned rather than read from the token header — see Scheduling.Auth.Tokens.
+  signing_algs:
+    "KEYCLOAK_SIGNING_ALGS"
+    |> System.get_env("RS256")
+    |> String.split(",", trim: true)
+    |> Enum.map(&String.trim/1),
+  session_ttl_seconds: String.to_integer(System.get_env("AUTH_SESSION_TTL_SECONDS", "28800"))
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||
@@ -40,6 +72,36 @@ if config_env() == :prod do
       environment variable DATABASE_URL is missing.
       For example: ecto://USER:PASS@HOST/DATABASE
       """
+
+  # Fail-closed on configuration, not on requests: a release that boots with
+  # auth silently off would serve PHI to anyone who found the hostname. Opting
+  # out is possible but must be deliberate and is announced at boot.
+  cond do
+    Scheduling.Auth.enabled?() ->
+      :ok
+
+    System.get_env("AUTH_DISABLED") == "true" ->
+      IO.warn("""
+      AUTH_DISABLED=true — running with NO authentication.
+
+      Every LiveView screen and all /api/v1 endpoints are public, including
+      patient data. Only acceptable when something else (a private network, an
+      authenticating reverse proxy) is enforcing access control.
+      """)
+
+    true ->
+      raise """
+      Authentication is not configured.
+
+      Set KEYCLOAK_ISSUER, KEYCLOAK_CLIENT_ID and KEYCLOAK_CLIENT_SECRET, e.g.
+
+          KEYCLOAK_ISSUER=https://sso.example.org/realms/clinic
+          KEYCLOAK_CLIENT_ID=scheduling
+          KEYCLOAK_CLIENT_SECRET=...
+
+      To run without authentication on purpose, set AUTH_DISABLED=true.
+      """
+  end
 
   maybe_ipv6 = if System.get_env("ECTO_IPV6") in ~w(true 1), do: [:inet6], else: []
 

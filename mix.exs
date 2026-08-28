@@ -67,6 +67,8 @@ defmodule Scheduling.MixProject do
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
       {:open_api_spex, "~> 3.21"},
+      {:oidcc, "~> 3.8"},
+      {:oidcc_plug, "~> 0.5.1"},
       {:bypass, "~> 2.1", only: :test}
     ]
   end

@@ -48,6 +48,24 @@ needed; old versions are deprecated with a sunset header before removal.
 There is no breaking change *within* a major version — additive changes
 only (new fields, new endpoints, new optional query params).
 
+### Authentication
+
+Integrators authenticate with an OAuth 2.0 access token from the deployment's
+OIDC realm:
+
+```sh
+TOKEN=$(curl -s -X POST "$KEYCLOAK_ISSUER/protocol/openid-connect/token" \
+  -d grant_type=client_credentials \
+  -d client_id=intake-bridge -d client_secret=... | jq -r .access_token)
+
+curl -s "$SCHEDULING_URL/api/v1/board" -H "Authorization: Bearer $TOKEN"
+```
+
+Give each integrating system **its own client** with the `service` role, so
+one can be revoked without affecting the others and the audit log names which
+system acted. Full realm setup, the role table and the auth error codes are in
+**`auth.md`**.
+
 The API mirrors every operation the LiveView UI offers — 41 endpoints across
 11 tag groups (`capabilities`, `diagnoses`, `patients`, `offices`, `visits`,
 `queue`, `handoffs`, `routing_decisions`, `visit_events`, `board`, `health`).
@@ -57,15 +75,19 @@ Conventions:
 
 - Raw JSON bodies, no `data:` wrapper.
 - Requests use a per-resource envelope: `{"capability": {…}}`, `{"office": {…}}`.
-- Validation errors → **422** with `{"errors": {field: [msgs]}}` (Ecto changeset
-  traversal).
-- Not found → **404** with `{"error":"not_found"}`.
+- **Every error shares one envelope** (`sc-2y8`):
+  `{"error": {"code": "...", "message": "...", "details": {...}}}`.
+  `details` is present only when there is structured detail to give.
+  Validation failures are **422** `validation_failed` with the field errors
+  under `details.fields`; not-found is **404** `not_found`.
 - Action endpoints under their resource: `POST /queue_entries/:id/accept`,
   `POST /handoffs/:id/acknowledge`, `POST /visits/:id/end`.
-- All mutating endpoints accept an optional `actor_type` + `actor_id` at
-  the top level of the request body. These are recorded on the
-  corresponding `visit_event`. Once `sc-6ea` (OAuth) lands, these come
-  from the bearer token's subject claim and become required.
+- **Every `/api/v1` endpoint requires a bearer token** (`sc-6ea`). Get one
+  with the client-credentials grant; see `auth.md`. `GET /api/health`,
+  `/api/openapi.json` and `/api/swagger` stay unauthenticated.
+- The actor recorded on each `visit_event` comes from the **token** —
+  `sub` for a user, the client id for a service account. `actor_type` and
+  `actor_id` in the request body are ignored.
 
 ## What we consume: Intake-form system
 
@@ -128,9 +150,9 @@ human-readable rationale):
 | Outcome                                | HTTP | Body                                                                       | Entry state |
 |----------------------------------------|------|----------------------------------------------------------------------------|-------------|
 | Assigned                               | 200  | `QueueEntry` (status=`assigned`)                                           | assigned    |
-| All required forms satisfied → matcher had no eligible office | 409  | `{"error":"no_eligible_office"}`                                           | waiting     |
-| At least one required form missing     | 422  | `{"error":"compliance_failed","missing_form_types":[…]}`                   | waiting     |
-| Intake-form system unreachable         | 503  | `{"error":"compliance_unavailable","reason":"<inspect>"}`                  | waiting     |
+| All required forms satisfied → matcher had no eligible office | 409  | `error.code = "no_eligible_office"`                                        | waiting     |
+| At least one required form missing     | 422  | `error.code = "compliance_failed"`, `error.details.missing_form_types`     | waiting     |
+| Intake-form system unreachable         | 503  | `error.code = "compliance_unavailable"`, `error.details.reason`            | waiting     |
 
 **Fail-closed**: an unreachable intake system blocks new bookings. The audit
 log records every blocked attempt so operations can see the failure
@@ -446,6 +468,10 @@ container run -d --name scheduling-app --network scheduling \
   -p 4000:4000 scheduling-rig:latest
 ```
 
+(No `KEYCLOAK_*` variables here, so auth is off and the endpoints below need
+no token — see `auth.md` §"Local development". A `:prod` release refuses to
+boot this way unless `AUTH_DISABLED=true` is also set.)
+
 A note on the host: inside an Apple `container` instance, `localhost` is the
 container itself. Use the host gateway IP (`192.168.66.1` on the `default`
 network) to reach services on the macOS host. If intake is in a sibling
@@ -481,7 +507,7 @@ Pending feature work that affects integration shape. Track via `bd show
 
 | Bead     | Scope                                                                                                       |
 |----------|-------------------------------------------------------------------------------------------------------------|
-| `sc-6ea` | Unified OAuth auth system. Service-to-service + per-role human auth. Once landed, `actor_type`/`actor_id` come from the bearer token instead of the request body. |
+| ~~`sc-6ea`~~ | **Done.** OIDC auth: browser SSO + service-to-service bearer tokens, roles from token claims. `actor_type`/`actor_id` now come from the token. See `auth.md`. |
 | `sc-7hu` | Queue-entry state machine extensions: `scheduled`, `cancelled`, `no_show`, `discharged_with_followup`. Adds new event types to `visit_events`. |
 | `sc-kub` | Service-to-service trust model (blocked-by `sc-6ea`).                                                       |
 | `sc-ry7` | Idempotency-key handling for sign-in / disposition / outbound (blocked-by `sc-6ea`).                        |
@@ -494,7 +520,7 @@ Pending feature work that affects integration shape. Track via `bd show
 |----------|-------------------------------------------------------------------------------------------------------------|
 | `sc-qsr` | Outbound webhooks for visit / queue / handoff events — so integrators don't have to poll.                   |
 | `sc-s7u` | Cursor pagination on every list endpoint.                                                                   |
-| `sc-2y8` | Unify error response envelope (`{"error": {"code", "message", "details"}}`).                                |
+| ~~`sc-2y8`~~ | **Done.** Unified error envelope (`{"error": {"code", "message", "details"}}`).                          |
 | `sc-c41` | Rate limiting per token / per service (blocked-by `sc-6ea`).                                                |
 | `sc-r5n` | External real-time subscription endpoint (SSE / WebSocket, blocked-by `sc-6ea`).                            |
 | `sc-ckz` | Wait-time / queue-position read API for the queueing-service patient UI.                                    |

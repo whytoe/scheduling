@@ -1,0 +1,199 @@
+defmodule Scheduling.OidcProvider do
+  @moduledoc """
+  Stands up a fake OpenID Connect provider so the auth path can be tested for
+  real rather than mocked out.
+
+  A `Bypass` server serves a discovery document and a JWKS built from an RSA
+  key generated for the test; `Scheduling.Auth` is pointed at it and a
+  `Oidcc.ProviderConfiguration.Worker` is started against it. Tokens are then
+  minted with `access_token/2` and signed by that key.
+
+  Testing through the real `oidcc` validation path — rather than stubbing
+  `Scheduling.Auth.Tokens` — is the point. It is what lets a test assert that
+  a token signed by the *wrong* key, or carrying the wrong audience, is
+  actually rejected. A stub would happily "reject" those without the code
+  under test ever checking.
+
+      use SchedulingWeb.ConnCase, async: false
+      import Scheduling.OidcProvider
+
+      setup :setup_oidc_provider
+
+      test "rejects a token from a different issuer", ctx do
+        token = access_token(ctx, %{"iss" => "https://elsewhere.example"})
+        ...
+      end
+
+  Tests using this must be `async: false`: pointing `Scheduling.Auth` at the
+  fake provider means writing application env, which is global.
+  """
+
+  @client_id "scheduling"
+  @client_secret "test-secret"
+
+  @doc "Setup callback. Returns bypass, issuer, jwk and client_id in the context."
+  def setup_oidc_provider(_context \\ %{}) do
+    bypass = Bypass.open()
+    issuer = "http://localhost:#{bypass.port}"
+    jwk = JOSE.JWK.generate_key({:rsa, 2048})
+
+    stub_discovery(bypass, issuer, jwk)
+    put_auth_config(issuer)
+    start_provider!()
+
+    ExUnit.Callbacks.on_exit(fn -> Application.delete_env(:scheduling, Scheduling.Auth) end)
+
+    %{bypass: bypass, issuer: issuer, jwk: jwk, client_id: @client_id}
+  end
+
+  @doc """
+  Mints a signed access token. `overrides` replaces any default claim, so a
+  test can produce an expired, mis-audienced or mis-issued token by naming
+  just the claim it wants wrong.
+
+  Pass `roles:` for realm roles and `client_roles:` for roles under
+  `resource_access.<client_id>`, mirroring Keycloak's two placements.
+  """
+  def access_token(context, overrides \\ %{}, opts \\ []) do
+    now = System.system_time(:second)
+
+    claims =
+      %{
+        "iss" => context.issuer,
+        "sub" => "user-1",
+        "aud" => @client_id,
+        "azp" => @client_id,
+        "exp" => now + 300,
+        "iat" => now,
+        "nbf" => now - 5,
+        "preferred_username" => "acasey",
+        "email" => "acasey@example.org",
+        "name" => "A. Casey",
+        "realm_access" => %{"roles" => Keyword.get(opts, :roles, ["operator"])}
+      }
+      |> put_client_roles(opts)
+      |> Map.merge(overrides)
+
+    sign(Keyword.get(opts, :jwk, context.jwk), claims)
+  end
+
+  @doc """
+  Mints a token shaped like Keycloak's client-credentials grant: the subject
+  is a service-account uuid and `preferred_username` carries the
+  `service-account-` prefix that `Scheduling.Auth.Identity` keys off.
+  """
+  def service_token(context, overrides \\ %{}, opts \\ []) do
+    client = Keyword.get(opts, :client, "intake-bridge")
+
+    access_token(
+      context,
+      Map.merge(
+        %{
+          "sub" => "b3f1e0c2-0000-4000-8000-000000000001",
+          "azp" => client,
+          "preferred_username" => "service-account-#{client}",
+          "email" => nil,
+          "name" => nil
+        },
+        overrides
+      ),
+      Keyword.put_new(opts, :roles, ["service"])
+    )
+  end
+
+  @doc "Signs arbitrary claims with a key — used to forge a wrong-key token."
+  def sign(jwk, claims) do
+    {_meta, token} =
+      jwk
+      |> JOSE.JWT.sign(%{"alg" => "RS256", "kid" => "test-key"}, claims)
+      |> JOSE.JWS.compact()
+
+    token
+  end
+
+  @doc "Sets the Authorization header for an API request."
+  def with_bearer(conn, token),
+    do: Plug.Conn.put_req_header(conn, "authorization", "Bearer " <> token)
+
+  defp put_client_roles(claims, opts) do
+    case Keyword.get(opts, :client_roles) do
+      nil -> claims
+      roles -> Map.put(claims, "resource_access", %{@client_id => %{"roles" => roles}})
+    end
+  end
+
+  defp stub_discovery(bypass, issuer, jwk) do
+    jwks = %{
+      "keys" => [
+        jwk
+        |> JOSE.JWK.to_public_map()
+        |> elem(1)
+        |> Map.merge(%{"kid" => "test-key", "use" => "sig", "alg" => "RS256"})
+      ]
+    }
+
+    Bypass.stub(bypass, "GET", "/.well-known/openid-configuration", fn conn ->
+      body =
+        Jason.encode!(%{
+          "issuer" => issuer,
+          "authorization_endpoint" => issuer <> "/protocol/openid-connect/auth",
+          "token_endpoint" => issuer <> "/protocol/openid-connect/token",
+          "end_session_endpoint" => issuer <> "/protocol/openid-connect/logout",
+          "jwks_uri" => issuer <> "/protocol/openid-connect/certs",
+          "userinfo_endpoint" => issuer <> "/protocol/openid-connect/userinfo",
+          "introspection_endpoint" => issuer <> "/protocol/openid-connect/token/introspect",
+          "response_types_supported" => ["code"],
+          "response_modes_supported" => ["query", "fragment", "form_post"],
+          "subject_types_supported" => ["public"],
+          "id_token_signing_alg_values_supported" => ["RS256"],
+          "scopes_supported" => ["openid", "profile", "email", "roles"],
+          "claims_supported" => ["sub", "iss", "aud", "exp", "email", "preferred_username"],
+          "grant_types_supported" => [
+            "authorization_code",
+            "client_credentials",
+            "refresh_token"
+          ],
+          "code_challenge_methods_supported" => ["S256"],
+          "token_endpoint_auth_methods_supported" => ["client_secret_post", "client_secret_basic"]
+        })
+
+      Plug.Conn.resp(Plug.Conn.put_resp_content_type(conn, "application/json"), 200, body)
+    end)
+
+    Bypass.stub(bypass, "GET", "/protocol/openid-connect/certs", fn conn ->
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.resp(200, Jason.encode!(jwks))
+    end)
+  end
+
+  defp put_auth_config(issuer) do
+    Application.put_env(:scheduling, Scheduling.Auth,
+      issuer: issuer,
+      client_id: @client_id,
+      client_secret: @client_secret,
+      trusted_audiences: [],
+      signing_algs: ["RS256"],
+      session_ttl_seconds: 3600
+    )
+  end
+
+  # The worker is normally supervised by the app, but the app booted with auth
+  # disabled. Start one per test, owned by the test process so it goes away
+  # with it.
+  #
+  # `allow_unsafe_http` is oidcc's development quirk. Bypass cannot serve TLS,
+  # and oidcc otherwise insists the discovered endpoints be https — correctly,
+  # for anything real. It relaxes the transport check only; every signature,
+  # issuer, audience and expiry check still runs exactly as in production.
+  defp start_provider! do
+    ExUnit.Callbacks.start_supervised!(
+      {Oidcc.ProviderConfiguration.Worker,
+       %{
+         issuer: Scheduling.Auth.issuer(),
+         name: Scheduling.Auth.provider_name(),
+         provider_configuration_opts: %{quirks: %{allow_unsafe_http: true}}
+       }}
+    )
+  end
+end

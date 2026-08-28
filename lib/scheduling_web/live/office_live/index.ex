@@ -130,7 +130,7 @@ defmodule SchedulingWeb.OfficeLive.Index do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} active={:offices}>
+    <Layouts.app flash={@flash} current_scope={@current_scope} active={:offices}>
       <.page_head title="Offices">
         <:subtitle>Configure each office's intake capacity and capabilities.</:subtitle>
         <:actions>

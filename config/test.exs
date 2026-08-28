@@ -27,6 +27,11 @@ config :scheduling, Scheduling.Mailer, adapter: Swoosh.Adapters.Test
 # off background HTTP requests. The webhook tests turn this on per-test.
 config :scheduling, :webhooks_enabled, false
 
+# Hold the board's one-shot arrival highlight open for the whole test run. At
+# the 450ms production value the class can clear between the PubSub broadcast
+# and the assertion when the suite is running 20 cases in parallel.
+config :scheduling, :arrival_highlight_ms, 60_000
+
 # Disable swoosh api client as it is only required for production adapters
 config :swoosh, :api_client, false
 

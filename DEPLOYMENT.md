@@ -72,6 +72,16 @@ bake them into the image or commit them to the repo.
 | `DATABASE_URL`     | PostgreSQL connection string, e.g. `ecto://user:pass@host:5432/scheduling_prod` |
 | `SECRET_KEY_BASE`  | Phoenix session / cookie signing key (64+ bytes). Generate with `mix phx.gen.secret` or `openssl rand -base64 48`. |
 | `PHX_HOST`         | Public hostname, e.g. `scheduling.example.com`. Used for URL generation. |
+| `KEYCLOAK_ISSUER`  | OIDC issuer URL, e.g. `https://sso.example.org/realms/clinic`. |
+| `KEYCLOAK_CLIENT_ID` | OAuth client id for this app, e.g. `scheduling`.             |
+| `KEYCLOAK_CLIENT_SECRET` | That client's secret.                                    |
+
+**A `:prod` release refuses to boot without the three `KEYCLOAK_*` variables.**
+Without them every screen and all 41 API endpoints are public, including
+patient data. If that is genuinely what you want — the app sits on a private
+network, or a reverse proxy authenticates in front of it — set
+`AUTH_DISABLED=true`, which allows the boot and logs a warning. See
+`docs/auth.md` for realm setup.
 
 Optional:
 
@@ -82,6 +92,10 @@ Optional:
 | `POOL_SIZE`         | `10`         | Ecto connection pool size.                                    |
 | `ECTO_IPV6`         | unset        | Set to `true`/`1` if the database host requires IPv6.         |
 | `DNS_CLUSTER_QUERY` | unset        | Optional libcluster-style DNS-based clustering hostname.      |
+| `KEYCLOAK_API_AUDIENCES` | unset   | Extra comma-separated `aud` values accepted on API access tokens. Needed when an integration's tokens carry an audience other than `KEYCLOAK_CLIENT_ID`. |
+| `KEYCLOAK_SIGNING_ALGS` | `RS256`  | Comma-separated JWS algorithms accepted on access tokens.     |
+| `AUTH_SESSION_TTL_SECONDS` | `28800` (8h) | How long a browser session is trusted before re-auth.  |
+| `AUTH_DISABLED`     | unset        | `true` allows a prod boot with no authentication. See above.  |
 
 ---
 

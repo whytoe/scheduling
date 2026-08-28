@@ -85,7 +85,7 @@ defmodule SchedulingWeb.VisitLive.Index do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} active={:visits}>
+    <Layouts.app flash={@flash} current_scope={@current_scope} active={:visits}>
       <.page_head title="Visits">
         <:subtitle>
           Every visit and its lifecycle. Open one to see the timeline of queue entries and events.
