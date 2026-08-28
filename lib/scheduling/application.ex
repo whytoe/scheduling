@@ -17,6 +17,9 @@ defmodule Scheduling.Application do
         # unconfigured, which is the local-dev default. Started before the
         # endpoint so the first request already has keys to validate against.
         Scheduling.Auth.Provider.child_spec_if_enabled(),
+        # Drops expired back-channel-logout revocations. Also nil when auth is
+        # unconfigured — there are no sessions to revoke.
+        Scheduling.Auth.SessionRevocation.Sweeper.child_spec_if_enabled(),
         # Start to serve requests, typically the last entry
         SchedulingWeb.Endpoint
       ]

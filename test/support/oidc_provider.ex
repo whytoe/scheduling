@@ -121,6 +121,36 @@ defmodule Scheduling.OidcProvider do
     )
   end
 
+  @doc """
+  Mints a back-channel logout token (OpenID Connect Back-Channel Logout 1.0).
+
+  Defaults to a valid one naming the same `sid`/`sub` that `access_token/3`
+  issues, so a test can revoke the session it just signed in with. `overrides`
+  replaces any claim, and a claim set to `:drop` is removed entirely — which is
+  how a test produces a token missing `events`, the check that distinguishes a
+  logout token from a replayed ID token.
+  """
+  def logout_token(context, overrides \\ %{}, opts \\ []) do
+    now = System.system_time(:second)
+
+    claims =
+      %{
+        "iss" => context.issuer,
+        "aud" => @client_id,
+        "iat" => now,
+        "exp" => now + 120,
+        "jti" => "logout-#{System.unique_integer([:positive])}",
+        "sub" => "user-1",
+        "sid" => "session-1",
+        "events" => %{"http://schemas.openid.net/event/backchannel-logout" => %{}}
+      }
+      |> Map.merge(overrides)
+      |> Enum.reject(fn {_key, value} -> value == :drop end)
+      |> Map.new()
+
+    sign(Keyword.get(opts, :jwk, context.jwk), claims)
+  end
+
   @doc "Signs arbitrary claims with a key — used to forge a wrong-key token."
   def sign(jwk, claims) do
     {_meta, token} =

@@ -38,6 +38,8 @@ defmodule Scheduling.Auth.Tokens do
 
   @role_claims ["realm_access", "resource_access"]
 
+  @backchannel_logout_event "http://schemas.openid.net/event/backchannel-logout"
+
   @doc """
   Validates a raw bearer token and returns the identity it names.
 
@@ -88,6 +90,85 @@ defmodule Scheduling.Auth.Tokens do
   end
 
   defp merge_role_claims(id_claims, _token), do: id_claims
+
+  @doc """
+  Validates a back-channel logout token and returns what it says to end.
+
+  Runs the same signature / issuer / audience / expiry checks an API bearer
+  token gets — a logout token is attacker-reachable (the endpoint is public and
+  unauthenticated), so it is exactly as security-critical as a login. Then the
+  checks specific to OpenID Connect Back-Channel Logout 1.0 §2.6:
+
+    * an `events` claim containing the back-channel-logout member,
+      which is what distinguishes a logout token from a replayed ID token
+    * a `sub`, a `sid`, or both — otherwise it names nothing
+    * **no** `nonce`, which only ever belongs on an ID token
+
+  Returns `{:ok, %{sub: sub, sid: sid}}`; `sid` may be nil.
+
+  ## Known constraint: sid-only tokens are rejected
+
+  §2.4 permits a logout token to carry `sid` *instead of* `sub`. `oidcc` does
+  not: `oidcc_token:verify_missing_required_claims/1` requires
+  `iss`/`sub`/`aud`/`exp`/`iat` on every JWT it validates, so a sid-only token
+  fails before reaching the checks here — logged as
+  `{missing_claim, "sub", ...}`.
+
+  We accept that. Validating a sid-only token would mean composing
+  `oidcc_jwt_util` primitives and hand-writing the `aud`/`exp`/`nbf`
+  comparisons, and this endpoint is public and unauthenticated — a bespoke
+  validator here is exactly the wrong place to save a round trip. Providers
+  that send `sub` (ac-core sends `sub` on every other token type) are
+  unaffected.
+
+  **If back-channel logout ever silently stops working, look here first**: a
+  provider that switched to sid-only tokens would produce 400s and a
+  `missing_claim` log line, not a partial success.
+
+  Replay is not separately guarded: `Scheduling.Auth.SessionRevocation.revoke/2`
+  upserts, so re-delivering a logout token re-revokes an already-revoked
+  session and changes nothing.
+  """
+  @spec validate_logout_token(String.t()) ::
+          {:ok, %{sub: String.t() | nil, sid: String.t() | nil}}
+          | {:error, error() | :invalid_logout_token}
+  def validate_logout_token(token) when is_binary(token) do
+    with {:ok, claims} <- validate_claims(token) do
+      sub = presence(claims["sub"])
+      sid = presence(claims["sid"])
+
+      cond do
+        not logout_event?(claims["events"]) ->
+          reject("missing the back-channel-logout events claim")
+
+        # Unreachable in practice — oidcc requires `sub` and rejects first.
+        # Kept so the guarantee is stated in code, not only in the doc.
+        is_nil(sub) and is_nil(sid) ->
+          reject("carries neither sub nor sid")
+
+        not is_nil(presence(claims["nonce"])) ->
+          reject("carries a nonce, which belongs only on an ID token")
+
+        true ->
+          {:ok, %{sub: sub, sid: sid}}
+      end
+    end
+  end
+
+  defp logout_event?(events) when is_map(events),
+    do: Map.has_key?(events, @backchannel_logout_event)
+
+  defp logout_event?(_events), do: false
+
+  defp reject(why) do
+    Logger.warning("Rejected back-channel logout token: #{why}")
+    {:error, :invalid_logout_token}
+  end
+
+  # oidcc decodes JSON null to the atom :null, not nil — see
+  # `Scheduling.Auth.Identity`, which normalises the same way.
+  defp presence(value) when value in [nil, :null, ""], do: nil
+  defp presence(value), do: value
 
   defp validate_claims(token) do
     with {:ok, client_context} <- client_context() do
