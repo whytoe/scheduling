@@ -115,34 +115,30 @@ app's admin surface.
 
 ### Data model
 
-Two columns wire scheduling rows to intake rows:
+Two things wire a scheduling row to the intake system:
 
 - `patients.intake_patient_id` (`uuid`, unique nullable) — the patient's id in
-  the intake-form system. **The correlation key** when looking up form
-  responses. Set this when a patient is created or updated via
-  `POST/PATCH /api/v1/patients`.
-- `diagnoses.required_form_types` (`text[]`, default `[]`) — the intake
-  `formType` strings that must be on file (status `completed` AND not
-  `flagged`) before a patient with this diagnosis can be assigned to an
-  office. Set via `POST/PATCH /api/v1/diagnoses`.
+  the intake-form system. **The correlation key.** Set this when a patient is
+  created or updated via `POST/PATCH /api/v1/patients`.
+- `queue_entries.compliance_ref` (`string`, nullable) — an **opaque** reference
+  supplied by whoever created the entry (ultimately from the EMR). Intake
+  resolves it to the forms this encounter requires. Scheduling never learns
+  what those are.
 
-Forms-required lives on the **diagnosis**, not the capability, because
-compliance is service-defined (what visit is the patient here for?), not
-equipment-defined (which room equipment will be used?). This decision is
-re-litigable; the join is small.
+`diagnoses.required_form_types` still exists as catalog data but is **no longer
+read at accept time**. It is a routing-template attribute, not something
+scheduling evaluates against a patient.
 
 ### Behavior
 
 `POST /api/v1/queue_entries/:id/accept`:
 
-1. **Compliance gate** runs first (when `INTAKE_API_KEY` is set).
-2. For each form type in the entry's diagnosis's `required_form_types`:
-   1. `GET {INTAKE_API_URL}/responses?form_type=<type>&status=completed&patient_id=<intake_patient_id>`
-   2. Defense-in-depth: verify `patientId == patient.intake_patient_id` in
-      the returned row(s) (intake's filter is index-direct, but the second
-      check costs nothing and catches a regression).
-   3. Require `flagged == false`.
-3. **Matcher** runs next (unchanged — best-fit office with free capacity).
+1. **Compliance gate** runs first, when all of: `INTAKE_API_KEY` is set, the
+   entry carries a `compliance_ref`, and the patient has an
+   `intake_patient_id`. Any of those missing → the gate is skipped.
+2. `GET {INTAKE_API_URL}/compliance/status?reference=<ref>&patient_id=<uuid>`
+3. Intake answers `{"compliant": true|false}`.
+4. **Matcher** runs next (unchanged — best-fit office with free capacity).
 
 Outcomes (all written to the `routing_decisions` audit log with a
 human-readable rationale):
@@ -150,68 +146,57 @@ human-readable rationale):
 | Outcome                                | HTTP | Body                                                                       | Entry state |
 |----------------------------------------|------|----------------------------------------------------------------------------|-------------|
 | Assigned                               | 200  | `QueueEntry` (status=`assigned`)                                           | assigned    |
-| All required forms satisfied → matcher had no eligible office | 409  | `error.code = "no_eligible_office"`                                        | waiting     |
-| At least one required form missing     | 422  | `error.code = "compliance_failed"`, `error.details.missing_form_types`     | waiting     |
-| Intake-form system unreachable         | 503  | `error.code = "compliance_unavailable"`, `error.details.reason`            | waiting     |
+| Compliant → matcher had no eligible office | 409  | `error.code = "no_eligible_office"`                                        | waiting     |
+| Intake says not compliant              | 422  | `error.code = "compliance_failed"`, `error.details.compliance_ref`         | waiting     |
+| Intake unreachable or the reference unresolvable | 503 | `error.code = "compliance_unavailable"`, `error.details.reason`      | waiting     |
 
-**Fail-closed**: an unreachable intake system blocks new bookings. The audit
-log records every blocked attempt so operations can see the failure
-immediately. Bookings resume automatically when intake recovers.
+**Fail-closed**: an unreachable intake blocks new bookings, and so does a
+reference intake cannot resolve — passing an unknown encounter through the gate
+would defeat the point. Bookings resume automatically when intake recovers.
 
-When the diagnosis requires no forms (`required_form_types == []`) or the
-patient has no `intake_patient_id`, the gate behaves as follows:
+> **This endpoint does not exist yet.** `/compliance/status` is a request to
+> the intake team, analogous to the `?patient_id=` filter they added for
+> `sc-c9j`. Until it ships, leave `INTAKE_API_KEY` unset — or simply create
+> entries without a `compliance_ref`, which skips the gate.
 
-- No required types → **skip** the check, proceed to matcher.
-- Required types AND no `intake_patient_id` → **block** with
-  `compliance_failed`, listing every required type as missing. (You can't
-  satisfy compliance for a patient we can't correlate.)
+### The data boundary (why the gate looks like this)
 
-### Sensitive forms and PHI considerations
+**Scheduling carries PII but not health data.** See `data-boundary.md` for the
+full statement; the short version is that clinical data belongs in the EMR, and
+this system deliberately cannot describe *why* a patient is here.
 
-**The compliance gate is not a privacy boundary.** Any `formType` string
-written into a diagnosis's `required_form_types` ends up visible in
-several downstream surfaces:
+That is why the gate sends an opaque reference rather than form-type names.
+Strings like `stroke-consent`, tied to a named patient, are health data — and
+they used to reach four surfaces:
 
 - `queue_entries` metadata (board snapshot, list endpoints)
-- `routing_decisions.rationale` (audit log — includes the
-  missing-form-types list when compliance fails)
+- `routing_decisions.rationale` (append-only, and read by `/decisions`)
 - `visit_events` (lifecycle log)
-- every outbound webhook subscription (`sc-qsr`)
+- every outbound webhook subscription
 
-Consequence: scheduling-side operators MUST NOT add `formType` values
-for **sensitive** form classes — behavioral health, substance use,
-reproductive health, HIV status, anything else a clinic treats as
-specially protected. Routing those `formType` strings into a
-general-purpose scheduling queue can leak the existence of a sensitive
-encounter via queue metadata even though scheduling never sees the form
-answers.
+Earlier revisions of this document warned operators not to put sensitive
+`formType` values into `required_form_types` for exactly that reason. That was
+a policy asking humans to compensate for a design flaw. The design is now the
+control: scheduling never receives the form types, so it cannot leak them, and
+`test/scheduling/phi_boundary_test.exs` asserts it at each egress path.
 
-The intake-scheduling bridge enforces the same rule on its side
-(`BRIDGE_FORM_TYPE_MAP` omits sensitive types entirely); see
-intakeform's `docs/integrations/scheduling.md` §"Production
-considerations". This is one of the cases where the two systems need to
-make the same policy decision separately — neither one can enforce it
-for the other.
-
-If a clinic genuinely needs a compliance gate around a sensitive form,
-the right shape is a separate code that maps to the form *category*
-without identifying the form's clinical purpose. Talk to legal /
-compliance before plumbing those through.
+For the same reason `queue_entries` no longer has a `diagnosis_id`. A diagnosis
+may be passed to `POST /api/v1/queue_entries` as a convenience — it is expanded
+to that diagnosis's default capabilities and discarded — but the association is
+never stored.
 
 ### Known limitations
 
 - The compliance call is **synchronous** inside `accept`. Slow intake = slow
-  accept. If this matters, options in increasing order of work:
-  1. Short-TTL cache on the per-`(intake_patient_id, form_type)` verdict.
-  2. Precompute compliance when a queue entry is created and stash on the
-     entry; revalidate on a TTL.
+  accept. It is now a single request per accept rather than one per required
+  form type, so this matters less than it did. If it still bites:
+  1. Short-TTL cache on the per-`(intake_patient_id, compliance_ref)` verdict.
+  2. Precompute at entry creation and revalidate on a TTL.
   3. Move the check off the accept path entirely: a background job marks
-     entries `compliant: true` and `accept` only books pre-cleared entries.
-
-(The previous "O(all org responses)" limitation was resolved by
-intakeform adding a `?patient_id=` filter on their `/responses`
-endpoint per scheduling's `sc-c9j`. Our client now passes it; each
-form-type check is one index-direct row instead of up to 200.)
+     entries pre-cleared and `accept` only books those.
+- The gate is **skipped when an entry has no `compliance_ref`**, which is every
+  entry until ac-checkin starts supplying one. Fail-open, matching the
+  unconfigured-intake default.
 
 ## What's pending: Check-in / queueing app
 
@@ -478,19 +463,24 @@ network) to reach services on the macOS host. If intake is in a sibling
 container on the same network, point at its container hostname or IP instead.
 
 ```sh
-# 3. Set required_form_types on a diagnosis.
-curl -X PATCH http://localhost:4000/api/diagnoses/1 \
-  -H 'content-type: application/json' \
-  -d '{"diagnosis":{"required_form_types":["stroke-consent"]}}'
-
-# 4. Create a patient with the intake UUID.
-curl -X POST http://localhost:4000/api/patients \
+# 3. Create a patient with the intake UUID.
+curl -X POST http://localhost:4000/api/v1/patients \
   -H 'content-type: application/json' \
   -d '{"patient":{"name":"Jane Doe","intake_patient_id":"<real-uuid>"}}'
 
-# 5. Create a queue entry and accept.
-#    Expect: 200 if compliance passes, 422 with missing_form_types if not,
-#            503 if intake is unreachable.
+# 4. Create a queue entry carrying a compliance reference. Note there is no
+#    diagnosis on the entry — pass diagnosis_id if you want its capabilities
+#    expanded onto the entry, but it is not stored (see "The data boundary").
+curl -X POST http://localhost:4000/api/v1/queue_entries \
+  -H 'content-type: application/json' \
+  -d '{"queue_entry":{"patient_id":1,"compliance_ref":"<ref-intake-knows>"}}'
+
+# 5. Accept it.
+#    Expect: 200 if intake reports compliant,
+#            422 compliance_failed (details.compliance_ref) if not,
+#            503 compliance_unavailable if intake is unreachable or the
+#                reference cannot be resolved.
+#    Omit compliance_ref in step 4 and the gate is skipped entirely.
 ```
 
 Watch the matcher audit log at `GET /api/routing_decisions` — every
