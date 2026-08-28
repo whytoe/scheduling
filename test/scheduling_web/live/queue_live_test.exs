@@ -48,9 +48,11 @@ defmodule SchedulingWeb.QueueLiveTest do
 
       {:ok, _live, html} = live(conn, ~p"/queue")
 
-      assert html =~ "Waiting room"
+      assert html =~ "Accept queue"
+      assert html =~ "Waiting patients"
       assert html =~ "Jane Doe"
       assert html =~ "XRay"
+      # The top entry is pre-selected, so the routing preview names its office.
       assert html =~ "Room A"
     end
   end
@@ -93,7 +95,6 @@ defmodule SchedulingWeb.QueueLiveTest do
 
       # Live capacity reflects the new in-service assignment.
       assert Scheduling.Queue.current_loads() == %{office.id => 1}
-      assert has_element?(live, "#office-capacity", "Room A")
     end
 
     test "surfaces 'no eligible office' and keeps the patient waiting", %{conn: conn} do

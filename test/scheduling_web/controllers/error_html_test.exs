@@ -5,10 +5,17 @@ defmodule SchedulingWeb.ErrorHTMLTest do
   import Phoenix.Template, only: [render_to_string: 4]
 
   test "renders 404.html" do
-    assert render_to_string(SchedulingWeb.ErrorHTML, "404", "html", []) == "Not Found"
+    html = render_to_string(SchedulingWeb.ErrorHTML, "404", "html", [])
+    assert html =~ "Error 404"
+    assert html =~ "Page not found"
+    assert html =~ "Back to board"
   end
 
   test "renders 500.html" do
-    assert render_to_string(SchedulingWeb.ErrorHTML, "500", "html", []) == "Internal Server Error"
+    html = render_to_string(SchedulingWeb.ErrorHTML, "500", "html", [])
+    assert html =~ "Error 500"
+    assert html =~ "Something went wrong"
+    assert html =~ "your data is safe"
+    assert html =~ "Back to board"
   end
 end

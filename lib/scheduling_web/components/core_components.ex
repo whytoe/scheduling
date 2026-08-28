@@ -56,25 +56,28 @@ defmodule SchedulingWeb.CoreComponents do
       id={@id}
       phx-click={JS.push("lv:clear-flash", value: %{key: @kind}) |> hide("##{@id}")}
       role="alert"
-      class="toast toast-top toast-end z-50"
+      class={[
+        "flash w-80 sm:w-96 cursor-pointer",
+        @kind == :info && "info",
+        @kind == :error && "error"
+      ]}
       {@rest}
     >
-      <div class={[
-        "alert w-80 sm:w-96 max-w-80 sm:max-w-96 text-wrap",
-        @kind == :info && "alert-info",
-        @kind == :error && "alert-error"
-      ]}>
-        <.icon :if={@kind == :info} name="hero-information-circle" class="size-5 shrink-0" />
-        <.icon :if={@kind == :error} name="hero-exclamation-circle" class="size-5 shrink-0" />
-        <div>
-          <p :if={@title} class="font-semibold">{@title}</p>
-          <p>{msg}</p>
-        </div>
-        <div class="flex-1" />
-        <button type="button" class="group self-start cursor-pointer" aria-label={gettext("close")}>
-          <.icon name="hero-x-mark" class="size-5 opacity-40 group-hover:opacity-70" />
-        </button>
+      <.icon
+        name={(@kind == :error && "hero-x-circle") || "hero-check-circle"}
+        class="size-[18px] shrink-0 mt-px"
+      />
+      <div class="flex-1 min-w-0">
+        <p :if={@title} class="font-semibold">{@title}</p>
+        <p>{msg}</p>
       </div>
+      <button
+        type="button"
+        class="shrink-0 cursor-pointer opacity-50 hover:opacity-80"
+        aria-label={gettext("close")}
+      >
+        <.icon name="hero-x-mark" class="size-4" />
+      </button>
     </div>
     """
   end
@@ -88,18 +91,28 @@ defmodule SchedulingWeb.CoreComponents do
       <.button phx-click="go" variant="primary">Send!</.button>
       <.button navigate={~p"/"}>Home</.button>
   """
-  attr :rest, :global, include: ~w(href navigate patch method download name value disabled)
-  attr :class, :any
-  attr :variant, :string, values: ~w(primary)
+  attr :rest, :global, include: ~w(href navigate patch method download name value disabled form)
+  attr :class, :any, default: nil
+  attr :variant, :string, default: "ghost", values: ~w(primary ghost subtle danger clinical)
+  attr :size, :string, default: nil, doc: ~s(set to "sm" for the compact variant)
   slot :inner_block, required: true
 
   def button(%{rest: rest} = assigns) do
-    variants = %{"primary" => "btn-primary", nil => "btn-primary btn-soft"}
+    variants = %{
+      "primary" => "btn-primary",
+      "ghost" => "btn-ghost",
+      "subtle" => "btn-subtle",
+      "danger" => "btn-danger",
+      "clinical" => "btn-primary btn-clinical"
+    }
 
     assigns =
-      assign_new(assigns, :class, fn ->
-        ["btn", Map.fetch!(variants, assigns[:variant])]
-      end)
+      assign(
+        assigns,
+        :class,
+        assigns.class ||
+          ["btn", Map.fetch!(variants, assigns.variant), assigns.size == "sm" && "btn-sm"]
+      )
 
     if rest[:href] || rest[:navigate] || rest[:patch] do
       ~H"""
@@ -295,6 +308,26 @@ defmodule SchedulingWeb.CoreComponents do
     """
   end
 
+  @doc "Renders translated validation errors for a bare (non-`.input`) form field."
+  attr :field, Phoenix.HTML.FormField, required: true
+
+  def field_errors(assigns) do
+    errors =
+      if Phoenix.Component.used_input?(assigns.field), do: assigns.field.errors, else: []
+
+    assigns = assign(assigns, :errors, Enum.map(errors, &translate_error/1))
+
+    ~H"""
+    <p
+      :for={msg <- @errors}
+      class="mt-1.5 flex gap-2 items-center text-sm"
+      style="color:var(--st-error-fg)"
+    >
+      <.icon name="hero-exclamation-circle" class="size-5" />{msg}
+    </p>
+    """
+  end
+
   # Helper used by inputs to generate form errors
   defp error(assigns) do
     ~H"""
@@ -442,6 +475,446 @@ defmodule SchedulingWeb.CoreComponents do
   def icon(%{name: "hero-" <> _} = assigns) do
     ~H"""
     <span class={[@name, @class]} />
+    """
+  end
+
+  # ===========================================================================
+  # Redesign component library — the standardized patterns the screens compose.
+  # Status is NEVER color-alone: every badge/callout carries color + icon + text.
+  # ===========================================================================
+
+  # Lifecycle + outcome status vocabulary (single source for color + icon + text).
+  @status_meta %{
+    "waiting" => {"waiting", "hero-clock", "Waiting"},
+    "assigned" => {"assigned", "hero-arrow-right-circle", "Assigned"},
+    "in_service" => {"active", "hero-bolt", "In service"},
+    "completed" => {"success", "hero-check-circle", "Completed"},
+    "no_eligible" => {"attention", "hero-exclamation-triangle", "No eligible office"},
+    "compliance_failed" => {"error", "hero-shield-exclamation", "Compliance failed"},
+    "compliance_unavailable" => {"neutral", "hero-signal-slash", "Compliance unavailable"},
+    "intake_unreachable" => {"neutral", "hero-signal-slash", "Intake unreachable"},
+    "sensitive" => {"attention", "hero-eye-slash", "Sensitive form"}
+  }
+
+  @doc """
+  PATTERN 1 — Status badge. Always renders color + icon + text (color-blind safe).
+
+  `status` is one of the lifecycle/outcome keys (`waiting`, `assigned`,
+  `in_service`, `completed`, `no_eligible`, `compliance_failed`,
+  `compliance_unavailable`, `intake_unreachable`, `sensitive`). Pass `label` to
+  override the default text (e.g. `→ Room 3`).
+  """
+  attr :status, :string, required: true
+  attr :label, :string, default: nil
+  attr :size, :string, default: nil, doc: ~s(set to "lg" for the larger badge)
+
+  def status_badge(assigns) do
+    {cls, icon, label} = Map.get(@status_meta, to_string(assigns.status), @status_meta["waiting"])
+    assigns = assign(assigns, cls: cls, icon: icon, default_label: label)
+
+    ~H"""
+    <span class={["badge", @cls, @size == "lg" && "badge--lg"]}>
+      <.icon name={@icon} class={if(@size == "lg", do: "size-[15px]", else: "size-[13px]")} />
+      {@label || @default_label}
+    </span>
+    """
+  end
+
+  @doc """
+  Capability chip — a plain capability tag (not a status). `miss` strikes it
+  through in error styling (a required capability the office can't provide);
+  `sensitive` renders amber with an eye-slash icon.
+  """
+  attr :miss, :boolean, default: false
+  attr :sensitive, :boolean, default: false
+  slot :inner_block, required: true
+
+  def chip(assigns) do
+    ~H"""
+    <span class={["chip", @miss && "chip--miss", @sensitive && "chip--sensitive"]}>
+      <.icon :if={@sensitive} name="hero-eye-slash" class="size-[12px]" />
+      {render_slot(@inner_block)}
+    </span>
+    """
+  end
+
+  @doc """
+  Capability chip row. `caps` is a list of names; any in `missing` are struck
+  through. Renders an em-dash when empty.
+  """
+  attr :caps, :list, required: true
+  attr :missing, :list, default: []
+
+  def cap_row(assigns) do
+    ~H"""
+    <span :if={@caps == []} class="t-small">—</span>
+    <span :if={@caps != []} class="chiprow">
+      <.chip :for={cap <- @caps} miss={cap in @missing}>{cap}</.chip>
+    </span>
+    """
+  end
+
+  # Actor attribution vocabulary.
+  @actor_meta %{
+    "front_desk" => {"actor--frontdesk", "hero-user", "Front desk"},
+    "clinician" => {"actor--clinician", "hero-hand-raised", "Clinician"},
+    "queueing" => {"actor--queueing", "hero-user-group", "Queueing service"},
+    "system" => {"actor--system", "hero-cpu-chip", "System"}
+  }
+
+  @doc "Actor attribution pill — who took an action (front desk / clinician / queueing / system)."
+  attr :actor, :string, required: true
+
+  def actor(assigns) do
+    {cls, icon, label} = Map.get(@actor_meta, to_string(assigns.actor), @actor_meta["system"])
+    assigns = assign(assigns, cls: cls, icon: icon, label: label)
+
+    ~H"""
+    <span class={["actor", @cls]}>
+      <.icon name={@icon} class="size-[13px]" />{@label}
+    </span>
+    """
+  end
+
+  @doc """
+  Priority tag for patient cards. A number, never just a hue — readable and
+  color-blind safe. 3+ is urgent (red), 2 is high (amber), else neutral.
+  """
+  attr :priority, :integer, required: true
+
+  def priority_tag(assigns) do
+    ~H"""
+    <div
+      class={[
+        "pcard__pri",
+        @priority >= 3 && "pcard__pri--urgent",
+        @priority == 2 && "pcard__pri--high"
+      ]}
+      title={"Priority #{@priority}"}
+      aria-label={"Priority #{@priority}"}
+    >
+      {@priority}
+    </div>
+    """
+  end
+
+  @doc """
+  PATTERN 3 — Office card with a segmented load meter. Slots are countable at a
+  glance: used (in service) / incoming (hatched) / free. Turns red at 0 free.
+  """
+  attr :name, :string, required: true
+  attr :capacity, :integer, required: true
+  attr :load, :integer, required: true
+  attr :incoming, :integer, default: 0
+  attr :caps, :list, default: []
+  attr :compact, :boolean, default: false
+
+  def office_card(assigns) do
+    free = max(assigns.capacity - assigns.load, 0)
+    assigns = assign(assigns, :free, free)
+
+    ~H"""
+    <div class="ocard">
+      <div class="ocard__top">
+        <div>
+          <div class="ocard__name">{@name}</div>
+          <div :if={not @compact and @caps != []} class="chiprow" style="margin-top:6px">
+            <.chip :for={cap <- @caps}>{cap}</.chip>
+          </div>
+        </div>
+        <div class="ocard__cap">
+          <div class="ocard__capnum tnum" style={@free == 0 && "color:var(--st-error-fg)"}>
+            {@free}
+          </div>
+          <div class="ocard__caplbl">{if @free == 1, do: "slot free", else: "slots free"}</div>
+        </div>
+      </div>
+      <div
+        class="loadmeter"
+        role="img"
+        aria-label={"#{@load} in service, #{@incoming} incoming, #{@free} free of #{@capacity}"}
+      >
+        <span
+          :for={i <- 0..(@capacity - 1)//1}
+          class={[
+            "loadmeter__slot",
+            i < @load && ((@load >= @capacity && "loadmeter__slot--full") || "loadmeter__slot--used"),
+            (i >= @load and i < @load + @incoming) && "loadmeter__slot--incoming"
+          ]}
+        />
+      </div>
+      <div class="ocard__legend">
+        <span class="ocard__legdot">
+          <i style="background:var(--st-active-fg)"></i>In service <b class="tnum">{@load}</b>
+        </span>
+        <span :if={@incoming > 0} class="ocard__legdot">
+          <i style="background:var(--st-assigned-fg);opacity:.6"></i>Incoming
+          <b class="tnum">{@incoming}</b>
+        </span>
+        <span class="ocard__legdot">
+          <i style="background:var(--color-base-300)"></i>Free <b class="tnum">{@free}</b>
+        </span>
+      </div>
+    </div>
+    """
+  end
+
+  @doc """
+  PATTERN 7 — Error / warning callout. `tone` is `attention`, `error`, `info`,
+  or `neutral`; `dashed` marks degraded/unreachable conditions. Carries an
+  icon + title + body so meaning never rests on color alone.
+  """
+  attr :tone, :string, default: "info", values: ~w(attention error info neutral)
+  attr :icon, :string, default: nil
+  attr :title, :string, default: nil
+  attr :dashed, :boolean, default: false
+  slot :inner_block, required: true
+
+  def callout(assigns) do
+    default_icon = %{
+      "attention" => "hero-exclamation-triangle",
+      "error" => "hero-x-circle",
+      "info" => "hero-information-circle",
+      "neutral" => "hero-signal-slash"
+    }
+
+    assigns =
+      assign_new(assigns, :resolved_icon, fn -> assigns.icon || default_icon[assigns.tone] end)
+
+    ~H"""
+    <div
+      class={["callout", @tone, @dashed && "callout--dashed"]}
+      role={if @tone == "error", do: "alert", else: "status"}
+    >
+      <.icon name={@resolved_icon} class="size-5 shrink-0" />
+      <div class="callout__main">
+        <div :if={@title} class="callout__title">{@title}</div>
+        <div class="callout__body">{render_slot(@inner_block)}</div>
+      </div>
+    </div>
+    """
+  end
+
+  @doc """
+  PATTERN 6 — Empty state. Icon + reassuring "system is working" body, so an
+  empty zone reads as calm rather than broken.
+  """
+  attr :icon, :string, default: "hero-check-circle"
+  attr :title, :string, required: true
+  slot :inner_block
+
+  def empty_state(assigns) do
+    ~H"""
+    <div class="empty">
+      <div class="empty__icon"><.icon name={@icon} class="size-6" /></div>
+      <div class="empty__title">{@title}</div>
+      <div :if={@inner_block != []} class="empty__body">{render_slot(@inner_block)}</div>
+    </div>
+    """
+  end
+
+  @doc "Design-decision annotation note (used to explain a layout choice in context)."
+  slot :inner_block, required: true
+
+  def note(assigns) do
+    ~H"""
+    <div class="note">
+      <.icon name="hero-sparkles" class="size-[14px] shrink-0" />
+      <div>{render_slot(@inner_block)}</div>
+    </div>
+    """
+  end
+
+  @doc "Zone header — icon + title + count pill. Optional `:right` slot for controls."
+  attr :id, :string, default: nil
+  attr :count_id, :string, default: nil
+  attr :icon, :string, default: nil
+  attr :title, :string, required: true
+  attr :count, :integer, default: nil
+  slot :right
+
+  def zone_head(assigns) do
+    ~H"""
+    <div class="zone__head">
+      <div class="panel-title">
+        <.icon :if={@icon} name={@icon} class="size-[18px] text-base-content/60" />
+        <h2 id={@id} class="t-h2">{@title}</h2>
+        <span :if={@count != nil} id={@count_id} class="zone__count tnum">{@count}</span>
+      </div>
+      {render_slot(@right)}
+    </div>
+    """
+  end
+
+  @doc "Page header — large title, optional live dot, subtitle, and actions."
+  attr :title, :string, required: true
+  attr :live, :boolean, default: false
+  slot :subtitle
+  slot :actions
+
+  def page_head(assigns) do
+    ~H"""
+    <div class="pagehead">
+      <div style="flex:1;min-width:0">
+        <div class="flex items-center gap-[10px]">
+          <h1 class="t-display">{@title}</h1>
+          <span
+            :if={@live}
+            class="inline-flex items-center gap-[6px] text-[13px] font-semibold"
+            style="color:var(--st-success-fg)"
+          >
+            <span class="livedot"></span> {gettext("Live")}
+          </span>
+        </div>
+        <p :if={@subtitle != []} class="pagehead__sub">{render_slot(@subtitle)}</p>
+      </div>
+      <div :if={@actions != []} class="flex gap-2 flex-none">{render_slot(@actions)}</div>
+    </div>
+    """
+  end
+
+  @doc """
+  PATTERN 8 — Confirmation dialog. The one pronounced-elevation surface, for
+  destructive / clinically-consequential actions only. Focus moves to Cancel,
+  Esc and backdrop cancel, focus is trapped, and returns to the trigger on close
+  (via the `ConfirmDialog` JS hook). The body must name the exact consequence.
+  """
+  attr :id, :string, required: true
+  attr :show, :boolean, default: false
+  attr :tone, :string, default: "error", values: ~w(error attention)
+  attr :icon, :string, default: "hero-trash"
+  attr :title, :string, required: true
+  attr :confirm_label, :string, default: "Confirm"
+  attr :on_confirm, :any, required: true, doc: "JS command or event for the confirm button"
+  attr :on_cancel, :any, default: nil, doc: "JS command run on cancel/dismiss"
+  slot :inner_block, required: true
+
+  def confirm_dialog(assigns) do
+    assigns = assign_new(assigns, :on_cancel, fn -> nil end)
+
+    ~H"""
+    <div
+      :if={@show}
+      id={@id}
+      class="scrim"
+      phx-hook="ConfirmDialog"
+      phx-window-keydown={@on_cancel}
+      phx-key="escape"
+    >
+      <div
+        class="cdialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby={"#{@id}-title"}
+        aria-describedby={"#{@id}-body"}
+        phx-click-away={@on_cancel}
+      >
+        <div class="cdialog__head">
+          <div class={["cdialog__icon", @tone]}><.icon name={@icon} class="size-[22px]" /></div>
+          <div>
+            <div id={"#{@id}-title"} class="cdialog__title">{@title}</div>
+            <div id={"#{@id}-body"} class="cdialog__body" style="margin-top:4px">
+              {render_slot(@inner_block)}
+            </div>
+          </div>
+        </div>
+        <div class="cdialog__actions">
+          <button type="button" class="btn btn-ghost" data-confirm-cancel phx-click={@on_cancel}>
+            {gettext("Cancel")}
+          </button>
+          <button
+            type="button"
+            class={["btn", (@tone == "error" && "btn-danger") || "btn-primary"]}
+            phx-click={@on_confirm}
+          >
+            {@confirm_label}
+          </button>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  @doc """
+  Vertical lifecycle timeline. `events` is a list of maps with `:label`,
+  `:icon`, `:tone` (an `--st-*` tone key), `:time`, `:actor`, and optional
+  `:note`. Shared by `/visit_events` and `/visits`.
+  """
+  attr :events, :list, required: true
+
+  def timeline(assigns) do
+    ~H"""
+    <ol class="tl">
+      <li :for={ev <- @events} class="tl__item">
+        <span
+          class="tl__dot"
+          style={"background:var(--st-#{ev.tone}-bg);color:var(--st-#{ev.tone}-fg);border:1px solid var(--st-#{ev.tone}-line)"}
+        >
+          <.icon name={ev.icon} class="size-4" />
+        </span>
+        <div>
+          <div class="tl__head">
+            <span class="font-semibold">{ev.label}</span>
+            <span class="mono t-small">{ev.time}</span>
+            <.actor actor={ev.actor} />
+          </div>
+          <div :if={ev.note} class="t-small" style="margin-top:2px">{ev.note}</div>
+        </div>
+      </li>
+    </ol>
+    """
+  end
+
+  @doc "PATTERN 9 — a single skeleton bar (reduced-motion falls back to a static tint)."
+  attr :class, :any, default: nil
+  attr :rest, :global
+
+  def skel(assigns) do
+    ~H"""
+    <span class={["skel block", @class]} {@rest} />
+    """
+  end
+
+  @doc "Skeleton placeholder list for first paint / reconnect on card lists."
+  attr :rows, :integer, default: 4
+
+  def skeleton_list(assigns) do
+    ~H"""
+    <div role="status" aria-live="polite">
+      <span class="sr-only">{gettext("Loading…")}</span>
+      <div :for={_ <- 1..@rows//1} class="skel-card" aria-hidden="true">
+        <.skel class="skel--lg" style="width:34px;height:34px;border-radius:8px;flex:none" />
+        <div style="flex:1">
+          <.skel class="skel--text" style="width:40%" />
+          <.skel class="skel--text" style="width:62%;margin-top:8px" />
+        </div>
+        <.skel style="width:70px;height:22px;border-radius:6px;flex:none" />
+      </div>
+    </div>
+    """
+  end
+
+  @doc "Skeleton placeholder table for first paint on CRUD/visit lists."
+  attr :rows, :integer, default: 5
+  attr :cols, :integer, default: 4
+
+  def skeleton_table(assigns) do
+    ~H"""
+    <div class="card overflow-hidden" style="padding:0" role="status">
+      <span class="sr-only">{gettext("Loading…")}</span>
+      <div
+        :for={_ <- 1..@rows//1}
+        aria-hidden="true"
+        class="grid gap-[var(--s-4)]"
+        style={"grid-template-columns:repeat(#{@cols},1fr);padding:var(--s-3) var(--s-4);border-bottom:1px solid var(--color-base-300)"}
+      >
+        <.skel
+          :for={j <- 1..@cols//1}
+          class="skel--text"
+          style={"width:#{if j == 1, do: 60, else: 45}%"}
+        />
+      </div>
+    </div>
     """
   end
 
