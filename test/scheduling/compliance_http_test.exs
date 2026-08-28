@@ -1,19 +1,21 @@
 defmodule Scheduling.ComplianceHttpTest do
   @moduledoc """
-  HTTP-path coverage for `Scheduling.Compliance.verify/1`. Stands up a
-  Bypass server to play the intake-form API. The non-HTTP branches
-  (`:not_configured`, `:ok` with no required types, `:missing` with no
-  `intake_patient_id`) are exercised in `Scheduling.ComplianceTest` —
-  those tests stay async-safe; these can't (they mutate global config).
+  HTTP-path coverage for `Scheduling.Compliance.verify/1`, with a Bypass server
+  playing the intake-form API. The branches that never reach HTTP are covered
+  in `Scheduling.ComplianceTest`.
+
+  The gate sends an **opaque reference**, never form-type names — that is the
+  whole point of the design (`docs/data-boundary.md`), so there is a test below
+  asserting it directly rather than trusting it by inspection.
   """
   use Scheduling.DataCase, async: false
 
-  alias Scheduling.Catalog.Diagnosis
   alias Scheduling.Compliance
   alias Scheduling.Patients.Patient
   alias Scheduling.Queue.QueueEntry
 
   @patient_uuid "11111111-1111-1111-1111-111111111111"
+  @reference "enc_01HV3K7Q"
 
   setup do
     bypass = Bypass.open()
@@ -31,204 +33,118 @@ defmodule Scheduling.ComplianceHttpTest do
     %{bypass: bypass}
   end
 
-  defp patient_fixture(attrs \\ %{}) do
-    attrs =
-      Map.merge(%{name: "Compliance HTTP", intake_patient_id: @patient_uuid}, Map.new(attrs))
-
-    Repo.insert!(Patient.changeset(%Patient{}, attrs))
-  end
-
-  defp diagnosis_fixture(required_form_types) do
+  defp patient_fixture do
     Repo.insert!(
-      Diagnosis.changeset(%Diagnosis{}, %{
-        name: "Compliance HTTP Dx #{System.unique_integer([:positive])}",
-        code: "DX-CMPH-#{System.unique_integer([:positive])}",
-        required_form_types: required_form_types
+      Patient.changeset(%Patient{}, %{
+        name: "Compliance HTTP",
+        intake_patient_id: @patient_uuid
       })
     )
   end
 
-  defp entry(patient, diagnosis) do
+  defp entry(patient, ref \\ @reference) do
     %QueueEntry{
       id: 1,
       patient_id: patient.id,
       patient: patient,
-      diagnosis_id: diagnosis.id,
-      diagnosis: diagnosis,
+      compliance_ref: ref,
       required_capabilities: []
     }
   end
 
-  # Builds a /responses payload — a list of ResponseMetadata-shaped maps with
-  # the intake-spec keys we filter on (patientId, formType, status, flagged).
-  defp responses(items), do: Jason.encode!(items)
+  defp stub_status(bypass, fun) do
+    Bypass.expect(bypass, "GET", "/api/v1/compliance/status", fun)
+  end
 
-  defp respond_json(conn, status, body) do
+  defp respond(conn, status, body) do
     conn
     |> Plug.Conn.put_resp_content_type("application/json")
-    |> Plug.Conn.resp(status, body)
+    |> Plug.Conn.resp(status, Jason.encode!(body))
   end
 
-  describe "verify/1 with API key set + intake reachable" do
-    test "returns :ok when intake has a completed, non-flagged response for the form type",
-         %{bypass: bypass} do
-      parent = self()
+  describe "verify/1 verdicts" do
+    test "compliant returns :ok", %{bypass: bypass} do
+      stub_status(bypass, &respond(&1, 200, %{"compliant" => true}))
 
-      Bypass.expect(bypass, "GET", "/api/v1/responses", fn conn ->
-        conn = Plug.Conn.fetch_query_params(conn)
-
-        send(
-          parent,
-          {:request, conn.query_params, Plug.Conn.get_req_header(conn, "authorization")}
-        )
-
-        respond_json(
-          conn,
-          200,
-          responses([
-            %{
-              "id" => "r1",
-              "patientId" => @patient_uuid,
-              "formType" => "stroke-consent",
-              "status" => "completed",
-              "flagged" => false
-            }
-          ])
-        )
-      end)
-
-      patient = patient_fixture()
-      dx = diagnosis_fixture(["stroke-consent"])
-
-      assert Compliance.verify(entry(patient, dx)) == :ok
-
-      # Confirm the request shape after the verify, when an assertion failure
-      # won't poison the cowboy handler.
-      assert_received {:request,
-                       %{
-                         "form_type" => "stroke-consent",
-                         "status" => "completed",
-                         "patient_id" => @patient_uuid
-                       }, auth}
-
-      assert auth == ["Bearer ik_test"]
+      assert Compliance.verify(entry(patient_fixture())) == :ok
     end
 
-    test "returns {:missing, [type]} when intake responses are all flagged",
-         %{bypass: bypass} do
-      Bypass.expect(bypass, "GET", "/api/v1/responses", fn conn ->
-        respond_json(
-          conn,
-          200,
-          responses([
-            %{
-              "id" => "r1",
-              "patientId" => @patient_uuid,
-              "formType" => "stroke-consent",
-              "status" => "completed",
-              "flagged" => true,
-              "flaggedCodes" => ["needs-review"]
-            }
-          ])
-        )
-      end)
+    test "not compliant returns :blocked", %{bypass: bypass} do
+      stub_status(bypass, &respond(&1, 200, %{"compliant" => false}))
 
-      patient = patient_fixture()
-      dx = diagnosis_fixture(["stroke-consent"])
-
-      assert {:missing, ["stroke-consent"]} = Compliance.verify(entry(patient, dx))
+      assert Compliance.verify(entry(patient_fixture())) == :blocked
     end
 
-    test "returns {:missing, [type]} when no response exists for this patient",
+    test "tolerates camelCase, since the field name isn't fixed yet",
          %{bypass: bypass} do
-      Bypass.expect(bypass, "GET", "/api/v1/responses", fn conn ->
-        # Other patients' responses present — none for ours.
-        respond_json(
-          conn,
-          200,
-          responses([
-            %{
-              "id" => "r99",
-              "patientId" => "99999999-9999-9999-9999-999999999999",
-              "formType" => "stroke-consent",
-              "status" => "completed",
-              "flagged" => false
-            }
-          ])
-        )
-      end)
+      stub_status(bypass, &respond(&1, 200, %{"isCompliant" => false}))
 
-      patient = patient_fixture()
-      dx = diagnosis_fixture(["stroke-consent"])
-
-      assert {:missing, ["stroke-consent"]} = Compliance.verify(entry(patient, dx))
-    end
-
-    test "returns {:missing, [only the missing types]} for a mixed multi-type diagnosis",
-         %{bypass: bypass} do
-      # The client makes one request per required form type — we expect two
-      # calls; one returns a satisfying response, the other returns nothing.
-      Bypass.expect(bypass, "GET", "/api/v1/responses", fn conn ->
-        conn = Plug.Conn.fetch_query_params(conn)
-
-        body =
-          case conn.query_params["form_type"] do
-            "stroke-consent" ->
-              responses([
-                %{
-                  "id" => "r1",
-                  "patientId" => @patient_uuid,
-                  "formType" => "stroke-consent",
-                  "status" => "completed",
-                  "flagged" => false
-                }
-              ])
-
-            "contrast-screening" ->
-              responses([])
-
-            _other ->
-              responses([])
-          end
-
-        respond_json(conn, 200, body)
-      end)
-
-      patient = patient_fixture()
-      dx = diagnosis_fixture(["stroke-consent", "contrast-screening"])
-
-      assert {:missing, ["contrast-screening"]} = Compliance.verify(entry(patient, dx))
+      assert Compliance.verify(entry(patient_fixture())) == :blocked
     end
   end
 
-  describe "verify/1 with intake unavailable" do
-    test "returns {:error, {:http_status, 401, _}} when intake rejects the API key",
-         %{bypass: bypass} do
-      Bypass.expect(bypass, "GET", "/api/v1/responses", fn conn ->
-        respond_json(conn, 401, Jason.encode!(%{"error" => "unauthenticated"}))
-      end)
+  describe "verify/1 failures are fail-closed" do
+    test "an unrecognised reference is an error, not a pass", %{bypass: bypass} do
+      # A 404 means intake cannot resolve the reference. Treating that as
+      # "compliant" would let an unknown encounter through the gate.
+      stub_status(bypass, &respond(&1, 404, %{"error" => "not_found"}))
 
-      patient = patient_fixture()
-      dx = diagnosis_fixture(["stroke-consent"])
-
-      assert {:error, {:http_status, 401, _body}} = Compliance.verify(entry(patient, dx))
+      assert {:error, {:http_status, 404, _}} = Compliance.verify(entry(patient_fixture()))
     end
 
-    test "returns {:error, %Req.TransportError{}} when intake refuses connections",
-         %{bypass: bypass} do
-      # Stopping Bypass leaves nothing listening on that port.
+    test "a server error is an error", %{bypass: bypass} do
+      stub_status(bypass, &respond(&1, 500, %{"error" => "boom"}))
+
+      assert {:error, {:http_status, 500, _}} = Compliance.verify(entry(patient_fixture()))
+    end
+
+    test "a body without a recognisable verdict is an error", %{bypass: bypass} do
+      stub_status(bypass, &respond(&1, 200, %{"status" => "maybe"}))
+
+      assert {:error, {:unexpected_body, _}} = Compliance.verify(entry(patient_fixture()))
+    end
+
+    test "an unreachable intake is an error", %{bypass: bypass} do
       Bypass.down(bypass)
 
-      patient = patient_fixture()
-      dx = diagnosis_fixture(["stroke-consent"])
+      assert {:error, _reason} = Compliance.verify(entry(patient_fixture()))
+    end
+  end
 
-      assert {:error, %Req.TransportError{}} = Compliance.verify(entry(patient, dx))
+  describe "the request itself" do
+    test "carries the reference, the patient id and the bearer token",
+         %{bypass: bypass} do
+      test_pid = self()
+
+      stub_status(bypass, fn conn ->
+        conn = Plug.Conn.fetch_query_params(conn)
+        send(test_pid, {:req, conn.query_params, Plug.Conn.get_req_header(conn, "authorization")})
+        respond(conn, 200, %{"compliant" => true})
+      end)
+
+      assert Compliance.verify(entry(patient_fixture())) == :ok
+
+      assert_receive {:req, params, ["Bearer ik_test"]}
+      assert params["reference"] == @reference
+      assert params["patient_id"] == @patient_uuid
     end
 
-    # NOTE: a "intake mid-request timeout" test (sleep past http_timeout_ms)
-    # was tried here, but cowboy + Req retry interaction made it flaky. The
-    # `Bypass.down` test above already covers the "intake unreachable ->
-    # transport error" path — the timeout case degrades into the same
-    # surfaced failure mode at the accept-flow boundary.
+    test "sends no clinical detail — only the opaque reference", %{bypass: bypass} do
+      # The guarantee this whole design exists for. If a future change starts
+      # sending form types again, this fails.
+      test_pid = self()
+
+      stub_status(bypass, fn conn ->
+        conn = Plug.Conn.fetch_query_params(conn)
+        send(test_pid, {:params, conn.query_params})
+        respond(conn, 200, %{"compliant" => true})
+      end)
+
+      Compliance.verify(entry(patient_fixture()))
+
+      assert_receive {:params, params}
+      assert Map.keys(params) |> Enum.sort() == ["patient_id", "reference"]
+      refute Enum.any?(Map.values(params), &String.contains?(&1, "consent"))
+    end
   end
 end

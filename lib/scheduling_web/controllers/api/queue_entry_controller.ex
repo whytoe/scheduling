@@ -199,14 +199,14 @@ defmodule SchedulingWeb.Api.QueueEntryController do
             )
           )
 
-        {:compliance_failed, missing_types} ->
+        {:compliance_failed, reference} ->
           conn
           |> put_status(:unprocessable_entity)
           |> json(
             ErrorEnvelope.error_envelope(
               "compliance_failed",
               "The patient hasn't completed every required intake form",
-              %{missing_form_types: missing_types}
+              compliance_details(reference)
             )
           )
 
@@ -302,13 +302,21 @@ defmodule SchedulingWeb.Api.QueueEntryController do
 
   defp reload(entry), do: Queue.get_entry!(entry.id)
 
+  # Names the reference the caller can look up in the intake system, never the
+  # form types behind it — those are health data and scheduling does not hold
+  # them. Omitted entirely when the entry carries no reference, so the envelope
+  # stays compact rather than carrying a null.
+  defp compliance_details(reference) when is_binary(reference) and reference != "",
+    do: %{compliance_ref: reference}
+
+  defp compliance_details(_reference), do: nil
+
   defp serialize(entry) do
     %{
       id: entry.id,
       status: entry.status,
       priority: entry.priority,
       patient_id: entry.patient_id,
-      diagnosis_id: entry.diagnosis_id,
       assigned_office_id: entry.assigned_office_id,
       visit_id: entry.visit_id,
       patient: serialize_patient(entry.patient),

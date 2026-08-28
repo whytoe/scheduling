@@ -1,37 +1,40 @@
 defmodule Scheduling.Compliance.Client do
   @moduledoc """
   Thin HTTP client wrapping the intake-form-system REST API
-  (`http://localhost:3001/api/v1/openapi.json` describes it).
+  (`{INTAKE_API_URL}/openapi.json` describes it).
 
-  Exposes `list_completed_responses/2`, which pulls response metadata for a
-  given form type filtered to `status=completed`. Pass `patient_id:` in opts
-  to scope the call server-side via intake's index-direct `patient_id` query
-  parameter (added by intakeform per scheduling's `sc-c9j` request) — the
-  result is 0 or 1 row instead of up to `limit` rows for the whole org.
-  Patient-side flag filtering still happens in `Scheduling.Compliance`
-  because intake's filter is `status=completed`, not
-  `status=completed AND flagged=false`.
+  Exposes `compliance_status/2`: given an opaque compliance reference and the
+  patient's intake id, intake answers whether that patient has satisfied the
+  forms the reference implies.
+
+  ## Why the shape changed
+
+  This client used to call `GET /responses?form_type=…`, which meant scheduling
+  had to know — and therefore store — the clinical form-type names. Those are
+  health data, and scheduling carries PII only (`docs/data-boundary.md`). The
+  verdict endpoint moves that resolution to intake, which legitimately owns it.
+
+  **This endpoint is a request to the intake team, not yet built.** Until it
+  exists the call fails and the accept flow treats it as fail-closed, so the
+  gate should stay disabled (`INTAKE_API_KEY` unset) until intake ships it. See
+  `docs/integrations.md`.
 
   Configuration lives under `config :scheduling, Scheduling.Compliance` —
   `base_url`, `api_key`, `http_timeout_ms`.
   """
 
   @doc """
-  Returns `{:ok, responses}` with a list of intake response metadata maps for
-  the given form type with `status=completed`, or `{:error, reason}`.
+  Returns `{:ok, %{compliant: boolean}}` for the given compliance reference and
+  patient, or `{:error, reason}`.
 
-  Opts:
-    * `:patient_id` (string, optional) — intake patient UUID; when supplied,
-      intake filters server-side via its `?patient_id=` parameter and the
-      result is 0 or 1 row. Omit to fall back to the org-wide listing.
-
-  Each response map has at least these keys (strings, as returned by intake):
-  `"id"`, `"patientId"`, `"questionnaireId"`, `"formType"`, `"status"`,
-  `"flagged"`, `"submittedAt"`.
+  `reference` is opaque to scheduling: intake resolves it to the set of forms
+  the encounter requires and evaluates them. A 404 means intake does not
+  recognise the reference, which is an error rather than a "no" — a reference
+  we cannot resolve must not silently pass a patient through.
   """
-  @spec list_completed_responses(String.t(), keyword()) ::
-          {:ok, list(map())} | {:error, term()}
-  def list_completed_responses(form_type, opts \\ []) when is_binary(form_type) do
+  @spec compliance_status(String.t(), keyword()) ::
+          {:ok, %{compliant: boolean()}} | {:error, term()}
+  def compliance_status(reference, opts \\ []) when is_binary(reference) do
     config = config()
 
     case config.api_key do
@@ -39,12 +42,9 @@ defmodule Scheduling.Compliance.Client do
         {:error, :api_key_missing}
 
       key ->
-        url = config.base_url <> "/responses"
-        params = build_params(form_type, opts)
-
         Req.new(
-          url: url,
-          params: params,
+          url: config.base_url <> "/compliance/status",
+          params: build_params(reference, opts),
           headers: [{"authorization", "Bearer " <> key}],
           receive_timeout: config.http_timeout_ms
         )
@@ -53,18 +53,18 @@ defmodule Scheduling.Compliance.Client do
     end
   end
 
-  defp build_params(form_type, opts) do
-    base = [form_type: form_type, status: "completed", limit: 200]
-
+  defp build_params(reference, opts) do
     case Keyword.get(opts, :patient_id) do
-      nil -> base
-      "" -> base
-      pid when is_binary(pid) -> [{:patient_id, pid} | base]
+      pid when is_binary(pid) and pid != "" -> [reference: reference, patient_id: pid]
+      _ -> [reference: reference]
     end
   end
 
   defp handle_response({:ok, %{status: 200, body: body}}) do
-    {:ok, normalize_list(body)}
+    case compliant_flag(body) do
+      nil -> {:error, {:unexpected_body, body}}
+      flag -> {:ok, %{compliant: flag}}
+    end
   end
 
   defp handle_response({:ok, %{status: status, body: body}}) do
@@ -73,13 +73,11 @@ defmodule Scheduling.Compliance.Client do
 
   defp handle_response({:error, exception}), do: {:error, exception}
 
-  # The ResponseList schema in the intake spec wraps results — accept either
-  # a raw list (some test fixtures) or {"data": [...]} / {"items": [...]}.
-  defp normalize_list(body) when is_list(body), do: body
-  defp normalize_list(%{"data" => items}) when is_list(items), do: items
-  defp normalize_list(%{"items" => items}) when is_list(items), do: items
-  defp normalize_list(%{"responses" => items}) when is_list(items), do: items
-  defp normalize_list(_), do: []
+  # Accept either casing; the intake API is camelCase elsewhere but the field
+  # name is not yet fixed, so tolerate both rather than guess wrong.
+  defp compliant_flag(%{"compliant" => flag}) when is_boolean(flag), do: flag
+  defp compliant_flag(%{"isCompliant" => flag}) when is_boolean(flag), do: flag
+  defp compliant_flag(_body), do: nil
 
   defp config do
     raw = Application.get_env(:scheduling, Scheduling.Compliance) || []

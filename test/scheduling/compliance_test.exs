@@ -1,10 +1,16 @@
 defmodule Scheduling.ComplianceTest do
+  @moduledoc """
+  The non-HTTP branches of `Scheduling.Compliance.verify/1` — every case where
+  there is nothing to ask intake about. The HTTP paths live in
+  `Scheduling.ComplianceHttpTest`.
+  """
   use Scheduling.DataCase, async: false
 
-  alias Scheduling.Catalog.Diagnosis
   alias Scheduling.Compliance
   alias Scheduling.Patients.Patient
   alias Scheduling.Queue.QueueEntry
+
+  @patient_uuid "22222222-2222-2222-2222-222222222222"
 
   setup do
     # Capture and restore Compliance config around each test so we can flip
@@ -19,68 +25,50 @@ defmodule Scheduling.ComplianceTest do
     Application.put_env(:scheduling, Compliance, cfg)
   end
 
-  defp clear_api_key do
-    cfg = (Application.get_env(:scheduling, Compliance) || []) |> Keyword.put(:api_key, nil)
-    Application.put_env(:scheduling, Compliance, cfg)
-  end
-
-  defp patient_fixture(attrs \\ %{}) do
+  defp patient_fixture(attrs) do
     attrs = Map.merge(%{name: "Compliance Test"}, Map.new(attrs))
     Repo.insert!(Patient.changeset(%Patient{}, attrs))
   end
 
-  defp diagnosis_fixture(attrs) do
-    attrs = Map.merge(%{name: "Compliance Dx", code: "DX-COMP"}, Map.new(attrs))
-    Repo.insert!(Diagnosis.changeset(%Diagnosis{}, attrs))
-  end
-
-  defp entry(patient, diagnosis) do
+  defp entry(patient, compliance_ref) do
     %QueueEntry{
       id: 1,
       patient_id: patient.id,
       patient: patient,
-      diagnosis_id: diagnosis && diagnosis.id,
-      diagnosis: diagnosis,
+      compliance_ref: compliance_ref,
       required_capabilities: []
     }
   end
 
-  describe "verify/1 with no API key configured" do
-    test "returns :not_configured regardless of required_form_types" do
-      clear_api_key()
-      patient = patient_fixture()
-      dx = diagnosis_fixture(%{required_form_types: ["stroke-consent"]})
+  describe "verify/1 skips the gate when there is nothing to ask" do
+    test "no API key configured" do
+      put_api_key(nil)
+      patient = patient_fixture(%{intake_patient_id: @patient_uuid})
 
-      assert Compliance.verify(entry(patient, dx)) == :not_configured
+      assert Compliance.verify(entry(patient, "enc_1")) == :not_configured
     end
-  end
 
-  describe "verify/1 with API key configured" do
-    setup do
+    test "no compliance reference on the entry" do
+      # The expected state until ac-checkin starts supplying references. Fails
+      # open by design — same posture as an unconfigured intake.
       put_api_key("ik_test_dummy")
-      :ok
+      patient = patient_fixture(%{intake_patient_id: @patient_uuid})
+
+      assert Compliance.verify(entry(patient, nil)) == :not_configured
     end
 
-    test "returns :ok when diagnosis has no required forms" do
-      patient = patient_fixture(%{intake_patient_id: "11111111-1111-1111-1111-111111111111"})
-      dx = diagnosis_fixture(%{required_form_types: []})
+    test "an empty-string reference is treated as no reference" do
+      put_api_key("ik_test_dummy")
+      patient = patient_fixture(%{intake_patient_id: @patient_uuid})
 
-      assert Compliance.verify(entry(patient, dx)) == :ok
+      assert Compliance.verify(entry(patient, "")) == :not_configured
     end
 
-    test "returns :ok when entry has no diagnosis" do
-      patient = patient_fixture(%{intake_patient_id: "11111111-1111-1111-1111-111111111111"})
-
-      # No diagnosis associated -> nothing required -> :ok
-      assert Compliance.verify(entry(patient, nil)) == :ok
-    end
-
-    test "blocks with the required types when patient has no intake_patient_id" do
+    test "no intake_patient_id to correlate against" do
+      put_api_key("ik_test_dummy")
       patient = patient_fixture(%{intake_patient_id: nil})
-      dx = diagnosis_fixture(%{required_form_types: ["stroke-consent", "imaging-consent"]})
 
-      assert {:missing, missing} = Compliance.verify(entry(patient, dx))
-      assert Enum.sort(missing) == ["imaging-consent", "stroke-consent"]
+      assert Compliance.verify(entry(patient, "enc_1")) == :not_configured
     end
   end
 end

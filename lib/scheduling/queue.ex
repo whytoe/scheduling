@@ -11,6 +11,7 @@ defmodule Scheduling.Queue do
   import Ecto.Query, warn: false
 
   alias Scheduling.Audit
+  alias Scheduling.Catalog
   alias Scheduling.Catalog.Capability
   alias Scheduling.Compliance
   alias Scheduling.Handoffs
@@ -123,8 +124,14 @@ defmodule Scheduling.Queue do
 
   @doc """
   Creates a new queue entry. Accepts `patient_id` (required), optional
-  `diagnosis_id` and `priority`, and `required_capability_ids` to set the
-  patient's required capabilities. Defaults to `status: :waiting`.
+  `priority` and `compliance_ref`, and either `required_capability_ids` or
+  `diagnosis_id` to set the patient's required capabilities. Defaults to
+  `status: :waiting`.
+
+  `diagnosis_id` is a **transient input**, not a stored field: it is expanded
+  to that diagnosis's default capabilities and then discarded. Scheduling keeps
+  the equipment requirement, never the clinical reason for it — see
+  `docs/data-boundary.md`. `required_capability_ids` wins when both are given.
 
   Returns `{:ok, entry}` with `:patient` and `:required_capabilities`
   preloaded, or `{:error, changeset}`.
@@ -152,7 +159,9 @@ defmodule Scheduling.Queue do
         patient_id: entry.patient_id,
         actor_type: Keyword.get(opts, :actor_type),
         actor_id: Keyword.get(opts, :actor_id),
-        payload: %{priority: entry.priority, diagnosis_id: entry.diagnosis_id}
+        # Priority only. This payload is serialised verbatim into every
+        # outbound webhook, so nothing clinical may enter it.
+        payload: %{priority: entry.priority}
       })
     end)
     |> Repo.transaction()
@@ -165,14 +174,29 @@ defmodule Scheduling.Queue do
     end
   end
 
+  # An explicit capability list wins. Otherwise a diagnosis id, if given, is
+  # expanded to its default capabilities here and goes no further — the entry
+  # records the equipment need, not the diagnosis that implied it.
   defp put_required_capabilities(changeset, attrs) do
     case Map.fetch(attrs, "required_capability_ids") do
       {:ok, ids} ->
-        caps = load_capabilities(ids)
-        Ecto.Changeset.put_assoc(changeset, :required_capabilities, caps)
+        Ecto.Changeset.put_assoc(changeset, :required_capabilities, load_capabilities(ids))
 
       :error ->
-        changeset
+        put_diagnosis_default_capabilities(changeset, Map.get(attrs, "diagnosis_id"))
+    end
+  end
+
+  defp put_diagnosis_default_capabilities(changeset, nil), do: changeset
+  defp put_diagnosis_default_capabilities(changeset, ""), do: changeset
+
+  defp put_diagnosis_default_capabilities(changeset, diagnosis_id) do
+    case Catalog.fetch_diagnosis(diagnosis_id) do
+      {:ok, diagnosis} ->
+        Ecto.Changeset.put_assoc(changeset, :required_capabilities, diagnosis.capabilities)
+
+      :error ->
+        Ecto.Changeset.add_error(changeset, :diagnosis_id, "does not exist")
     end
   end
 
@@ -223,19 +247,18 @@ defmodule Scheduling.Queue do
   @spec accept(QueueEntry.t(), keyword()) ::
           {:ok, QueueEntry.t(), Result.t()}
           | {:no_eligible_office, Result.t()}
-          | {:compliance_failed, [String.t()]}
+          | {:compliance_failed, String.t() | nil}
           | {:compliance_unavailable, term()}
           | {:error, Ecto.Changeset.t()}
   def accept(%QueueEntry{} = entry, opts \\ []) do
-    # Compliance.verify needs the diagnosis (for required_form_types) and the
-    # patient (for intake_patient_id). get_entry!/1 preloads patient already;
-    # we add diagnosis here so the gate has what it needs.
-    entry = Repo.preload(entry, [:diagnosis])
-
+    # Compliance.verify/1 needs the entry's compliance_ref and the patient's
+    # intake_patient_id; get_entry!/1 preloads the patient already. It no
+    # longer needs a diagnosis — the gate now sends an opaque reference and
+    # intake decides which forms it implies.
     case Compliance.verify(entry) do
       :ok -> do_accept(entry, opts)
       :not_configured -> do_accept(entry, opts)
-      {:missing, missing_types} -> record_compliance_block(entry, missing_types, opts)
+      :blocked -> record_compliance_block(entry, opts)
       {:error, reason} -> record_compliance_unavailable(entry, reason, opts)
     end
   end
@@ -265,10 +288,19 @@ defmodule Scheduling.Queue do
     end
   end
 
-  defp record_compliance_block(entry, missing_types, opts) do
+  # The rationale is written to an append-only audit row that also fans out to
+  # every webhook subscriber, so it names the reference, never the form types
+  # behind it. The "Compliance check failed" prefix is load-bearing —
+  # SchedulingWeb.RoutingDecisionLive.Index derives the outcome filter from it.
+  defp record_compliance_block(entry, opts) do
     rationale =
-      "Compliance check failed: missing required form types [" <>
-        Enum.join(missing_types, ", ") <> "]"
+      case entry.compliance_ref do
+        ref when is_binary(ref) and ref != "" ->
+          "Compliance check failed for reference " <> ref
+
+        _ ->
+          "Compliance check failed"
+      end
 
     result = %Result{
       required: entry.required_capabilities,
@@ -278,7 +310,7 @@ defmodule Scheduling.Queue do
     }
 
     Audit.record_decision(entry, result, opts)
-    {:compliance_failed, missing_types}
+    {:compliance_failed, entry.compliance_ref}
   end
 
   defp record_compliance_unavailable(entry, reason, opts) do

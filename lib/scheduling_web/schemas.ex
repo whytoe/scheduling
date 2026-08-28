@@ -486,7 +486,6 @@ defmodule SchedulingWeb.Schemas do
         priority: %Schema{type: :integer, minimum: 0, description: "Higher = served sooner"},
         patient: %Schema{nullable: true, allOf: [SchedulingWeb.Schemas.Patient]},
         patient_id: %Schema{type: :integer},
-        diagnosis_id: %Schema{type: :integer, nullable: true},
         assigned_office_id: %Schema{type: :integer, nullable: true},
         visit_id: %Schema{
           type: :integer,
@@ -536,7 +535,8 @@ defmodule SchedulingWeb.Schemas do
             diagnosis_id: %Schema{
               type: :integer,
               nullable: true,
-              description: "Optional diagnosis"
+              description:
+                "Optional. **Transient input, not stored.** Expanded to that diagnosis's default capabilities, which are recorded on the entry; the diagnosis reference itself is discarded. Scheduling keeps the equipment requirement, never the clinical reason for it. Ignored when `required_capability_ids` is given."
             },
             visit_id: %Schema{
               type: :integer,
@@ -544,11 +544,17 @@ defmodule SchedulingWeb.Schemas do
               description: "Parent Visit. Set by the queueing service's sign-in flow."
             },
             priority: %Schema{type: :integer, minimum: 0, description: "Defaults to 0"},
+            compliance_ref: %Schema{
+              type: :string,
+              nullable: true,
+              description:
+                "Opaque reference the intake-form system resolves to the forms this encounter requires. Scheduling passes it through and never learns the form types. Omit to skip the compliance gate."
+            },
             required_capability_ids: %Schema{
               type: :array,
               items: %Schema{type: :integer},
               description:
-                "Capability ids this patient requires. Set explicitly; the diagnosis default isn't auto-applied yet."
+                "Capability ids this patient requires. Takes precedence over `diagnosis_id` when both are supplied."
             }
           },
           required: [:patient_id]
@@ -596,7 +602,15 @@ defmodule SchedulingWeb.Schemas do
   end
 
   defmodule ComplianceFailedError do
-    @moduledoc "Returned when the patient hasn't completed every required intake form."
+    @moduledoc """
+    Returned when the intake-form system reports the patient has not satisfied
+    the forms this encounter requires.
+
+    Names the opaque `compliance_ref` so an operator can look the encounter up
+    in the intake system — **not** the form types behind it. Those are health
+    data; scheduling neither stores nor transmits them. See
+    `docs/data-boundary.md`.
+    """
     require OpenApiSpex
     alias OpenApiSpex.Schema
 
@@ -611,18 +625,17 @@ defmodule SchedulingWeb.Schemas do
             message: %Schema{type: :string},
             details: %Schema{
               type: :object,
+              nullable: true,
               properties: %{
-                missing_form_types: %Schema{
-                  type: :array,
-                  items: %Schema{type: :string},
+                compliance_ref: %Schema{
+                  type: :string,
                   description:
-                    "Form types the patient is missing a completed-and-not-flagged response for"
+                    "The entry's opaque compliance reference; resolve it in the intake system to see which forms are outstanding. Absent when the entry carries no reference."
                 }
-              },
-              required: [:missing_form_types]
+              }
             }
           },
-          required: [:code, :message, :details]
+          required: [:code, :message]
         }
       },
       required: [:error],
@@ -630,7 +643,7 @@ defmodule SchedulingWeb.Schemas do
         "error" => %{
           "code" => "compliance_failed",
           "message" => "The patient hasn't completed every required intake form",
-          "details" => %{"missing_form_types" => ["stroke-consent"]}
+          "details" => %{"compliance_ref" => "enc_01HV3K7Q"}
         }
       }
     })

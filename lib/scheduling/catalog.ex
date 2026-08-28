@@ -64,6 +64,28 @@ defmodule Scheduling.Catalog do
     |> Repo.preload(:capabilities)
   end
 
+  @doc """
+  Non-raising `get_diagnosis!/1`. Returns `:error` for a missing row or an id
+  that isn't an integer — callers expanding a client-supplied `diagnosis_id`
+  need to turn bad input into a validation error, not a 500.
+  """
+  @spec fetch_diagnosis(term()) :: {:ok, Diagnosis.t()} | :error
+  def fetch_diagnosis(id) when is_integer(id) do
+    case Repo.get(Diagnosis, id) do
+      nil -> :error
+      diagnosis -> {:ok, Repo.preload(diagnosis, :capabilities)}
+    end
+  end
+
+  def fetch_diagnosis(id) when is_binary(id) do
+    case Integer.parse(id) do
+      {int_id, ""} -> fetch_diagnosis(int_id)
+      _ -> :error
+    end
+  end
+
+  def fetch_diagnosis(_id), do: :error
+
   @doc "Creates a diagnosis. Accepts `capability_ids` to set its default required capabilities."
   def create_diagnosis(attrs \\ %{}) do
     %Diagnosis{capabilities: []}

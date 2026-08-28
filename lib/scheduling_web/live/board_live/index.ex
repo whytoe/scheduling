@@ -14,7 +14,6 @@ defmodule SchedulingWeb.BoardLive.Index do
   alias Scheduling.Handoffs
   alias Scheduling.Offices
   alias Scheduling.Queue
-  alias Scheduling.Repo
 
   @impl true
   def mount(_params, _session, socket) do
@@ -164,12 +163,10 @@ defmodule SchedulingWeb.BoardLive.Index do
 
     waiting =
       Queue.list_waiting_entries()
-      |> Repo.preload(:diagnosis)
       |> Enum.map(fn entry ->
         %{
           id: entry.id,
           name: patient_name(entry),
-          diagnosis: diagnosis_name(entry),
           caps: capability_list(entry.required_capabilities),
           priority: entry.priority,
           wait: format_wait(now, entry.inserted_at)
@@ -249,13 +246,6 @@ defmodule SchedulingWeb.BoardLive.Index do
     end
   end
 
-  defp diagnosis_name(entry) do
-    case entry.diagnosis do
-      %{name: name} when is_binary(name) -> name
-      _ -> nil
-    end
-  end
-
   defp office_name(entry) do
     case entry.assigned_office do
       %{name: name} when is_binary(name) -> name
@@ -324,8 +314,6 @@ defmodule SchedulingWeb.BoardLive.Index do
               <div class="pcard__main">
                 <div class="pcard__name">{p.name}</div>
                 <div class="pcard__meta">
-                  <span :if={p.diagnosis} class="t-small">{p.diagnosis}</span>
-                  <span :if={p.diagnosis} style="color:var(--color-base-300)">·</span>
                   <.cap_row caps={p.caps} />
                 </div>
               </div>
