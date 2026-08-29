@@ -97,6 +97,25 @@ config :scheduling, Scheduling.Auth,
   tenant_claim: System.get_env("OIDC_TENANT_CLAIM", "astrum_tenant"),
   session_ttl_seconds: String.to_integer(System.get_env("AUTH_SESSION_TTL_SECONDS", "28800"))
 
+# ---------------------------------------------------------------------------
+# Avenue D Core API (ac-core) — the platform's system of record for patients,
+# practices and locations. Scheduling reads from it as an OAuth client.
+#
+# A *separate* OAuth client from the browser SSO one above: that identifies the
+# web app to end users, this identifies scheduling-as-a-service to ac-core and
+# holds only read scopes. Separate credentials means the browser client's
+# secret is not also a key to the patient registry.
+#
+# No default base_url on purpose — a wrong host is worse than an unconfigured
+# one, because it would send a bearer token somewhere unintended.
+# ---------------------------------------------------------------------------
+config :scheduling, Scheduling.Core,
+  base_url: System.get_env("CORE_API_URL"),
+  client_id: System.get_env("CORE_CLIENT_ID"),
+  client_secret: System.get_env("CORE_CLIENT_SECRET"),
+  scopes: comma_list.("CORE_SCOPES", "core:patients:read,core:organizations:read"),
+  http_timeout_ms: String.to_integer(System.get_env("CORE_HTTP_TIMEOUT_MS", "5000"))
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

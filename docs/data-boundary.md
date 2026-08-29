@@ -95,6 +95,35 @@ Until it ships, entries carry no `compliance_ref`, `Compliance.verify/1`
 returns `:not_configured`, and the gate is skipped — the same fail-open posture
 as an unconfigured intake.
 
+## Reading from ac-core
+
+`Scheduling.Core.Client` is the only way patient data enters this system from
+the core API, and it is a **projection boundary**, not a pass-through.
+
+Every object in `ac-core-swagger.json` is declared `additionalProperties:
+true`. The live API may already return fields the spec does not list, and may
+start returning more without a spec change. So each response is projected
+field by field into a map the client constructs, and the raw body is discarded
+there. Nothing downstream ever sees it.
+
+From a patient we keep `id`, `practiceId`, `firstName`, `lastName` — enough to
+correlate the record and call the right person. We drop `mrn`, `dateOfBirth`,
+`phone` and `email`: all PII we *could* hold, none of it needed. Minimal
+exposure is the rule, not just "no PHI".
+
+Two consequences worth stating:
+
+- **Never `Map.take/2` or `Map.merge/2` a core response.** The projection has
+  to name its fields, which is why the client returns snake_case atom keys —
+  a projection cannot be produced by merging a decoded JSON map.
+- The token requests **read scopes only** (`core:patients:read`,
+  `core:organizations:read`). `core:patients:write` is deliberately absent:
+  scheduling projects patient data, it does not author it.
+
+`test/scheduling/core/client_test.exs` asserts the allowlist directly, feeding
+the client a response stuffed with unwanted and undocumented fields and
+checking none survive.
+
 ## If you need to add clinical data
 
 Don't. Put it in the EMR and reference it by an opaque id, the way
