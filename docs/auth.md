@@ -1,13 +1,16 @@
 # Authentication & Authorization
 
-Scheduling authenticates both of its surfaces against one OpenID Connect
-realm:
+Scheduling authenticates both of its inbound surfaces against one OpenID
+Connect realm, and holds a token of its own for calling out:
 
 - **Browser SSO** — operators sign in to the LiveView UI with the
   authorization-code flow (PKCE).
 - **API bearer tokens** — the intake bridge, the check-in / queueing app and
   any other integrator call `/api/v1` with an access token from the
   client-credentials grant.
+- **Outbound** — scheduling is also an OAuth *client*, holding its own
+  client-credentials token to read ac-core's patient and location registry.
+  See "Scheduling as an OAuth client" below.
 
 Provider-neutral: anything that publishes a discovery document and a JWKS
 works. The deployment target is **Astrum core-api**
@@ -22,7 +25,8 @@ question, answered in **`data-boundary.md`**: PII yes, health data no.
 
 Implementation: `Scheduling.Auth` and friends, `SchedulingWeb.Plugs.ApiAuth`,
 `SchedulingWeb.Plugs.BrowserAuth`, `SchedulingWeb.AuthController`,
-`SchedulingWeb.AuthHooks`.
+`SchedulingWeb.AuthHooks`; outbound in `Scheduling.Auth.ServiceToken` and
+`Scheduling.Core`.
 
 ## Configuration
 
@@ -135,6 +139,42 @@ behaviour so it stays a known quantity.
 within a deployment: no query filters by tenant. If one deployment ever needs
 to serve several practices, that is a schema change (tenant id on patients,
 visits, queue entries, offices) plus scoping every query and PubSub topic.
+
+## Scheduling as an OAuth *client*
+
+Everything above is scheduling as a **resource server** — validating tokens
+other parties present. It is also a **client**: it calls ac-core's `/v1` API
+for the patient and location registry, and needs its own token to do it.
+
+`Scheduling.Auth.ServiceToken` obtains one via the client-credentials grant
+(`Oidcc.client_credentials_token/4`, reusing the same discovery worker), caches
+it, and refreshes a minute before expiry. `Scheduling.Core.Client` uses it.
+
+**Separate credentials from the browser SSO client:**
+
+| | Identifies | Scopes |
+|---|---|---|
+| `OIDC_CLIENT_ID` | the web app, to end users | `openid profile email roles` |
+| `CORE_CLIENT_ID` | scheduling-as-a-service, to ac-core | `core:patients:read core:organizations:read` |
+
+Two clients rather than one so the browser client's secret is not also a key to
+the patient registry, and so the read scopes can be granted narrowly.
+`core:patients:write` is deliberately absent — scheduling projects patient
+data, it does not author it.
+
+Three behaviours worth knowing:
+
+- **A failed exchange is never cached** and never clobbers a still-valid token.
+  A refresh failure should not turn a working cache into an outage.
+- **The exchange traps exits.** It reaches the shared provider worker via
+  `GenServer.call`, so a worker that is down or backing off after failed
+  discovery would otherwise take the token holder with it — an IdP blip
+  becoming a supervision cascade.
+- **A 401 from ac-core invalidates the cached token**, so the next call
+  re-fetches rather than replaying a credential ac-core has stopped honouring.
+
+What the client is allowed to do with what it reads is a separate constraint —
+see `data-boundary.md` §"Reading from ac-core".
 
 ## Back-channel logout
 

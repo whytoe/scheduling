@@ -1,5 +1,20 @@
 This is a web application written using the Phoenix web framework.
 
+## Read these first
+
+Project-specific constraints that override the generic Phoenix guidance below:
+
+- **[`docs/data-boundary.md`](docs/data-boundary.md)** — this application
+  carries PII but **not health data**. Read it before adding any field, and
+  before touching the compliance gate, `routing_decisions`, `visit_events` or
+  outbound webhooks.
+- [`docs/auth.md`](docs/auth.md) — OIDC against ac-core; roles come from token
+  claims, and there is no local users table.
+- [`docs/integrations.md`](docs/integrations.md) — the API we expose and the
+  systems we consume.
+- [`docs/design-system.md`](docs/design-system.md) — theme tokens and component
+  patterns. Note this project *does* use DaisyUI; see the UI section below.
+
 ## Project guidelines
 
 - Use `mix precommit` alias when you are done with all changes and fix any pending issues
@@ -30,7 +45,13 @@ custom classes must fully style the input
 
 - **Always use and maintain this import syntax** in the app.css file for projects generated with `phx.new`
 - **Never** use `@apply` when writing raw css
-- **Always** manually write your own tailwind-based components instead of using daisyUI for a unique, world-class design
+- ~~**Always** manually write your own tailwind-based components instead of using daisyUI~~
+  **Superseded in this project.** The design system deliberately builds *on*
+  DaisyUI 5: `assets/css/app.css` loads the plugin and defines light/dark
+  themes through it, and the `--st-*` lifecycle state tokens exist precisely
+  because DaisyUI's four semantic slots cannot express them. Component
+  patterns are hand-written on top of that base, not instead of it. See
+  `docs/design-system.md` before changing styling.
 - Out of the box **only the app.js and app.css bundles are supported**
   - You cannot reference an external vendor'd script `src` or link `href` in the layouts
   - You must import the vendor deps into app.js and app.css to use them
