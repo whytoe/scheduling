@@ -226,14 +226,28 @@ Decision: **wait for the real OpenAPI spec, then generate a client. Don't
 build speculative stubs.** Today, queue entries are created via
 `POST /api/v1/queue_entries` (admin / manual / test flows).
 
-**Status (2026-08-28).** The app is deployed and healthy
-(`https://ac-checkin.45.59.71.47.nip.io/health` returns `{"status":"ok"}`) but
-its spec is behind authentication — `/docs` and `/docs/json` return 401 with no
-`WWW-Authenticate` challenge, so token or cookie auth. `sc-bd8` is held on
-getting a copy. The ac-core spec has arrived and is vendored; this is the one
-still outstanding.
+**Status (2026-08-29).** The spec has arrived and is vendored at
+`ac-checkin.json` ("Avenue D Pediatrics — Check-in API", 195 paths). It changes
+the picture, and `sc-bd8` stays held for different reasons than before — see
+`integration-contracts.md` for the full reconciliation. In short:
 
-When it lands the work is:
+- **There is no webhook.** The assumed `patient.checked_in` push does not
+  exist. The only push surface is an undocumented `POST /fhir/r4/Subscription`.
+- **The pull endpoint cannot identify a patient.**
+  `GET /v1/external/queue` returns `{id, status, queuePosition, checkInTime}` —
+  enough for a position board, not enough to create a visit.
+- **11 of 12 external write endpoints have no documented request body**, so a
+  client cannot be generated for them.
+- **Auth federates to ac-core**, using `checkin:*` scopes on a core-issued
+  token — the same source `Scheduling.Auth.ServiceToken` already uses. That
+  part is ready.
+- **The direction may be reversed.** `/v1/external/scheduling/*` is built for a
+  federated app to publish schedules and book appointments *into* check-in,
+  then mark them arrived. Whether appointments belong to this system or that
+  one is an open question.
+
+When the request bodies and a patient-identifying arrival signal land, the work
+is:
 
 1. Generate a client from the spec, and reconcile
    `integration-contracts.md`'s working assumptions against it.

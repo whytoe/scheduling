@@ -160,8 +160,89 @@ untyped array on `POST /staff/provision`, so a real token is still needed.
 
 **Still missing.** The ac-checkin spec. `sc-bd8` remains held on it.
 
+## Update 2026-08-29: the ac-checkin spec has arrived
+
+`docs/ac-checkin.json` is the real document ("Avenue D Pediatrics — Check-in
+API" v1.0.0, 195 paths). Reconciling it against the working assumptions above.
+
+### Auth federates to ac-core — good news
+
+The `/v1/external/*` surface takes an **OAuth2 client-credentials token issued
+and introspected by core-api**, with `checkin:*` scopes. That is the same token
+source `Scheduling.Auth.ServiceToken` already uses, so the outbound plumbing
+exists; it needs the extra scopes granted, nothing more.
+
+(Two spec defects to raise: the declared `tokenUrl` is
+`http://ac-core/oauth/token` — plain HTTP, internal hostname — and 9 of the 10
+`checkin:*` scopes used on endpoints are not declared in the flow's `scopes`
+map. Neither blocks us, but both will confuse a generator.)
+
+### There is no webhook — the core assumption was wrong
+
+This record assumed an inbound `patient.checked_in` webhook carrying
+`external_patient_id`, `name`, `checked_in_at`. **No such surface exists.** The
+only push mechanism anywhere in the spec is `POST /fhir/r4/Subscription`
+(FHIR R4, with GET and DELETE) — and it carries no summary, description,
+request body or response schema, so it cannot be built against as documented.
+
+### The pull endpoint cannot identify a patient
+
+`GET /v1/external/queue` (`checkin:queue:read`) returns:
+
+```json
+{"queue": [{"id": "…", "status": "…", "queuePosition": 1, "checkInTime": "…"}]}
+```
+
+No patient id, no name, no `core_patient_id`. Enough to render a position
+board; **not enough to create a visit or a queue entry**, which is what
+`sc-bd8` needs.
+
+### The direction may be the reverse of what we assumed
+
+`/v1/external/scheduling/*` lets a federated app publish **schedules** and
+**availability**, **book appointments**, and then call
+`POST /v1/external/scheduling/appointments/{externalId}/arrive` — which "lands
+the patient into the check-in queue" and returns `patientId`, `queuePosition`,
+`status`, `created`.
+
+That is a surface built for *us to push into them*, not for them to push into
+us. It raises a question this record cannot answer on its own: **which system
+owns appointments and availability?** Scheduling has no appointment concept at
+all today — it is a walk-in routing engine (queue entries, visits, offices,
+capabilities). Answering it decides whether `sc-bd8` is an ingest job or a
+publish job.
+
+### The write surface is not yet buildable
+
+**11 of the 12 external write endpoints have no documented request body** —
+only `POST /v1/external/forms/documents` has one. Responses are documented;
+requests are not. This record's decision is to *generate a client from the
+spec*, and that cannot be done for the writes as they stand.
+
+### Asks for the check-in team
+
+1. Request-body schemas for the `/v1/external/*` write endpoints — without
+   them the spec cannot generate a client.
+2. Either patient identity on `GET /v1/external/queue`, or a documented push
+   (FHIR Subscription with a schema, or a plain webhook).
+3. Confirm the intended ownership split for appointments and availability.
+4. Minor: fix `tokenUrl` and declare the `checkin:*` scopes.
+
+Until 1 and 2 land, `sc-bd8` stays held — building against undocumented
+request bodies is precisely the speculative-stub work this record exists to
+prevent.
+
+### Also relevant
+
+`POST /v1/external/intake-refs` records a "vendor intake reference
+(pointer-only)". That is the same shape as the `compliance_ref` on our queue
+entries, and may be where the two systems should meet on intake pointers.
+Worth exploring once the above is unblocked.
+
 ## Dependency status
 
 - `sc-7hs` (this decision) — the ac-core half is resolved; see the update above.
-- `sc-bd8` — still held, pending the **ac-checkin** spec.
+- `sc-bd8` — still held. The ac-checkin spec arrived but does not yet document
+  request bodies for its write surface, and its queue read carries no patient
+  identity. See the asks above.
 - `sc-5ed` — effectively delivered.
