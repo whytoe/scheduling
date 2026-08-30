@@ -72,6 +72,39 @@ defmodule SchedulingWeb.Api.PatientsFilterTest do
     end
   end
 
+  describe "?core_patient_id=" do
+    test "returns the one matching row", %{conn: conn} do
+      uuid = Ecto.UUID.generate()
+      target = patient_fixture(%{core_patient_id: uuid})
+      _other = patient_fixture(%{core_patient_id: Ecto.UUID.generate()})
+
+      conn = get(conn, ~p"/api/v1/patients?core_patient_id=#{uuid}")
+      assert [%{"id" => id}] = json_response(conn, 200)
+      assert id == target.id
+    end
+
+    test "is serialized on the response alongside the other ids", %{conn: conn} do
+      uuid = Ecto.UUID.generate()
+      patient_fixture(%{core_patient_id: uuid})
+
+      conn = get(conn, ~p"/api/v1/patients?core_patient_id=#{uuid}")
+      assert [row] = json_response(conn, 200)
+      assert row["core_patient_id"] == uuid
+      assert Map.has_key?(row, "client_id")
+    end
+
+    test "is null for rows that predate the projection", %{conn: conn} do
+      # Existing rows have no key to backfill from; they populate on next
+      # touch rather than being invented.
+      target = patient_fixture(%{external_id: "legacy-row"})
+
+      conn = get(conn, ~p"/api/v1/patients?external_id=legacy-row")
+      assert [row] = json_response(conn, 200)
+      assert row["id"] == target.id
+      assert row["core_patient_id"] == nil
+    end
+  end
+
   describe "filter composition" do
     test "filters AND together", %{conn: conn} do
       # Both id columns carry a unique index, so individually each filter

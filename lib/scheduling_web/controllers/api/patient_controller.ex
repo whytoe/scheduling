@@ -22,6 +22,12 @@ defmodule SchedulingWeb.Api.PatientController do
         "Each id column carries a unique index, so a filtered query returns at " <>
         "most one row.",
     parameters: [
+      core_patient_id: [
+        in: :query,
+        type: :string,
+        required: false,
+        description: "ac-core registry UUID — the identity of record"
+      ],
       intake_patient_id: [
         in: :query,
         type: :string,
@@ -50,7 +56,12 @@ defmodule SchedulingWeb.Api.PatientController do
   end
 
   defp patient_filters(params) do
-    [intake_patient_id: "intake_patient_id", external_id: "external_id", client_id: "client_id"]
+    [
+      core_patient_id: "core_patient_id",
+      intake_patient_id: "intake_patient_id",
+      external_id: "external_id",
+      client_id: "client_id"
+    ]
     |> Enum.reduce(%{}, fn {key, param}, acc ->
       case Map.get(params, param) do
         v when is_binary(v) and v != "" -> Map.put(acc, key, v)
@@ -142,6 +153,7 @@ defmodule SchedulingWeb.Api.PatientController do
     %{
       id: p.id,
       name: p.name,
+      core_patient_id: p.core_patient_id,
       client_id: p.client_id,
       external_id: p.external_id,
       intake_patient_id: p.intake_patient_id,

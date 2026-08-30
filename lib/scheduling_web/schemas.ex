@@ -251,12 +251,23 @@ defmodule SchedulingWeb.Schemas do
       type: :object,
       properties: %{
         id: %Schema{type: :integer},
-        name: %Schema{type: :string, description: "Display name"},
+        name: %Schema{
+          type: :string,
+          description:
+            "Display name, cached from ac-core. This system does not own it — treat ac-core as authoritative."
+        },
+        core_patient_id: %Schema{
+          type: :string,
+          format: :uuid,
+          nullable: true,
+          description:
+            "This patient's id in ac-core, the platform's registry — the identity of record. Null on rows created before the projection existed; they populate on next touch. Prefer this over `client_id` for new integrations."
+        },
         client_id: %Schema{
           type: :string,
           format: :uuid,
           description:
-            "Canonical scheduling-owned UUID. Auto-generated if not supplied. Used as the inter-service reference; not the EMR record id."
+            "Scheduling-owned UUID, auto-generated if not supplied. **Deprecated** as an inter-service reference in favour of `core_patient_id`: it names a row in this database, not the person every system shares. Still generated and still unique, so existing consumers keep working."
         },
         external_id: %Schema{
           type: :string,
@@ -277,6 +288,7 @@ defmodule SchedulingWeb.Schemas do
       example: %{
         "id" => 1,
         "name" => "Jane Doe",
+        "core_patient_id" => "3f2b8c1d-7a45-4e29-b0c6-4d8e1f9a2b73",
         "client_id" => "9b1c4a3e-2f5d-4b8a-9c7e-1a3b5c7d9e2f",
         "external_id" => "checkin-7a3f",
         "intake_patient_id" => "5e1f2c8a-1d3b-4ee9-9a64-8e3b6cf21e10",
@@ -310,11 +322,19 @@ defmodule SchedulingWeb.Schemas do
           type: :object,
           properties: %{
             name: %Schema{type: :string, description: "Display name (1–255 chars)"},
+            core_patient_id: %Schema{
+              type: :string,
+              format: :uuid,
+              nullable: true,
+              description:
+                "Optional unique ac-core registry id. Supplying it links this row to the registry; the name is then a cache of what ac-core holds."
+            },
             client_id: %Schema{
               type: :string,
               format: :uuid,
               nullable: true,
-              description: "Canonical UUID. Optional on create: server generates one if omitted."
+              description:
+                "Scheduling-owned UUID. Optional on create: server generates one if omitted. Deprecated in favour of `core_patient_id`."
             },
             external_id: %Schema{
               type: :string,
