@@ -13,6 +13,7 @@ defmodule SchedulingWeb.BoardLive.Index do
 
   alias Scheduling.Handoffs
   alias Scheduling.Offices
+  alias Scheduling.Booking
   alias Scheduling.Queue
 
   @impl true
@@ -208,6 +209,7 @@ defmodule SchedulingWeb.BoardLive.Index do
     |> assign(:active, active)
     |> assign(:active_count, length(active))
     |> assign(:alerts, routing_alerts(waiting, offices))
+    |> assign(:commitment_alerts, commitment_alerts())
     |> assign(:arrived_waiting, arrived_w)
     |> assign(:arrived_incoming, arrived_i)
     |> assign(:arrived_active, arrived_a)
@@ -228,6 +230,34 @@ defmodule SchedulingWeb.BoardLive.Index do
       %{patient: w.name, missing: missing}
     end
   end
+
+  # A committed appointment is pinned to the only office that could serve it.
+  # If that office later loses the capability, the booking is unfulfillable and
+  # nothing says so until the patient arrives — so it is raised here, ahead of
+  # time, where an operator will see it.
+  defp commitment_alerts do
+    for {appointment, missing} <- Booking.broken_commitments() do
+      %{
+        patient: patient_label(appointment),
+        when: appointment_when(appointment),
+        office: office_label(appointment),
+        missing: missing
+      }
+    end
+  end
+
+  defp patient_label(%{patient: %{name: name}}) when is_binary(name), do: name
+  defp patient_label(appointment), do: "patient ##{appointment.patient_id}"
+
+  defp appointment_when(appointment) do
+    case Booking.Appointment.starts_at(appointment) do
+      nil -> "an unscheduled time"
+      starts_at -> Calendar.strftime(starts_at, "%a %d %b, %H:%M UTC")
+    end
+  end
+
+  defp office_label(%{slots: [%{office: %{name: name}} | _]}), do: name
+  defp office_label(_appointment), do: nil
 
   defp capability_list(caps) when is_list(caps), do: caps |> Enum.map(& &1.name) |> Enum.sort()
   defp capability_list(_), do: []
@@ -286,6 +316,23 @@ defmodule SchedulingWeb.BoardLive.Index do
         >
           No eligible office provides <b>{Enum.join(alert.missing, ", ")}</b>
           with the required capability. Add it to an office or refer out.
+        </.callout>
+      </div>
+
+      <div :if={@commitment_alerts != []} class="stack" style="margin-bottom:var(--s-6)">
+        <.callout
+          :for={alert <- @commitment_alerts}
+          tone="attention"
+          title={"#{alert.patient}'s booking can no longer be met"}
+        >
+          <span :if={alert.missing != []}>
+            Booked into <b>{alert.office}</b>
+            for {alert.when}, which no longer provides <b>{Enum.join(alert.missing, ", ")}</b>.
+          </span>
+          <span :if={alert.missing == []}>
+            Booked for {alert.when}, but the room it was booked into is gone.
+          </span>
+          Re-book it or restore the capability before the patient arrives.
         </.callout>
       </div>
 

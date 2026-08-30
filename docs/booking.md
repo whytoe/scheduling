@@ -56,6 +56,28 @@ exact — but the matcher is free to move them at arrival, releasing the slot.
   to intervene before that patient arrives, and the board is where they will
   see it.
 
+`Booking.broken_commitments/0` is a **scan, not an event**. A capability can
+leave an office by several routes — the office is edited, the join is removed,
+the office is deleted entirely — and a hook that catches some of them is worse
+than none, because it looks like coverage. The board runs the scan on every
+load.
+
+It only considers future, still-`:booked` appointments. An arrived one is past
+the point where the room mattered; a cancelled one holds nothing.
+
+Deleting an office cascades to its slots, so the appointment ends up holding
+none. That is the same problem reached differently and is reported with an
+empty missing-list, phrased as "the room it was booked into is gone".
+
+> **A related gap this does *not* cover.** Deleting a *capability* cascades
+> through `appointment_capabilities`, so the appointment stops requiring it
+> rather than becoming unservable — a booking made for a CT scan silently
+> becomes a booking for nothing. Arguably worse, but it is a different failure
+> (the requirement vanished, not the room's ability to meet it), and no rule
+> here can distinguish it from a legitimate no-capability booking in a
+> single-office deployment. Left as its own bead rather than half-handled;
+> `broken_commitment_test.exs` pins the current behaviour so it is known.
+
 ## What an appointment does *not* store
 
 **The service code.** It is a transient input, expanded to the service's
