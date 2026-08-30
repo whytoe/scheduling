@@ -229,6 +229,19 @@ right now — there is a test for exactly that.
 
 The default still excludes offices with `intake_capacity` 0, which is correct.
 
+### A requirement must be stated
+
+Booking takes either a `service_code` or a `required_capability_ids` list.
+Supplying **neither** is refused with `:no_service_specified`.
+
+That is not pedantry: an empty requirement is a subset of every office's
+capabilities, so it matches all of them and would quietly reserve the first
+free slot anywhere for an unspecified purpose. Almost always it means the
+caller forgot the code.
+
+An explicit `required_capability_ids: []` *is* honoured, and means "any room
+will do". Omitting the key is not the same statement as passing an empty one.
+
 ### Runs, not slot counts
 
 `slot_minutes` varies per rule, so "how many slots" is not a division. The
@@ -250,6 +263,14 @@ UPDATE slots SET status = 'booked', appointment_id = $1
 …and **the affected row count must equal the number of slots intended**. Short
 means someone took one in between; the transaction rolls back and the caller
 gets `{:error, :slots_taken}`, which is the one error worth retrying.
+
+**`:slots_taken` is currently unreachable in a single-node deployment.**
+`book/1` does the search and the write inside one call, so a competitor either
+loses the search (`:no_available_slots`) or wins it outright — there is no
+window between them for one caller. It becomes reachable the moment two nodes
+run concurrently, which is why it is in the contract and mapped to a 409. Don't
+go hunting for a test that produces it through `book/1`; there isn't one that
+could be written honestly.
 
 `Engine.claim_slots/3` is public because it is the crux, and because it cannot
 be reached through `book/1` in a test: `Ecto.Adapters.SQL.Sandbox` routes every

@@ -81,7 +81,8 @@ defmodule Scheduling.Booking.Engine do
   not — asking again with the same arguments gives the same answer.
   """
   @type error ::
-          :unknown_service
+          :no_service_specified
+          | :unknown_service
           | :no_eligible_office
           | :no_available_slots
           | :slots_taken
@@ -91,7 +92,9 @@ defmodule Scheduling.Booking.Engine do
   Books an appointment.
 
   Required: `:patient_id`, and one of `:service_code` or
-  `:required_capability_ids`.
+  `:required_capability_ids`. Supplying neither is refused with
+  `:no_service_specified` — see `resolve_capabilities/1` for why an omitted
+  requirement is not treated as an empty one.
 
   Optional:
 
@@ -209,7 +212,15 @@ defmodule Scheduling.Booking.Engine do
     end
   end
 
-  defp resolve_capabilities(_attrs), do: {:ok, []}
+  # Neither a service code nor a capability list. Almost always a caller that
+  # forgot one — and booking a room for an unspecified purpose is worse than
+  # refusing, because an empty requirement matches *every* office and quietly
+  # reserves the first free slot anywhere.
+  #
+  # An explicit empty `required_capability_ids: []` is honoured above and means
+  # "any room will do", which is a real intent. Omitting the key entirely is
+  # not the same statement.
+  defp resolve_capabilities(_attrs), do: {:error, :no_service_specified}
 
   # --- 2 & 3. offices and binding ---------------------------------------------
 

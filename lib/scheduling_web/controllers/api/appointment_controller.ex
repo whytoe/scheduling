@@ -20,7 +20,8 @@ defmodule SchedulingWeb.Api.AppointmentController do
       booking won the race) and `no_available_slots` (nothing free in the
       window). Both worth retrying, the first immediately.
     * **422** — the request can never succeed as asked. `unknown_service`,
-      `no_eligible_office`, `appointment_cancelled`. Retrying is pointless.
+      `no_service_specified`, `no_eligible_office`, `appointment_cancelled`.
+      Retrying is pointless.
 
   A client that retries a 422 forever is a client we misled, so each operation
   says which of its failures are worth another attempt.
@@ -268,6 +269,17 @@ defmodule SchedulingWeb.Api.AppointmentController do
 
   defp render_booking_error(conn, :unknown_service) do
     rejected(conn, "unknown_service", "No routing template exists with that service code")
+  end
+
+  defp render_booking_error(conn, :no_service_specified) do
+    rejected(
+      conn,
+      "no_service_specified",
+      "Supply either service_code or required_capability_ids. " <>
+        "An omitted requirement is not treated as an empty one, because an empty " <>
+        "requirement matches every office and would reserve a room for an " <>
+        "unspecified purpose."
+    )
   end
 
   defp render_booking_error(conn, :appointment_cancelled) do

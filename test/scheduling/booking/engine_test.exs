@@ -249,6 +249,31 @@ defmodule Scheduling.Booking.EngineTest do
       assert Enum.map(appointment.required_capabilities, & &1.name) == [cap.name]
     end
 
+    test "a booking with no requirement at all is refused" do
+      # Found by the API work. An empty requirement matches every office, so
+      # this would quietly reserve the first free slot anywhere for an
+      # unspecified purpose. Almost always a caller that forgot the code.
+      cap = capability_fixture("CT scanner")
+      office = office_fixture([cap.id])
+      slots_for(office, 2)
+
+      assert {:error, :no_service_specified} = book(%{patient_id: patient_fixture().id})
+      assert Booking.list_appointments() == []
+      assert Booking.list_slots(status: :booked) == []
+    end
+
+    test "an explicit empty capability list is honoured as 'any room'" do
+      # Distinct from omitting it: the caller has said what they want.
+      cap = capability_fixture("CT scanner")
+      office = office_fixture([cap.id])
+      slots_for(office, 2)
+
+      assert {:ok, appointment} =
+               book(%{patient_id: patient_fixture().id, required_capability_ids: []})
+
+      assert appointment.required_capabilities == []
+    end
+
     test "an unknown service code is refused rather than booked blind" do
       assert {:error, :unknown_service} =
                book(%{patient_id: patient_fixture().id, service_code: "svc_nope"})
