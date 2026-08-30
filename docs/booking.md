@@ -172,11 +172,33 @@ Regeneration never destroys a `:booked` or `:blocked` slot — that is the
 property that matters most, since silently dropping a booked slot would cancel
 an appointment with nothing to show for it. Running it twice is a no-op.
 
-**Nothing prunes.** Shortening a rule's window leaves its already-generated
-slots in place, still open and bookable. Retiring the rule and writing a new
-one is the supported path. A prune would have to be strictly `:open`-only —
-a predicate slightly wrong there deletes booked slots — so it is deliberately
-absent rather than half-done.
+### Pruning
+
+Generation being additive is only half the story: shortening a rule's window,
+or retiring one, would otherwise leave its slots in place, still open and
+bookable, with a room offering times it no longer works.
+`Scheduling.Booking.SlotPruner` removes them.
+
+**It only ever deletes an unbooked, unblocked slot**, and that is enforced
+twice — `status == :open` *and* `is_nil(appointment_id)`, in SQL, both when
+selecting candidates and again at the point of deletion. A `:booked` slot must
+survive even when the rules stopped producing it, because deleting one cancels
+somebody's appointment with no record and no message. A `:blocked` slot must
+survive because it was withheld deliberately.
+
+The second guard is redundant while `book/1` writes status and
+`appointment_id` together. It stays because "redundant" and "load-bearing the
+moment that changes" are the same thing here.
+
+That safety argument is what makes pruning safe to run **automatically**, which
+it does after each horizon run (`BOOKING_PRUNE_STALE_SLOTS`, default on).
+Everything it can remove is unbooked capacity the current rules do not justify,
+so a rule deactivated by mistake costs a regeneration, not an appointment.
+
+It asks the generator what should exist (`SlotGenerator.candidate_starts/3`)
+rather than deriving it a second way — two answers to "what should be here"
+would drift, and the churn would show up as slots created and deleted on every
+run. A test asserts a prune immediately after a generation deletes nothing.
 
 ### Overlapping rules
 

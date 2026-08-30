@@ -121,7 +121,12 @@ config :scheduling, Scheduling.Core,
 # stale slots — nothing prunes them, so the horizon is also the blast radius of
 # a mistake. See docs/booking.md.
 config :scheduling, Scheduling.Booking,
-  horizon_days: String.to_integer(System.get_env("BOOKING_HORIZON_DAYS", "60"))
+  horizon_days: String.to_integer(System.get_env("BOOKING_HORIZON_DAYS", "60")),
+  # Remove slots the rules no longer justify, after each horizon run. On by
+  # default because it can only ever delete an *unbooked, unblocked* slot, and
+  # regeneration restores anything removed in error. Off means a shortened rule
+  # leaves a room offering times it no longer works.
+  prune_stale_slots: System.get_env("BOOKING_PRUNE_STALE_SLOTS", "true") == "true"
 
 if config_env() == :prod do
   database_url =

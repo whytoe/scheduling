@@ -33,6 +33,7 @@ defmodule Scheduling.Booking.HorizonKeeper do
   import Ecto.Query, warn: false
 
   alias Scheduling.Booking
+  alias Scheduling.Booking.SlotPruner
   alias Scheduling.Booking.AvailabilityRule
   alias Scheduling.Repo
 
@@ -86,11 +87,28 @@ defmodule Scheduling.Booking.HorizonKeeper do
       )
     end
 
+    prune()
+
     result
   rescue
     error ->
       Logger.error("Slot horizon generation failed: #{Exception.message(error)}")
       :error
+  end
+
+  # After generating, remove what the rules no longer justify. Safe to run
+  # unattended because it can only ever delete an unbooked, unblocked slot —
+  # see Scheduling.Booking.SlotPruner. Anything removed in error comes back on
+  # the next generation.
+  #
+  # Rescued separately: a prune failure must not make the generation that just
+  # succeeded look like it failed.
+  defp prune do
+    if SlotPruner.enabled?(), do: SlotPruner.prune_horizon(), else: %{deleted: 0, protected: 0}
+  rescue
+    error ->
+      Logger.error("Slot pruning failed: #{Exception.message(error)}")
+      %{deleted: 0, protected: 0}
   end
 
   defp any_rules? do
