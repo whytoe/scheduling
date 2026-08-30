@@ -19,6 +19,7 @@ Ready to run in production? See [`DEPLOYMENT.md`](DEPLOYMENT.md).
 | [`docs/integration-contracts.md`](docs/integration-contracts.md) | Decision record for the check-in / forms contracts, reconciled against the real ac-core spec. |
 | [`docs/ac-core-swagger.json`](docs/ac-core-swagger.json) | Vendored OpenAPI document for the Avenue D Core API. |
 | [`docs/ac-checkin.json`](docs/ac-checkin.json) | Vendored OpenAPI document for the Check-in API. |
+| [`docs/checkin-integration-asks.md`](docs/checkin-integration-asks.md) | What the check-in team needs to provide before `sc-bd8` can proceed. |
 | [`docs/design-system.md`](docs/design-system.md) | Theme tokens, component patterns, accessibility guarantees. |
 | [`DEPLOYMENT.md`](DEPLOYMENT.md) | Environment variables, Postgres requirements, health probe. |
 

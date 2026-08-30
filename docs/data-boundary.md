@@ -124,6 +124,30 @@ Two consequences worth stating:
 the client a response stuffed with unwanted and undocumented fields and
 checking none survive.
 
+## Opaque service codes
+
+External systems name a service by its catalog **`code`**, not by a row id and
+not by a clinical label:
+
+    POST /api/v1/queue_entries
+    {"queue_entry": {"patient_id": 1, "service_code": "svc_7a2f"}}
+
+Scheduling resolves the code to the capabilities that service requires, records
+those on the entry, and **discards the code**. Neither side has to put a
+clinical label on the wire, and the entry ends up holding equipment only —
+the same outcome as the `diagnosis_id` path, reached without an internal id
+leaking into an external contract.
+
+Codes should be opaque (`svc_7a2f`), not descriptive (`stroke-workup`). A
+descriptive code travelling alongside a patient id is a clinical label in
+everything but name, and it would appear in request logs at both ends. The
+catalog's human-readable name stays local, where it is a rule rather than a
+patient fact.
+
+This is the same shape as `compliance_ref`, in the other direction: an opaque
+token in, a resolved answer out, and the meaning owned by whichever system
+legitimately holds it.
+
 ## If you need to add clinical data
 
 Don't. Put it in the EMR and reference it by an opaque id, the way

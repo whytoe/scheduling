@@ -174,31 +174,49 @@ defmodule Scheduling.Queue do
     end
   end
 
-  # An explicit capability list wins. Otherwise a diagnosis id, if given, is
-  # expanded to its default capabilities here and goes no further — the entry
-  # records the equipment need, not the diagnosis that implied it.
+  # Precedence: an explicit capability list, then a service code, then a
+  # diagnosis id. Each of the latter two is expanded to the catalog entry's
+  # default capabilities and goes no further — the entry records the equipment
+  # need, never the service that implied it.
+  #
+  # `service_code` is the form external callers should use. It is the catalog's
+  # stable contract key rather than a row id, and it can be opaque
+  # (`svc_7a2f`), so check-in can name a service without either side putting a
+  # clinical label on the wire.
   defp put_required_capabilities(changeset, attrs) do
-    case Map.fetch(attrs, "required_capability_ids") do
-      {:ok, ids} ->
+    cond do
+      Map.has_key?(attrs, "required_capability_ids") ->
+        ids = Map.get(attrs, "required_capability_ids")
         Ecto.Changeset.put_assoc(changeset, :required_capabilities, load_capabilities(ids))
 
-      :error ->
-        put_diagnosis_default_capabilities(changeset, Map.get(attrs, "diagnosis_id"))
+      present?(Map.get(attrs, "service_code")) ->
+        expand_template(
+          changeset,
+          :service_code,
+          Catalog.fetch_diagnosis_by_code(Map.get(attrs, "service_code"))
+        )
+
+      present?(Map.get(attrs, "diagnosis_id")) ->
+        expand_template(
+          changeset,
+          :diagnosis_id,
+          Catalog.fetch_diagnosis(Map.get(attrs, "diagnosis_id"))
+        )
+
+      true ->
+        changeset
     end
   end
 
-  defp put_diagnosis_default_capabilities(changeset, nil), do: changeset
-  defp put_diagnosis_default_capabilities(changeset, ""), do: changeset
-
-  defp put_diagnosis_default_capabilities(changeset, diagnosis_id) do
-    case Catalog.fetch_diagnosis(diagnosis_id) do
-      {:ok, diagnosis} ->
-        Ecto.Changeset.put_assoc(changeset, :required_capabilities, diagnosis.capabilities)
-
-      :error ->
-        Ecto.Changeset.add_error(changeset, :diagnosis_id, "does not exist")
-    end
+  defp expand_template(changeset, _field, {:ok, template}) do
+    Ecto.Changeset.put_assoc(changeset, :required_capabilities, template.capabilities)
   end
+
+  defp expand_template(changeset, field, :error) do
+    Ecto.Changeset.add_error(changeset, field, "does not exist")
+  end
+
+  defp present?(value), do: (is_binary(value) and value != "") or is_integer(value)
 
   defp load_capabilities(nil), do: []
 

@@ -86,6 +86,27 @@ defmodule Scheduling.Catalog do
 
   def fetch_diagnosis(_id), do: :error
 
+  @doc """
+  Fetches a routing template by its `code` — the catalog's stable, externally
+  quotable key.
+
+  External systems reference a service by code, never by our row id: an id is
+  an implementation detail of this database, and a code is a contract. Codes
+  are also what lets the reference stay **opaque** — a caller can send
+  `svc_7a2f` and scheduling resolves it to the capabilities that service
+  needs, without either side putting a clinical label on the wire. See
+  `docs/data-boundary.md`.
+  """
+  @spec fetch_diagnosis_by_code(term()) :: {:ok, Diagnosis.t()} | :error
+  def fetch_diagnosis_by_code(code) when is_binary(code) and code != "" do
+    case Repo.get_by(Diagnosis, code: code) do
+      nil -> :error
+      diagnosis -> {:ok, Repo.preload(diagnosis, :capabilities)}
+    end
+  end
+
+  def fetch_diagnosis_by_code(_code), do: :error
+
   @doc "Creates a diagnosis. Accepts `capability_ids` to set its default required capabilities."
   def create_diagnosis(attrs \\ %{}) do
     %Diagnosis{capabilities: []}

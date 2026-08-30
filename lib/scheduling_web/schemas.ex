@@ -532,11 +532,17 @@ defmodule SchedulingWeb.Schemas do
           type: :object,
           properties: %{
             patient_id: %Schema{type: :integer, description: "Patient this entry represents"},
+            service_code: %Schema{
+              type: :string,
+              nullable: true,
+              description:
+                "Optional. **The form external callers should use, and transient input — not stored.** Names a routing template by its catalog `code`, which is a stable contract key rather than a row id, and may be opaque (`svc_7a2f`). Expanded to that template's default capabilities, which are recorded on the entry; the code itself is discarded. Scheduling keeps the equipment requirement, never the service that implied it. Takes precedence over `diagnosis_id`; ignored when `required_capability_ids` is given."
+            },
             diagnosis_id: %Schema{
               type: :integer,
               nullable: true,
               description:
-                "Optional. **Transient input, not stored.** Expanded to that diagnosis's default capabilities, which are recorded on the entry; the diagnosis reference itself is discarded. Scheduling keeps the equipment requirement, never the clinical reason for it. Ignored when `required_capability_ids` is given."
+                "Optional. **Transient input, not stored**, and a row id rather than a contract key — prefer `service_code`. Expanded to that template's default capabilities, which are recorded on the entry; the reference itself is discarded. Ignored when `required_capability_ids` or `service_code` is given."
             },
             visit_id: %Schema{
               type: :integer,

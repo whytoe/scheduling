@@ -219,6 +219,30 @@ only `POST /v1/external/forms/documents` has one. Responses are documented;
 requests are not. This record's decision is to *generate a client from the
 spec*, and that cannot be done for the writes as they stand.
 
+### Agreed flow (2026-08-29)
+
+1. **Scheduling** owns booking — publishes schedules, availability and
+   appointments into check-in.
+2. **Check-in** registers the patient on arrival.
+3. **Scheduling** decides the room.
+4. **Scheduling** owns the rules for which forms a service requires;
+   **check-in** serves them to the patient.
+
+Two decisions attach to it:
+
+- **Opaque service codes.** An appointment carries a code scheduling cannot
+  interpret (`svc_7a2f`, not `stroke-workup`). Scheduling maps code →
+  capabilities for routing and code → required forms as a rule catalog; the
+  human-readable clinical meaning stays in ac-core/EMR. This keeps booking
+  compatible with `data-boundary.md`: without it, owning booking would mean
+  holding patient ↔ clinical purpose, which is exactly what Phase 1 removed.
+- **Close the loop before building booking.** Steps 2–4 first. Scheduling has
+  no appointment, availability or slot model at all, and that is the largest
+  single piece of work in this plan; it should land after arrival → routing →
+  forms works for walk-ins, which the app already models.
+
+Step 3 is built. Steps 2 and 4 have no surface to land on — see below.
+
 ### Asks for the check-in team
 
 1. Request-body schemas for the `/v1/external/*` write endpoints — without
@@ -226,7 +250,15 @@ spec*, and that cannot be done for the writes as they stand.
 2. Either patient identity on `GET /v1/external/queue`, or a documented push
    (FHIR Subscription with a schema, or a plain webhook).
 3. Confirm the intended ownership split for appointments and availability.
-4. Minor: fix `tokenUrl` and declare the `checkin:*` scopes.
+4. An external (OAuth) endpoint for room assignment — `POST
+   /staff/patients/{id}/room` exists but is staff-JWT only, so step 3's
+   decision has nowhere federated to land.
+5. A way to publish form *rules* (`service_code → form ids`) rather than
+   per-patient form assignments — step 4.
+6. Minor: fix `tokenUrl` and declare the `checkin:*` scopes.
+
+The full brief, in a form that can be sent to that team as-is, is
+`checkin-integration-asks.md`.
 
 Until 1 and 2 land, `sc-bd8` stays held — building against undocumented
 request bodies is precisely the speculative-stub work this record exists to
