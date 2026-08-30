@@ -13,6 +13,10 @@ defmodule Scheduling.Offices.Office do
     field :intake_capacity, :integer, default: 0
     field :timezone, :string, default: "Etc/UTC"
 
+    # The physical site this room sits in. Nullable: offices predate locations,
+    # and a room not yet tied to a site still routes patients perfectly well.
+    belongs_to :location, Scheduling.Locations.Location
+
     many_to_many :capabilities, Capability,
       join_through: Scheduling.Offices.OfficeCapability,
       on_replace: :delete
@@ -23,11 +27,12 @@ defmodule Scheduling.Offices.Office do
   @doc false
   def changeset(office, attrs) do
     office
-    |> cast(attrs, [:name, :intake_capacity, :timezone])
+    |> cast(attrs, [:name, :intake_capacity, :timezone, :location_id])
     |> validate_required([:name, :intake_capacity, :timezone])
     |> validate_length(:name, min: 1, max: 255)
     |> validate_number(:intake_capacity, greater_than_or_equal_to: 0)
     |> validate_timezone()
+    |> assoc_constraint(:location)
     |> unique_constraint(:name)
   end
 
