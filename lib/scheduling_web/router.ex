@@ -169,6 +169,13 @@ defmodule SchedulingWeb.Router do
 
       get "/visits", VisitController, :index
       get "/visits/:id", VisitController, :show
+
+      get "/appointments", AppointmentController, :index
+      get "/appointments/:id", AppointmentController, :show
+
+      # Availability search. Reading a slot as `open` is not a reservation —
+      # two clients can see the same one and only one wins the booking.
+      get "/slots", AppointmentController, :slots
     end
 
     get "/board", Api.BoardController, :show
@@ -193,6 +200,11 @@ defmodule SchedulingWeb.Router do
 
     post "/visits", VisitController, :create
     post "/visits/:id/end", VisitController, :end_visit
+
+    post "/appointments", AppointmentController, :create
+    patch "/appointments/:id", AppointmentController, :update
+    put "/appointments/:id", AppointmentController, :update
+    post "/appointments/:id/cancel", AppointmentController, :cancel
   end
 
   # ADMIN — catalog changes reshape how every future patient is routed, and a
