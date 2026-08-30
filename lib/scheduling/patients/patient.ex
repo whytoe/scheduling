@@ -1,15 +1,28 @@
 defmodule Scheduling.Patients.Patient do
   @moduledoc """
-  A minimal patient record. Registration is owned by the external check-in /
-  queueing service, so we keep only a display name and three correlation ids:
+  A minimal patient record — a **projection** of ac-core's patient registry,
+  not an authority. We keep a display name and four correlation ids:
 
-    * `client_id` — the canonical, scheduling-owned UUID. Auto-generated on
-      create if not supplied. **Not** the EMR record id; used as the stable
-      reference exchanged across services.
+    * `core_patient_id` — the patient's id in ac-core, which is the platform's
+      system of record. The identity of record.
+    * `client_id` — the canonical scheduling-owned UUID, auto-generated on
+      create. **Deprecated** as an inter-service reference in favour of
+      `core_patient_id`: it names a row in *this* database, whereas the core id
+      names the person every system shares. Still generated and still unique,
+      so nothing that already exchanges it breaks.
     * `external_id` — the check-in / queueing service's id for this patient
       (free-form string, unique).
     * `intake_patient_id` — the intake-form system's UUID for this patient
       (used as the correlation key at the compliance gate).
+
+  `name` is a **cache** of what ac-core holds, refreshed by
+  `Scheduling.Patients.refresh_from_core/1`, not something this system owns.
+
+  Note what is deliberately absent. ac-core also exposes `mrn`, `dateOfBirth`,
+  `phone` and `email`; `Scheduling.Core.Client` drops all four at the boundary
+  and there are no columns for them here. They are PII this system could hold
+  and has no use for, and a column is an invitation. See
+  `docs/data-boundary.md`.
   """
   use Ecto.Schema
   import Ecto.Changeset
@@ -18,6 +31,7 @@ defmodule Scheduling.Patients.Patient do
 
   schema "patients" do
     field :name, :string
+    field :core_patient_id, Ecto.UUID
     field :client_id, Ecto.UUID
     field :external_id, :string
     field :intake_patient_id, Ecto.UUID
@@ -33,10 +47,11 @@ defmodule Scheduling.Patients.Patient do
   """
   def changeset(patient, attrs) do
     patient
-    |> cast(attrs, [:name, :client_id, :external_id, :intake_patient_id])
+    |> cast(attrs, [:name, :core_patient_id, :client_id, :external_id, :intake_patient_id])
     |> maybe_generate_client_id()
     |> validate_required([:name, :client_id])
     |> validate_length(:name, min: 1, max: 255)
+    |> unique_constraint(:core_patient_id)
     |> unique_constraint(:client_id)
     |> unique_constraint(:external_id)
     |> unique_constraint(:intake_patient_id)
