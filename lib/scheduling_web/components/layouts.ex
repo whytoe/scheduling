@@ -49,6 +49,7 @@ defmodule SchedulingWeb.Layouts do
   @nav [
     {:board, "Board", "hero-squares-2x2", "/board", nil},
     {:queue, "Queue", "hero-queue-list", "/queue", nil},
+    {:appointments, "Appointments", "hero-calendar-days", "/appointments", nil},
     {:decisions, "Decisions", "hero-document-magnifying-glass", "/decisions", nil},
     {:visit_events, "Visit events", "hero-clock", "/visit_events", nil},
     {:visits, "Visits", "hero-rectangle-stack", "/visits", nil},

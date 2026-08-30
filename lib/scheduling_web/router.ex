@@ -91,6 +91,12 @@ defmodule SchedulingWeb.Router do
       live "/visit_events", VisitEventLive.Index, :index
 
       live "/visits", VisitLive.Index, :index
+
+      # Booking a patient is shift work, not catalog administration — so it
+      # lives here beside the board, while /availability (what is bookable at
+      # all) sits behind the admin session.
+      live "/appointments", AppointmentLive.Index, :index
+      live "/appointments/new", AppointmentLive.Index, :new
     end
   end
 
