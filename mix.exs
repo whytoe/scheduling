@@ -68,6 +68,11 @@ defmodule Scheduling.MixProject do
       {:bandit, "~> 1.5"},
       {:open_api_spex, "~> 3.21"},
       {:oidcc, "~> 3.8"},
+      # Availability rules are written in an office's local time and stored as
+      # UTC slots. Elixir ships a UTC-only time zone database, so DST-correct
+      # conversion needs a real IANA source. `tz` over `tzdata` because tzdata
+      # depends on hackney, and this project's HTTP client is Req/Finch.
+      {:tz, "~> 0.28"},
       {:oidcc_plug, "~> 0.5.1"},
       {:bypass, "~> 2.1", only: :test}
     ]
