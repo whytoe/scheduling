@@ -1,13 +1,16 @@
 # Authentication & Authorization
 
-Scheduling authenticates both of its surfaces against one OpenID Connect
-realm:
+Scheduling authenticates both of its inbound surfaces against one OpenID
+Connect realm, and holds a token of its own for calling out:
 
 - **Browser SSO** — operators sign in to the LiveView UI with the
   authorization-code flow (PKCE).
 - **API bearer tokens** — the intake bridge, the check-in / queueing app and
   any other integrator call `/api/v1` with an access token from the
   client-credentials grant.
+- **Outbound** — scheduling is also an OAuth *client*, holding its own
+  client-credentials token to read ac-core's patient and location registry.
+  See "Scheduling as an OAuth client" below.
 
 Provider-neutral: anything that publishes a discovery document and a JWKS
 works. The deployment target is **Astrum core-api**
@@ -22,7 +25,8 @@ question, answered in **`data-boundary.md`**: PII yes, health data no.
 
 Implementation: `Scheduling.Auth` and friends, `SchedulingWeb.Plugs.ApiAuth`,
 `SchedulingWeb.Plugs.BrowserAuth`, `SchedulingWeb.AuthController`,
-`SchedulingWeb.AuthHooks`.
+`SchedulingWeb.AuthHooks`; outbound in `Scheduling.Auth.ServiceToken` and
+`Scheduling.Core`.
 
 ## Configuration
 
@@ -38,7 +42,8 @@ Implementation: `Scheduling.Auth` and friends, `SchedulingWeb.Plugs.ApiAuth`,
 | `OIDC_ORG_ID_CLAIM`        | no       | `astrum_org_id` | Claim naming the organisation id                |
 | `OIDC_TENANT_CLAIM`        | no       | `astrum_tenant` | Claim naming the tenant                         |
 | `OIDC_DISCOVERY_OVERRIDES` | no       | `{"subject_types_supported":["public"]}` | JSON merged over the discovery document |
-| `ASTRUM_ORG_ID`            | no       | —         | Restricts this deployment to one organisation (see below) |
+| `SCHEDULING_TENANCY_ID`    | no       | —         | Restricts this deployment to one tenant (see below)   |
+| `OIDC_TENANCY_CLAIM`       | no       | `astrum_org_id` | Which claim carries the tenancy id            |
 | `AUTH_SESSION_TTL_SECONDS` | no       | `28800`   | Browser session lifetime (8h)                         |
 | `AUTH_DISABLED`            | no       | unset     | `true` permits a `:prod` boot with no auth            |
 
@@ -93,32 +98,83 @@ decides which intake forms gate an assignment. A change there silently
 re-routes every future patient. That is a different kind of act from accepting
 the person in front of you, so it takes a different role.
 
-## One organisation per deployment
+## One tenant per deployment
 
-Tokens from Astrum carry `astrum_org_id`, `astrum_org`, `astrum_tenant` and
-`astrum_location`. A deployment serves **one** organisation: set
-`ASTRUM_ORG_ID` and any token naming a different org is refused — 403
-`forbidden` on the API, and the "not permitted" page at browser sign-in.
+ac-core nests **organization → practice → location**, and every `/v1` read is
+"scoped to the caller's practice[s]". A practice is therefore the level that
+matches how the data is actually partitioned, and a scheduling deployment
+serves one.
 
-Set it to the **opaque org id**, not the human-readable org name. Names change;
-ids don't. The check reads `astrum_org_id`, and `astrum_org` is captured for
-display only.
+Set `SCHEDULING_TENANCY_ID` and a token whose id does not match is refused —
+403 `forbidden` on the API, and the "not permitted" page at browser sign-in.
+Leave it unset and the check is skipped, matching how the rest of the auth
+layer behaves unconfigured.
 
-Leave `ASTRUM_ORG_ID` unset and the check is skipped, matching how the rest of
-the auth layer is off when unconfigured.
+### Which claim carries it is not yet confirmed
 
-Two things to know:
+ac-core's `claims_supported` advertises `astrum_org`, `astrum_org_id`,
+`astrum_tenant` and `astrum_location` — **nothing named for a practice**. The
+vendored spec (`ac-core-swagger.json`) does not settle it either: its only
+`roles` reference is an untyped array on `POST /staff/provision`.
 
-- **A token with no org claim is refused when an org is expected.** That is the
-  safe default, but note the failure mode: if `astrum_org_id` turns out to be
-  named something else on real ac-core tokens, *everyone* is refused, not just
-  outsiders. Same class of risk as the `astrum_roles` unknown below — confirm
-  both against a real token before enabling.
-- **This is an authentication boundary, not a data boundary.** No query filters
-  by org. If a deployment ever needs to serve several organisations, that is a
-  schema change (org id on patients, visits, queue entries, offices) and every
-  query and PubSub topic has to be scoped. Today's guarantee is only that a
-  token from another org cannot get in.
+So the claim is configuration. `OIDC_TENANCY_CLAIM` defaults to
+`astrum_org_id` — the one claim we have confirmed ac-core sends — and points
+anywhere:
+
+```sh
+OIDC_TENANCY_CLAIM=astrum_tenant     # if the practice arrives as the tenant
+SCHEDULING_TENANCY_ID=northside
+```
+
+**Confirm this against a real token before enabling it.** The failure mode is
+not subtle but it is total: name a claim the provider does not send and
+*everyone* is refused, not just outsiders. That is deliberate — a tenancy check
+that fails open is not a tenancy check — but it means a typo locks out the
+deployment. `test/scheduling_web/plugs/tenancy_scope_test.exs` pins that
+behaviour so it stays a known quantity.
+
+### It is an authentication boundary, not a data one
+
+`SCHEDULING_TENANCY_ID` keeps other tenants *out*. It does not partition data
+within a deployment: no query filters by tenant. If one deployment ever needs
+to serve several practices, that is a schema change (tenant id on patients,
+visits, queue entries, offices) plus scoping every query and PubSub topic.
+
+## Scheduling as an OAuth *client*
+
+Everything above is scheduling as a **resource server** — validating tokens
+other parties present. It is also a **client**: it calls ac-core's `/v1` API
+for the patient and location registry, and needs its own token to do it.
+
+`Scheduling.Auth.ServiceToken` obtains one via the client-credentials grant
+(`Oidcc.client_credentials_token/4`, reusing the same discovery worker), caches
+it, and refreshes a minute before expiry. `Scheduling.Core.Client` uses it.
+
+**Separate credentials from the browser SSO client:**
+
+| | Identifies | Scopes |
+|---|---|---|
+| `OIDC_CLIENT_ID` | the web app, to end users | `openid profile email roles` |
+| `CORE_CLIENT_ID` | scheduling-as-a-service, to ac-core | `core:patients:read core:organizations:read` |
+
+Two clients rather than one so the browser client's secret is not also a key to
+the patient registry, and so the read scopes can be granted narrowly.
+`core:patients:write` is deliberately absent — scheduling projects patient
+data, it does not author it.
+
+Three behaviours worth knowing:
+
+- **A failed exchange is never cached** and never clobbers a still-valid token.
+  A refresh failure should not turn a working cache into an outage.
+- **The exchange traps exits.** It reaches the shared provider worker via
+  `GenServer.call`, so a worker that is down or backing off after failed
+  discovery would otherwise take the token holder with it — an IdP blip
+  becoming a supervision cascade.
+- **A 401 from ac-core invalidates the cached token**, so the next call
+  re-fetches rather than replaying a credential ac-core has stopped honouring.
+
+What the client is allowed to do with what it reads is a separate constraint —
+see `data-boundary.md` §"Reading from ac-core".
 
 ## Back-channel logout
 
@@ -349,9 +405,9 @@ mounted under.
   mitigation. Astrum exposes `/oauth/introspect`; calling it per request would
   close the window at the cost of a round-trip per call.
 - **No rate limiting.** Tracked as `sc-c41`.
-- **No multi-org data scoping.** `ASTRUM_ORG_ID` keeps other organisations
+- **No multi-tenant data scoping.** `SCHEDULING_TENANCY_ID` keeps other tenants
   *out*; it does not partition data within a deployment. No query filters by
-  org. See "One organisation per deployment" above.
+  tenant. See "One tenant per deployment" above.
 - **`astrum_location` is ignored.** If offices map onto it, that is the natural
   key for per-location scoping.
 - **`astrum_apps` is ignored.** It looks like an app-entitlement list; gating

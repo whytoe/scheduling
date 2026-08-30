@@ -20,6 +20,9 @@ defmodule Scheduling.Application do
         # Drops expired back-channel-logout revocations. Also nil when auth is
         # unconfigured — there are no sessions to revoke.
         Scheduling.Auth.SessionRevocation.Sweeper.child_spec_if_enabled(),
+        # Caches scheduling's own client-credentials token for calling ac-core.
+        # nil unless core credentials are configured.
+        Scheduling.Auth.ServiceToken.child_spec_if_enabled(),
         # Start to serve requests, typically the last entry
         SchedulingWeb.Endpoint
       ]

@@ -168,11 +168,11 @@ defmodule SchedulingWeb.AuthController do
 
   defp sign_in(conn, %Identity{} = identity) do
     cond do
-      # Organisation before roles: someone from another tenant should be told
-      # they are at the wrong deployment, not that their roles are wrong here.
-      not Auth.org_permitted?(identity.org_id) ->
+      # Tenancy before roles: someone from another tenant should be told they
+      # are at the wrong deployment, not that their roles are wrong here.
+      not Auth.tenancy_permitted?(identity.tenancy_id) ->
         Logger.warning(
-          "Denied #{identity.subject}: organisation #{inspect(identity.org_id)} is not the one this deployment serves"
+          "Denied #{identity.subject}: tenant #{inspect(identity.tenancy_id)} is not the one this deployment serves"
         )
 
         conn

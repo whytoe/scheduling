@@ -95,6 +95,59 @@ Until it ships, entries carry no `compliance_ref`, `Compliance.verify/1`
 returns `:not_configured`, and the gate is skipped — the same fail-open posture
 as an unconfigured intake.
 
+## Reading from ac-core
+
+`Scheduling.Core.Client` is the only way patient data enters this system from
+the core API, and it is a **projection boundary**, not a pass-through.
+
+Every object in `ac-core-swagger.json` is declared `additionalProperties:
+true`. The live API may already return fields the spec does not list, and may
+start returning more without a spec change. So each response is projected
+field by field into a map the client constructs, and the raw body is discarded
+there. Nothing downstream ever sees it.
+
+From a patient we keep `id`, `practiceId`, `firstName`, `lastName` — enough to
+correlate the record and call the right person. We drop `mrn`, `dateOfBirth`,
+`phone` and `email`: all PII we *could* hold, none of it needed. Minimal
+exposure is the rule, not just "no PHI".
+
+Two consequences worth stating:
+
+- **Never `Map.take/2` or `Map.merge/2` a core response.** The projection has
+  to name its fields, which is why the client returns snake_case atom keys —
+  a projection cannot be produced by merging a decoded JSON map.
+- The token requests **read scopes only** (`core:patients:read`,
+  `core:organizations:read`). `core:patients:write` is deliberately absent:
+  scheduling projects patient data, it does not author it.
+
+`test/scheduling/core/client_test.exs` asserts the allowlist directly, feeding
+the client a response stuffed with unwanted and undocumented fields and
+checking none survive.
+
+## Opaque service codes
+
+External systems name a service by its catalog **`code`**, not by a row id and
+not by a clinical label:
+
+    POST /api/v1/queue_entries
+    {"queue_entry": {"patient_id": 1, "service_code": "svc_7a2f"}}
+
+Scheduling resolves the code to the capabilities that service requires, records
+those on the entry, and **discards the code**. Neither side has to put a
+clinical label on the wire, and the entry ends up holding equipment only —
+the same outcome as the `diagnosis_id` path, reached without an internal id
+leaking into an external contract.
+
+Codes should be opaque (`svc_7a2f`), not descriptive (`stroke-workup`). A
+descriptive code travelling alongside a patient id is a clinical label in
+everything but name, and it would appear in request logs at both ends. The
+catalog's human-readable name stays local, where it is a rule rather than a
+patient fact.
+
+This is the same shape as `compliance_ref`, in the other direction: an opaque
+token in, a resolved answer out, and the meaning owned by whichever system
+legitimately holds it.
+
 ## If you need to add clinical data
 
 Don't. Put it in the EMR and reference it by an opaque id, the way

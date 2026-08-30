@@ -14,9 +14,12 @@ Ready to run in production? See [`DEPLOYMENT.md`](DEPLOYMENT.md).
 | | |
 |---|---|
 | [`docs/data-boundary.md`](docs/data-boundary.md) | **Read this before adding a field.** Scheduling carries PII, not health data — what that means per table, and the three egress paths that enforce it. |
-| [`docs/auth.md`](docs/auth.md) | OIDC setup: browser SSO, API bearer tokens, roles, org scoping, back-channel logout. |
+| [`docs/auth.md`](docs/auth.md) | OIDC setup: browser SSO, API bearer tokens, roles, tenancy scoping, back-channel logout, and the outbound client for ac-core. |
 | [`docs/integrations.md`](docs/integrations.md) | The API we expose, the intake-form system we consume, audit logs, outbound webhooks. |
-| [`docs/integration-contracts.md`](docs/integration-contracts.md) | Decision record for the check-in / forms contracts. |
+| [`docs/integration-contracts.md`](docs/integration-contracts.md) | Decision record for the check-in / forms contracts, reconciled against the real ac-core spec. |
+| [`docs/ac-core-swagger.json`](docs/ac-core-swagger.json) | Vendored OpenAPI document for the Avenue D Core API. |
+| [`docs/ac-checkin.json`](docs/ac-checkin.json) | Vendored OpenAPI document for the Check-in API. |
+| [`docs/checkin-integration-asks.md`](docs/checkin-integration-asks.md) | What the check-in team needs to provide before `sc-bd8` can proceed. |
 | [`docs/design-system.md`](docs/design-system.md) | Theme tokens, component patterns, accessibility guarantees. |
 | [`DEPLOYMENT.md`](DEPLOYMENT.md) | Environment variables, Postgres requirements, health probe. |
 

@@ -1,4 +1,4 @@
-defmodule SchedulingWeb.Plugs.OrgScopeTest do
+defmodule SchedulingWeb.Plugs.TenancyScopeTest do
   @moduledoc """
   One deployment serves one organisation.
 
@@ -7,7 +7,7 @@ defmodule SchedulingWeb.Plugs.OrgScopeTest do
   otherwise permit the call — otherwise a valid operator at one clinic could
   read another clinic's board with a perfectly genuine token.
 
-  The check is off unless `expected_org_id` is configured, so one group here
+  The check is off unless `expected_tenancy_id` is configured, so one group here
   pins that down: it is the state every other test in the suite runs in, and a
   regression that turned it on by default would break them all in a way that is
   easier to misread than to diagnose.
@@ -28,11 +28,11 @@ defmodule SchedulingWeb.Plugs.OrgScopeTest do
 
   setup :setup_oidc_provider
 
-  defp expect_org(org_id), do: put_auth_option(:expected_org_id, org_id)
+  defp expect_tenant(org_id), do: put_auth_option(:expected_tenancy_id, org_id)
 
   describe "API — organisation matches" do
     setup do
-      expect_org(@token_org)
+      expect_tenant(@token_org)
       :ok
     end
 
@@ -56,7 +56,7 @@ defmodule SchedulingWeb.Plugs.OrgScopeTest do
 
   describe "API — organisation does not match" do
     setup do
-      expect_org("org-we-do-not-serve")
+      expect_tenant("org-we-do-not-serve")
       :ok
     end
 
@@ -125,7 +125,7 @@ defmodule SchedulingWeb.Plugs.OrgScopeTest do
 
   describe "API — no organisation configured" do
     test "any organisation is accepted, which is how the rest of the suite runs", ctx do
-      refute Auth.expected_org_id()
+      refute Auth.expected_tenancy_id()
 
       token = access_token(ctx, %{"astrum_org_id" => "some-other-org"})
       conn = ctx.conn |> with_bearer(token) |> get(~p"/api/v1/offices")
@@ -141,16 +141,51 @@ defmodule SchedulingWeb.Plugs.OrgScopeTest do
     end
   end
 
-  describe "Auth.org_permitted?/1" do
-    test "is the single source of truth both surfaces call" do
-      refute Auth.expected_org_id()
-      assert Auth.org_permitted?("anything")
-      assert Auth.org_permitted?(nil)
+  describe "the tenancy claim is configurable" do
+    # ac-core nests organization -> practice -> location and scopes /v1 reads
+    # by practice, but advertises no claim named for a practice. So the claim
+    # to check is configuration: point it elsewhere and the boundary moves
+    # without a code change. This is what makes the unknown survivable.
+    test "pointing it at another claim moves the boundary", ctx do
+      put_auth_option(:tenancy_claim, "astrum_tenant")
+      expect_tenant("northside")
 
-      expect_org("org-1")
-      assert Auth.org_permitted?("org-1")
-      refute Auth.org_permitted?("org-2")
-      refute Auth.org_permitted?(nil)
+      # The astrum-shaped fixture carries astrum_tenant: "northside".
+      conn = ctx.conn |> with_bearer(access_token(ctx)) |> get(~p"/api/v1/offices")
+      assert json_response(conn, 200) == []
+
+      # ...and a token whose astrum_tenant differs is refused, even though its
+      # astrum_org_id still matches what the default claim would have checked.
+      other = access_token(ctx, %{"astrum_tenant" => "southside"})
+      conn = build_conn() |> with_bearer(other) |> get(~p"/api/v1/offices")
+      assert json_response(conn, 403)["error"]["code"] == "forbidden"
+    end
+
+    test "defaults to astrum_org_id, the only claim ac-core is confirmed to send" do
+      assert Auth.tenancy_claim() == "astrum_org_id"
+    end
+
+    test "a claim the provider does not send refuses everyone", ctx do
+      # The failure mode worth knowing about: a wrong claim name does not fail
+      # open, it locks the whole deployment out.
+      put_auth_option(:tenancy_claim, "astrum_practice_id")
+      expect_tenant("practice-1")
+
+      conn = ctx.conn |> with_bearer(access_token(ctx)) |> get(~p"/api/v1/offices")
+      assert json_response(conn, 403)["error"]["code"] == "forbidden"
+    end
+  end
+
+  describe "Auth.tenancy_permitted?/1" do
+    test "is the single source of truth both surfaces call" do
+      refute Auth.expected_tenancy_id()
+      assert Auth.tenancy_permitted?("anything")
+      assert Auth.tenancy_permitted?(nil)
+
+      expect_tenant("org-1")
+      assert Auth.tenancy_permitted?("org-1")
+      refute Auth.tenancy_permitted?("org-2")
+      refute Auth.tenancy_permitted?(nil)
     end
   end
 
@@ -196,7 +231,7 @@ defmodule SchedulingWeb.Plugs.OrgScopeTest do
 
   describe "browser sign-in" do
     test "an operator from this organisation is signed in", ctx do
-      expect_org(@token_org)
+      expect_tenant(@token_org)
 
       conn = complete_login(ctx)
 
@@ -205,7 +240,7 @@ defmodule SchedulingWeb.Plugs.OrgScopeTest do
     end
 
     test "an operator from another organisation is refused", ctx do
-      expect_org("org-we-do-not-serve")
+      expect_tenant("org-we-do-not-serve")
 
       conn = complete_login(ctx)
 
@@ -214,7 +249,7 @@ defmodule SchedulingWeb.Plugs.OrgScopeTest do
     end
 
     test "the refusal leaves no session behind", ctx do
-      expect_org("org-we-do-not-serve")
+      expect_tenant("org-we-do-not-serve")
 
       conn = complete_login(ctx)
 
@@ -222,7 +257,7 @@ defmodule SchedulingWeb.Plugs.OrgScopeTest do
     end
 
     test "tenancy is checked before roles here too", ctx do
-      expect_org("org-we-do-not-serve")
+      expect_tenant("org-we-do-not-serve")
 
       # No recognised role either. The organisation message is the useful one:
       # granting this person a role would not get them in.
@@ -232,7 +267,7 @@ defmodule SchedulingWeb.Plugs.OrgScopeTest do
     end
 
     test "with no organisation configured, sign-in is unaffected", ctx do
-      refute Auth.expected_org_id()
+      refute Auth.expected_tenancy_id()
 
       conn = complete_login(ctx, %{"astrum_org_id" => "some-other-org"})
 

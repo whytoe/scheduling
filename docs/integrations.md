@@ -8,19 +8,30 @@ pending — see `integration-contracts.md` for the decision record.
 ## Topology
 
 ```
-       sign-in
-[Queueing app] ───POST /api/v1/visits───▶ [Scheduling]
-[Queueing app] ───POST /api/v1/queue_entries (with visit_id)──▶
-                                            │
-                                            │  on POST /queue_entries/:id/accept:
-                                            │
-                                            ├─► [Intake-form system]   compliance gate
-                                            │      GET /responses        (per required form_type)
-                                            │
-                                            ├─► [matcher]              best-fit office
-                                            ├─► [routing_decisions]    audit row
-                                            └─► [Handoff]              office staff notified
+[ac-core] ──── OIDC ─────▶ [Scheduling]      identity for operators + integrators
+   ▲                            │
+   └──── GET /v1/patients ──────┤            patient + location registry (read-only)
+         GET /v1/locations      │
+                                │
+       sign-in                  │
+[Check-in app] ──POST /api/v1/visits──▶
+[Check-in app] ──POST /api/v1/queue_entries (visit_id, compliance_ref)──▶
+                                │
+                                │  on POST /queue_entries/:id/accept:
+                                │
+                                ├─► [Intake-form system]  compliance gate
+                                │     GET /compliance/status?reference=…
+                                │     (opaque ref in, verdict out)
+                                │
+                                ├─► [matcher]             best-fit office
+                                ├─► [routing_decisions]   audit row
+                                └─► [Handoff]             office staff notified
 ```
+
+ac-core wears two hats: the **identity provider** both surfaces authenticate
+against (`auth.md`), and the **system of record** for patients and locations
+that scheduling reads from (`Scheduling.Core.Client`). The check-in app arrow
+is still pending — see "What's pending" below.
 
 Two audit logs, both append-only:
 
@@ -208,34 +219,76 @@ never stored.
 
 `docs/integration-contracts.md` (sc-7hs) is the decision record. The check-in
 app **is the queueing service** — the same external system patients sign
-into when arriving for an appointment. It owns patient registration and
-emits the sign-in event that creates the visit.
+into when arriving for an appointment. It emits the sign-in event that creates
+the visit.
 
 Decision: **wait for the real OpenAPI spec, then generate a client. Don't
 build speculative stubs.** Today, queue entries are created via
-`POST /api/v1/queue_entries` (admin / manual / test flows). When the check-in
-spec lands the work is:
+`POST /api/v1/queue_entries` (admin / manual / test flows).
 
-1. Generate a client from the spec.
+**Status (2026-08-29).** The spec has arrived and is vendored at
+`ac-checkin.json` ("Avenue D Pediatrics — Check-in API", 195 paths). It changes
+the picture, and `sc-bd8` stays held for different reasons than before — see
+`integration-contracts.md` for the full reconciliation. In short:
+
+- **There is no webhook.** The assumed `patient.checked_in` push does not
+  exist. The only push surface is an undocumented `POST /fhir/r4/Subscription`.
+- **The pull endpoint cannot identify a patient.**
+  `GET /v1/external/queue` returns `{id, status, queuePosition, checkInTime}` —
+  enough for a position board, not enough to create a visit.
+- **11 of 12 external write endpoints have no documented request body**, so a
+  client cannot be generated for them.
+- **Auth federates to ac-core**, using `checkin:*` scopes on a core-issued
+  token — the same source `Scheduling.Auth.ServiceToken` already uses. That
+  part is ready.
+- **The direction may be reversed.** `/v1/external/scheduling/*` is built for a
+  federated app to publish schedules and book appointments *into* check-in,
+  then mark them arrived. Whether appointments belong to this system or that
+  one is an open question.
+
+When the request bodies and a patient-identifying arrival signal land, the work
+is:
+
+1. Generate a client from the spec, and reconcile
+   `integration-contracts.md`'s working assumptions against it.
 2. Add a webhook receiver under `/api/v1/webhooks/check-in/...`.
-3. Add a periodic reconcile pull against the REST API.
-4. The check-in app references patients by their canonical `client_id` (see
-   "Patient identity" below), distinct from `intake_patient_id`.
+   **It must not sit behind the `:api_write` pipeline**: the check-in app
+   signs its own payloads and is not an OIDC client of ours, so it needs its
+   own pipeline doing signature verification.
+   `Scheduling.Webhooks.verify_signature/5` is the reference for the scheme in
+   the outbound direction.
+3. Dedupe on the external event id — delivery is at-least-once. Overlaps
+   `sc-ry7`.
+4. Add a periodic reconcile pull for dropped deliveries. This is the same
+   advice we already give our own consumers.
+5. Resolve the patient through ac-core (`core_patient_id`) rather than
+   upserting by `external_id`. ac-core is the registry; `external_id` stays as
+   the check-in app's own correlation key.
 
 ### Patient identity
 
-Three external systems reference the same human; scheduling owns the
-canonical identity:
+Several systems reference the same human. **ac-core is the source of truth** —
+it is the platform's patient registry, and scheduling holds a projection of the
+fields it needs, not an authority of its own.
 
 | Field on `patients`    | Owned by         | Used by                          |
 |------------------------|------------------|----------------------------------|
-| `client_id` (uuid)     | **scheduling**   | All inter-service references     |
+| `core_patient_id`      | **ac-core**      | The identity of record *(planned — Phase 3c)* |
+| `client_id` (uuid)     | scheduling       | Legacy inter-service reference — **deprecated** |
 | `external_id` (string) | check-in/queueing | Map check-in app's patient id    |
-| `intake_patient_id` (uuid) | intake-form  | Compliance gate lookup           |
+| `intake_patient_id` (uuid) | intake-form  | Compliance gate correlation      |
 
-`client_id` is auto-generated on patient create if not supplied; it is
-**not** the EMR record id. External systems integrate by exchanging
-`client_id` plus their own source-specific id.
+> **In transition.** `client_id` was scheduling's canonical id and is still
+> generated, still unique, still filterable — nothing has broken. But it is no
+> longer the authority: it names a row in *this* database, whereas
+> `core_patient_id` names the person in the registry every other system shares.
+> New integrations should exchange `core_patient_id`. `client_id` will be
+> retired in a separate change once existing consumers have moved.
+
+Scheduling projects only `id`, `practiceId`, `firstName` and `lastName` from a
+core patient record and drops `mrn`, `dateOfBirth`, `phone` and `email` at the
+client boundary — PII it could hold and has no use for. See
+`data-boundary.md` §"Reading from ac-core".
 
 Each of the three id columns is uniquely indexed and exposed as a query
 filter on the two list endpoints integrators reach for most:
@@ -499,14 +552,19 @@ visit.
 Pending feature work that affects integration shape. Track via `bd show
 <id>` in the scheduling workspace.
 
+> Statuses below were reconciled by hand on 2026-08-28. The Dolt server was
+> not serving the `scheduling` database at the time (escalation
+> `hq-wisp-pd2y`), so the beads themselves could not be updated — treat `bd`
+> as authoritative once it is back, and re-check anything marked done here.
+
 **Auth & lifecycle**
 
 | Bead     | Scope                                                                                                       |
 |----------|-------------------------------------------------------------------------------------------------------------|
 | ~~`sc-6ea`~~ | **Done.** OIDC auth: browser SSO + service-to-service bearer tokens, roles from token claims. `actor_type`/`actor_id` now come from the token. See `auth.md`. |
 | `sc-7hu` | Queue-entry state machine extensions: `scheduled`, `cancelled`, `no_show`, `discharged_with_followup`. Adds new event types to `visit_events`. |
-| `sc-kub` | Service-to-service trust model (blocked-by `sc-6ea`).                                                       |
-| `sc-ry7` | Idempotency-key handling for sign-in / disposition / outbound (blocked-by `sc-6ea`).                        |
+| `sc-kub` | Service-to-service trust model. **Unblocked** — `sc-6ea` landed.                                            |
+| `sc-ry7` | Idempotency-key handling for sign-in / disposition / outbound. **Unblocked** — and overlaps the dedupe work in the check-in ingest below. |
 | `sc-ais` | Replay job for queue entries stuck on `compliance_unavailable` / `no_eligible_office`.                      |
 | `sc-nm5` | Patient-facing notifications (SMS / email) for follow-ups.                                                  |
 
@@ -514,11 +572,11 @@ Pending feature work that affects integration shape. Track via `bd show
 
 | Bead     | Scope                                                                                                       |
 |----------|-------------------------------------------------------------------------------------------------------------|
-| `sc-qsr` | Outbound webhooks for visit / queue / handoff events — so integrators don't have to poll.                   |
+| ~~`sc-qsr`~~ | **Done.** Outbound webhooks for visit / queue / handoff events — see "Outbound webhooks" above. Retries and a delivery log are still open. |
 | `sc-s7u` | Cursor pagination on every list endpoint.                                                                   |
 | ~~`sc-2y8`~~ | **Done.** Unified error envelope (`{"error": {"code", "message", "details"}}`).                          |
-| `sc-c41` | Rate limiting per token / per service (blocked-by `sc-6ea`).                                                |
-| `sc-r5n` | External real-time subscription endpoint (SSE / WebSocket, blocked-by `sc-6ea`).                            |
+| `sc-c41` | Rate limiting per token / per service. **Unblocked** — `sc-6ea` landed, so there is now a token to key on. |
+| `sc-r5n` | External real-time subscription endpoint (SSE / WebSocket). **Unblocked** — `sc-6ea` landed.                |
 | `sc-ckz` | Wait-time / queue-position read API for the queueing-service patient UI.                                    |
 | `sc-jma` | Document the recommended generated-client / SDK toolchain.                                                  |
 | `sc-j2s` | Cross-resource query / GraphQL story (deferred).                                                            |

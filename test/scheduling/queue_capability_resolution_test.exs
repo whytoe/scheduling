@@ -104,6 +104,95 @@ defmodule Scheduling.QueueCapabilityResolutionTest do
     assert entry.required_capabilities == []
   end
 
+  describe "service_code — the external contract key" do
+    test "resolves to the catalog entry's default capabilities" do
+      ct = capability_fixture("CT scanner")
+
+      {:ok, dx} =
+        Catalog.create_diagnosis(%{
+          "name" => "Imaging",
+          "code" => "svc_7a2f",
+          "capability_ids" => [ct.id]
+        })
+
+      {:ok, entry} =
+        Queue.create_entry(%{"patient_id" => patient_fixture().id, "service_code" => dx.code})
+
+      assert Enum.map(entry.required_capabilities, & &1.name) == [ct.name]
+    end
+
+    test "the code itself is not stored — only the equipment it implied" do
+      ct = capability_fixture("CT scanner")
+
+      {:ok, dx} =
+        Catalog.create_diagnosis(%{
+          "name" => "Imaging",
+          "code" => "svc_b3e1",
+          "capability_ids" => [ct.id]
+        })
+
+      {:ok, entry} =
+        Queue.create_entry(%{"patient_id" => patient_fixture().id, "service_code" => dx.code})
+
+      refute Map.has_key?(entry, :service_code)
+      refute Map.has_key?(entry, :diagnosis_id)
+    end
+
+    test "an unknown code is a validation error, not a crash" do
+      assert {:error, changeset} =
+               Queue.create_entry(%{
+                 "patient_id" => patient_fixture().id,
+                 "service_code" => "svc_nope"
+               })
+
+      assert "does not exist" in errors_on(changeset).service_code
+    end
+
+    test "an explicit capability list still wins" do
+      ct = capability_fixture("CT scanner")
+      xray = capability_fixture("XRay")
+
+      {:ok, dx} =
+        Catalog.create_diagnosis(%{
+          "name" => "Imaging",
+          "code" => "svc_c4d2",
+          "capability_ids" => [ct.id]
+        })
+
+      {:ok, entry} =
+        Queue.create_entry(%{
+          "patient_id" => patient_fixture().id,
+          "service_code" => dx.code,
+          "required_capability_ids" => [xray.id]
+        })
+
+      assert Enum.map(entry.required_capabilities, & &1.name) == [xray.name]
+    end
+
+    test "service_code takes precedence over diagnosis_id" do
+      ct = capability_fixture("CT scanner")
+      xray = capability_fixture("XRay")
+
+      {:ok, by_code} =
+        Catalog.create_diagnosis(%{
+          "name" => "ByCode",
+          "code" => "svc_e5f3",
+          "capability_ids" => [ct.id]
+        })
+
+      {:ok, by_id} = Catalog.create_diagnosis(%{"name" => "ById", "capability_ids" => [xray.id]})
+
+      {:ok, entry} =
+        Queue.create_entry(%{
+          "patient_id" => patient_fixture().id,
+          "service_code" => by_code.code,
+          "diagnosis_id" => by_id.id
+        })
+
+      assert Enum.map(entry.required_capabilities, & &1.name) == [ct.name]
+    end
+  end
+
   test "compliance_ref round-trips onto the entry" do
     {:ok, entry} =
       Queue.create_entry(%{

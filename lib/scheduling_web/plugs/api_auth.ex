@@ -36,7 +36,7 @@ defmodule SchedulingWeb.Plugs.ApiAuth do
   | Valid token, insufficient role    | 403    | `forbidden`            |
   | IdP unreachable                   | 503    | `provider_unavailable` |
 
-  The organisation check (`Scheduling.Auth.org_permitted?/1`) runs during
+  The tenancy check (`Scheduling.Auth.tenancy_permitted?/1`) runs during
   authentication rather than authorization: which tenant a token belongs to is
   not a question about what it may do here, it is a question about whether it
   is talking to the right deployment at all.
@@ -80,13 +80,13 @@ defmodule SchedulingWeb.Plugs.ApiAuth do
   defp authenticate(conn) do
     with {:ok, token} <- bearer_token(conn),
          {:ok, identity} <- Tokens.validate(token),
-         :ok <- check_org(identity) do
+         :ok <- check_tenancy(identity) do
       assign(conn, :current_identity, identity)
     else
       {:error, :missing} ->
         deny(conn, 401, "unauthorized", "A bearer token is required")
 
-      {:error, {:wrong_org, org_id}} ->
+      {:error, {:wrong_tenant, org_id}} ->
         # The token is genuine — it just belongs to another tenant. Echoing the
         # org id we read back is the caller's own data, and it separates "wrong
         # organisation" from "our org claim mapping is misconfigured", which
@@ -132,10 +132,12 @@ defmodule SchedulingWeb.Plugs.ApiAuth do
     end
   end
 
-  # Runs after the signature checks, so a token is only ever told it is in the
-  # wrong organisation once we have established it is genuinely ours to read.
-  defp check_org(%Identity{org_id: org_id}) do
-    if Auth.org_permitted?(org_id), do: :ok, else: {:error, {:wrong_org, org_id}}
+  # Runs after the signature checks, so a token is only ever told it is at the
+  # wrong deployment once we have established it is genuinely ours to read.
+  defp check_tenancy(%Identity{tenancy_id: tenancy_id}) do
+    if Auth.tenancy_permitted?(tenancy_id),
+      do: :ok,
+      else: {:error, {:wrong_tenant, tenancy_id}}
   end
 
   defp permitted?(identity, :require_read), do: Identity.can_read?(identity)
