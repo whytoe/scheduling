@@ -33,7 +33,7 @@ defmodule SchedulingWeb.Layouts do
   attr :active, :atom,
     default: nil,
     doc:
-      "the active nav tab — one of :board, :queue, :decisions, :visit_events, :visits, :offices, :capabilities, :diagnoses"
+      "the active nav tab — one of :board, :queue, :decisions, :visit_events, :visits, :offices, :capabilities, :diagnoses, :availability"
 
   attr :wide, :boolean, default: false, doc: "use the wider page container"
 
@@ -54,7 +54,8 @@ defmodule SchedulingWeb.Layouts do
     {:visits, "Visits", "hero-rectangle-stack", "/visits", nil},
     {:offices, "Offices", "hero-building-office", "/offices", "admin"},
     {:capabilities, "Capabilities", "hero-beaker", "/capabilities", "admin"},
-    {:diagnoses, "Diagnoses", "hero-clipboard-document-list", "/diagnoses", "admin"}
+    {:diagnoses, "Diagnoses", "hero-clipboard-document-list", "/diagnoses", "admin"},
+    {:availability, "Availability", "hero-calendar-days", "/availability", "admin"}
   ]
 
   def app(assigns) do

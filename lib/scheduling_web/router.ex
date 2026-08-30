@@ -113,6 +113,10 @@ defmodule SchedulingWeb.Router do
       live "/diagnoses", DiagnosisLive.Index, :index
       live "/diagnoses/new", DiagnosisLive.Index, :new
       live "/diagnoses/:id/edit", DiagnosisLive.Index, :edit
+
+      live "/availability", AvailabilityLive.Index, :index
+      live "/availability/new", AvailabilityLive.Index, :new
+      live "/availability/:id/edit", AvailabilityLive.Index, :edit
     end
   end
 
