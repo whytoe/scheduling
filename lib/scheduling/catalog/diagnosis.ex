@@ -12,6 +12,7 @@ defmodule Scheduling.Catalog.Diagnosis do
   schema "diagnoses" do
     field :name, :string
     field :code, :string
+    field :duration_minutes, :integer, default: 20
     field :required_form_types, {:array, :string}, default: []
 
     many_to_many :capabilities, Capability,
@@ -24,9 +25,16 @@ defmodule Scheduling.Catalog.Diagnosis do
   @doc false
   def changeset(diagnosis, attrs) do
     diagnosis
-    |> cast(attrs, [:name, :code, :required_form_types])
-    |> validate_required([:name])
+    |> cast(attrs, [:name, :code, :duration_minutes, :required_form_types])
+    |> validate_required([:name, :duration_minutes])
     |> validate_length(:name, min: 1, max: 255)
+    # A booking has to occupy a whole number of slots, and a zero-length
+    # service would occupy none. The upper bound is a full day — anything
+    # longer is a data-entry slip, not a service.
+    |> validate_number(:duration_minutes,
+      greater_than: 0,
+      less_than_or_equal_to: 1440
+    )
     |> unique_constraint(:name)
     |> unique_constraint(:code)
   end

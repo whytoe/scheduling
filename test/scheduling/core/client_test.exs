@@ -40,7 +40,7 @@ defmodule Scheduling.Core.ClientTest do
 
     # Stand in for the GenServer so these tests exercise the client, not the
     # token cache; ServiceToken has its own test.
-    {:ok, stub} = start_supervised({__MODULE__.TokenStub, {:ok, @token}})
+    stub = start_supervised!({Scheduling.ServiceTokenStub, {:ok, @token}})
 
     on_exit(fn ->
       Application.put_env(:scheduling, Scheduling.Core, original_core)
@@ -48,25 +48,6 @@ defmodule Scheduling.Core.ClientTest do
     end)
 
     %{bypass: bypass, stub: stub}
-  end
-
-  # A minimal process registered under the ServiceToken name, so the client's
-  # GenServer.call reaches something we control.
-  defmodule TokenStub do
-    @moduledoc false
-    use GenServer
-
-    def start_link(reply),
-      do: GenServer.start_link(__MODULE__, reply, name: Scheduling.Auth.ServiceToken)
-
-    @impl GenServer
-    def init(reply), do: {:ok, reply}
-
-    @impl GenServer
-    def handle_call(:fetch, _from, reply), do: {:reply, reply, reply}
-
-    @impl GenServer
-    def handle_cast(:invalidate, reply), do: {:noreply, reply}
   end
 
   defp respond(conn, status, body) do

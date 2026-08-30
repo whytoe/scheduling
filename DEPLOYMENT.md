@@ -102,6 +102,7 @@ Optional:
 | `CORE_CLIENT_ID` / `CORE_CLIENT_SECRET` | unset | OAuth client scheduling presents to ac-core. **A separate client from `OIDC_CLIENT_ID`** — that one identifies the web app to users; this one identifies scheduling-as-a-service and needs only read scopes. |
 | `CORE_SCOPES`       | `core:patients:read,core:organizations:read` | Scopes on the core token. `core:patients:write` is deliberately absent — scheduling projects patient data, it does not author it. |
 | `CORE_HTTP_TIMEOUT_MS` | `5000`    | Request timeout for core API calls.                           |
+| `BOOKING_HORIZON_DAYS` | `60`      | How far ahead booking slots are generated. Nothing prunes stale slots, so this is also the blast radius of a schedule mistake. |
 | `OIDC_TENANCY_CLAIM` | `astrum_org_id` | Which claim carries the tenancy id. ac-core scopes data by *practice* but advertises no practice claim, so confirm against a real token before setting `SCHEDULING_TENANCY_ID` — a wrong claim name refuses everyone. See `docs/auth.md`. |
 | `AUTH_SESSION_TTL_SECONDS` | `28800` (8h) | How long a browser session is trusted before re-auth.  |
 | `AUTH_DISABLED`     | unset        | `true` allows a prod boot with no authentication. See above.  |

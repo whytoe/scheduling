@@ -273,7 +273,7 @@ fields it needs, not an authority of its own.
 
 | Field on `patients`    | Owned by         | Used by                          |
 |------------------------|------------------|----------------------------------|
-| `core_patient_id`      | **ac-core**      | The identity of record *(planned — Phase 3c)* |
+| `core_patient_id`      | **ac-core**      | The identity of record                        |
 | `client_id` (uuid)     | scheduling       | Legacy inter-service reference — **deprecated** |
 | `external_id` (string) | check-in/queueing | Map check-in app's patient id    |
 | `intake_patient_id` (uuid) | intake-form  | Compliance gate correlation      |
@@ -289,6 +289,32 @@ Scheduling projects only `id`, `practiceId`, `firstName` and `lastName` from a
 core patient record and drops `mrn`, `dateOfBirth`, `phone` and `email` at the
 client boundary — PII it could hold and has no use for. See
 `data-boundary.md` §"Reading from ac-core".
+
+`GET /api/v1/patients?core_patient_id=<id>` joins the two.
+
+### Sites
+
+`locations` is a second projection, from `GET /v1/locations`. ac-core owns the
+site list; scheduling caches name, address, timezone and active state so the
+board keeps its labels when the registry is briefly unreachable.
+
+**A location is a site; an office is a room.** An ac-core location has an
+address and a timezone; a scheduling office has an intake capacity and a set of
+capabilities. Several offices sit in one site, so `offices.location_id` is a
+nullable belongs-to — not a one-to-one projection.
+
+Sync upserts by `core_location_id` and **deactivates** what ac-core stops
+returning rather than deleting it: an office may point at that site, and a
+vanished location is more often a scope change than a decision to erase
+history. A sync that fails partway leaves what it wrote and changes nothing
+else — in particular a failed sync never deactivates anything, which would
+otherwise switch off every site on the pages it never fetched.
+
+Sync never touches offices. Adopting a site's timezone happens when an
+operator links a room (`Scheduling.Locations.link_office/2`), and only when the
+office is still on the default — slot generation reads `Office.timezone`, so
+changing it behind someone would move a whole calendar by an hour with no
+audit trail.
 
 Each of the three id columns is uniquely indexed and exposed as a query
 filter on the two list endpoints integrators reach for most:

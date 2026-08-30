@@ -60,6 +60,10 @@ config :logger, :default_formatter,
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 
+# Booking converts between an office's local time and UTC, which needs a real
+# IANA database — Elixir's built-in one is UTC-only. See docs/booking.md.
+config :elixir, :time_zone_database, Tz.TimeZoneDatabase
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"
