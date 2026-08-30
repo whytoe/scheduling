@@ -57,6 +57,37 @@ defmodule Scheduling.Catalog do
     |> Repo.preload(:capabilities)
   end
 
+  @doc """
+  Loads capabilities by id, ignoring ids that do not exist.
+
+  Ignoring rather than erroring because the caller is usually expanding a
+  client-supplied list, and a stale id should narrow the requirement rather
+  than fail the whole request.
+  """
+  @spec list_capabilities_by_ids([term()]) :: [Capability.t()]
+  def list_capabilities_by_ids(ids) when is_list(ids) do
+    parsed =
+      ids
+      |> Enum.map(&normalise_id/1)
+      |> Enum.reject(&is_nil/1)
+
+    case parsed do
+      [] -> []
+      ids -> Capability |> where([c], c.id in ^ids) |> order_by([c], asc: c.name) |> Repo.all()
+    end
+  end
+
+  defp normalise_id(id) when is_integer(id), do: id
+
+  defp normalise_id(id) when is_binary(id) do
+    case Integer.parse(id) do
+      {int_id, ""} -> int_id
+      _ -> nil
+    end
+  end
+
+  defp normalise_id(_id), do: nil
+
   @doc "Fetches a diagnosis by id with capabilities preloaded. Raises if missing."
   def get_diagnosis!(id) do
     Diagnosis

@@ -12,7 +12,9 @@ defmodule Scheduling.Booking do
   """
   import Ecto.Query, warn: false
 
+  alias Scheduling.Booking.Appointment
   alias Scheduling.Booking.AvailabilityRule
+  alias Scheduling.Booking.Engine
   alias Scheduling.Booking.Slot
   alias Scheduling.Booking.SlotGenerator
   alias Scheduling.Repo
@@ -176,6 +178,50 @@ defmodule Scheduling.Booking do
   @doc "Returns a blocked slot to `:open`. Refuses a booked slot."
   @spec unblock_slot(Slot.t()) :: {:ok, Slot.t()} | {:error, Ecto.Changeset.t()}
   def unblock_slot(%Slot{} = slot), do: slot |> Slot.unblock_changeset() |> Repo.update()
+
+  # --- appointments ----------------------------------------------------------
+
+  @doc """
+  Books an appointment. See `Scheduling.Booking.Engine` for the five steps and,
+  more importantly, why reservation is a compare-and-swap rather than a
+  select-then-update.
+  """
+  @spec book(map()) :: {:ok, Appointment.t()} | {:error, Engine.error()}
+  defdelegate book(attrs), to: Engine
+
+  @doc "Fetches an appointment with patient, slots and capabilities preloaded."
+  @spec get_appointment!(term()) :: Appointment.t()
+  def get_appointment!(id) do
+    Appointment |> Repo.get!(id) |> Repo.preload([:patient, :slots, :required_capabilities])
+  end
+
+  @doc """
+  Lists appointments, soonest first.
+
+  Opts: `:patient_id`, `:status` (atom or list).
+  """
+  @spec list_appointments(keyword()) :: [Appointment.t()]
+  def list_appointments(opts \\ []) do
+    Appointment
+    |> filter_appointments_by_patient(Keyword.get(opts, :patient_id))
+    |> filter_appointments_by_status(Keyword.get(opts, :status))
+    |> order_by([a], asc: a.inserted_at, asc: a.id)
+    |> preload([:patient, :slots, :required_capabilities])
+    |> Repo.all()
+  end
+
+  defp filter_appointments_by_patient(query, nil), do: query
+
+  defp filter_appointments_by_patient(query, patient_id),
+    do: where(query, [a], a.patient_id == ^patient_id)
+
+  defp filter_appointments_by_status(query, nil), do: query
+
+  defp filter_appointments_by_status(query, statuses) when is_list(statuses),
+    do: where(query, [a], a.status in ^statuses)
+
+  defp filter_appointments_by_status(query, status),
+    do: where(query, [a], a.status == ^status)
 
   defp filter_by_office(query, nil), do: query
   defp filter_by_office(query, office_id), do: where(query, [r], r.office_id == ^office_id)

@@ -178,6 +178,59 @@ consecutive slots on one office as its service requires:
 Booking therefore looks for a run of consecutive open slots, not a single one.
 A 40-minute service on a 20-minute calendar takes two.
 
+## The booking engine
+
+`Scheduling.Booking.book/1` runs five steps, each narrowing what the next has
+to consider:
+
+1. **Resolve the service** to its capabilities. The code is expanded and
+   discarded.
+2. **Find eligible offices** — those providing every required capability.
+3. **Derive the binding** from how many there are.
+4. **Find a contiguous run** of open slots long enough for the service.
+5. **Reserve them** atomically.
+
+### Eligibility is capability-only
+
+`Matching.eligible_offices/3` is called with **no loads**. It filters on live
+free capacity, which is right for the walk-in matcher and wrong here: for a
+future appointment the capacity constraint is the slot, not today's queue.
+Passing live loads would refuse to book tomorrow a room that happens to be busy
+right now — there is a test for exactly that.
+
+The default still excludes offices with `intake_capacity` 0, which is correct.
+
+### Runs, not slot counts
+
+`slot_minutes` varies per rule, so "how many slots" is not a division. The
+engine walks actual slot boundaries until the run is long enough, and requires
+`slot[i].ends_at == slot[i+1].starts_at` — a gap (a lunch break between two
+rules) breaks the run rather than being booked through. The earliest qualifying
+run across all eligible offices wins.
+
+### Reservation is a compare-and-swap
+
+The part that has to be right. Selecting candidate slots and then updating them
+leaves a window where two callers both read `:open` and both write. Instead:
+
+```sql
+UPDATE slots SET status = 'booked', appointment_id = $1
+ WHERE id = ANY($2) AND status = 'open'
+```
+
+…and **the affected row count must equal the number of slots intended**. Short
+means someone took one in between; the transaction rolls back and the caller
+gets `{:error, :slots_taken}`, which is the one error worth retrying.
+
+`Engine.claim_slots/3` is public because it is the crux, and because it cannot
+be reached through `book/1` in a test: `Ecto.Adapters.SQL.Sandbox` routes every
+process through one connection, so nothing can take a slot in the window
+between the search and the reservation. A "spawn N tasks" test would look
+rigorous and prove nothing. The tests drive `claim_slots/3` directly instead —
+same code path a genuine race takes — and separately assert that a rolled-back
+transaction releases what it claimed, since the two halves of the guarantee
+live in different places.
+
 ## Timezones
 
 Availability rules are written in the office's local time — "Mon–Fri

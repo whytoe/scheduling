@@ -41,6 +41,11 @@ defmodule Scheduling.Booking.Slot do
     belongs_to :office, Office
     belongs_to :availability_rule, AvailabilityRule
 
+    # Set when the slot is reserved. `status` and this field are two views of
+    # one fact and are always written together — see
+    # `Scheduling.Booking.book/1`, which is the only thing that sets either.
+    belongs_to :appointment, Scheduling.Booking.Appointment
+
     timestamps(type: :utc_datetime)
   end
 
