@@ -37,6 +37,10 @@ defmodule Scheduling.Queue.QueueEntry do
     belongs_to :assigned_office, Office
     belongs_to :visit, Visit
 
+    # Set when the entry arrived from a booking. Nil for a walk-in, which is
+    # still the majority of what this queue handles.
+    belongs_to :appointment, Scheduling.Booking.Appointment
+
     many_to_many :required_capabilities, Capability,
       join_through: Scheduling.Queue.QueueEntryCapability,
       on_replace: :delete
@@ -60,6 +64,7 @@ defmodule Scheduling.Queue.QueueEntry do
       :patient_id,
       :assigned_office_id,
       :visit_id,
+      :appointment_id,
       :status,
       :priority,
       :compliance_ref
@@ -71,6 +76,7 @@ defmodule Scheduling.Queue.QueueEntry do
     |> assoc_constraint(:patient)
     |> assoc_constraint(:assigned_office)
     |> assoc_constraint(:visit)
+    |> assoc_constraint(:appointment)
   end
 
   @doc """

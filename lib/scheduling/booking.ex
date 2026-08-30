@@ -13,6 +13,7 @@ defmodule Scheduling.Booking do
   import Ecto.Query, warn: false
 
   alias Scheduling.Booking.Appointment
+  alias Scheduling.Booking.Arrival
   alias Scheduling.Booking.AvailabilityRule
   alias Scheduling.Booking.Engine
   alias Scheduling.Booking.Slot
@@ -217,6 +218,13 @@ defmodule Scheduling.Booking do
   @spec reschedule_appointment(Appointment.t(), keyword()) ::
           {:ok, Appointment.t()} | {:error, Engine.error()}
   defdelegate reschedule_appointment(appointment, opts \\ []), to: Engine, as: :reschedule
+
+  @doc """
+  Records a booked patient arriving — opens a visit, queues them, and for a
+  committed appointment assigns the room. See `Scheduling.Booking.Arrival`.
+  """
+  @spec arrive(Appointment.t(), keyword()) :: {:ok, Arrival.result()} | {:error, Arrival.error()}
+  defdelegate arrive(appointment, opts \\ []), to: Arrival
 
   @doc "Fetches an appointment with patient, slots and capabilities preloaded."
   @spec get_appointment!(term()) :: Appointment.t()

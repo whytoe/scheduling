@@ -289,6 +289,45 @@ zero-length requirement takes the first single slot it finds and quietly
 becomes twenty minutes. There is a test that books six slots, moves the
 appointment, and asserts it still holds six.
 
+## Arrival
+
+A booked patient turning up produces the same things a walk-in does — a `Visit`
+and a `QueueEntry` — so the whole existing lifecycle (matching, handoffs,
+completion, the board, the audit log) takes over unchanged. Booking decides
+*when* and *what equipment*; the queue decides everything after the patient is
+through the door.
+
+`queue_entries.appointment_id` records which booking an entry came from, and is
+nil for a walk-in.
+
+**This is the only place the binding does anything.**
+
+- **Committed** — one office could ever serve it, and it holds slots there.
+  The entry is assigned directly and a handoff raised, exactly as
+  `Queue.accept/2` would. Running the matcher would ask a question with one
+  possible answer.
+- **Provisional** — the entry is left `:waiting` and goes through
+  `Queue.accept/2` like any other, so the matcher picks on **live capacity at
+  the moment of arrival** rather than what was true at booking. It may well
+  choose a different room from the one holding the slots; that is the point,
+  and there is a test that fills the booked room and asserts the patient lands
+  elsewhere.
+
+Arriving twice returns the original visit and entry rather than opening a
+second. Being checked in twice at a desk is a routine mistake, not something to
+punish with a duplicate queue entry.
+
+### Slots stay booked on arrival
+
+A committed appointment's slots represent the room's time being spent, and the
+patient is now spending it — releasing them would let a second patient be
+booked into an occupied room.
+
+Provisional slots stay booked too, **even when the matcher sends the patient
+somewhere else**. Releasing them mid-session would hand back capacity the
+original room had notionally set aside. Whether that should be reclaimed is a
+scheduling-policy question, not something to decide implicitly — see Open below.
+
 ## Timezones
 
 Availability rules are written in the office's local time — "Mon–Fri
@@ -323,3 +362,9 @@ the service requires.
   overbooking would need a per-rule allowance.
 - **Provider-level booking.** ac-core has a provider directory. Today booking
   is against rooms and equipment, not people.
+- **Rerouted provisional slots are not reclaimed.** When the matcher sends a
+  provisional patient to a different room, the slots in the originally-booked
+  room stay `:booked` for the rest of that window. Reclaiming them would return
+  real capacity, but only if it is certain the patient will not come back to
+  that room — a policy question worth deciding deliberately rather than by
+  default.
