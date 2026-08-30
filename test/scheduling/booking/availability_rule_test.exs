@@ -217,6 +217,34 @@ defmodule Scheduling.Booking.AvailabilityRuleTest do
   end
 
   describe "retiring" do
+    test "a rule that has not started yet can still be retired" do
+      # Found by the /availability screen. The changeset refuses an
+      # effective_until before the effective_from, so retiring a future-dated
+      # rule "today" failed validation — and silently, since the caller gets an
+      # error changeset it may not inspect. Clamping forward keeps the dates
+      # coherent; the rule is deactivated either way.
+      office = office_fixture()
+
+      {:ok, rule} =
+        Booking.create_availability_rule(valid_attrs(office, %{effective_from: ~D[2099-01-01]}))
+
+      assert {:ok, retired} = Booking.retire_availability_rule(rule, Date.utc_today())
+
+      refute retired.active
+      assert retired.effective_until == ~D[2099-01-01]
+      refute AvailabilityRule.applies_on?(retired, ~D[2099-01-04])
+    end
+
+    test "a retire date after the start is used as given" do
+      office = office_fixture()
+
+      {:ok, rule} =
+        Booking.create_availability_rule(valid_attrs(office, %{effective_from: ~D[2026-09-01]}))
+
+      assert {:ok, retired} = Booking.retire_availability_rule(rule, ~D[2026-10-15])
+      assert retired.effective_until == ~D[2026-10-15]
+    end
+
     test "bounds the rule instead of deleting it, so old slots stay explicable" do
       office = office_fixture()
       {:ok, rule} = Booking.create_availability_rule(valid_attrs(office))

@@ -92,6 +92,10 @@ would silently rewrite what the calendar meant last month, and orphan the slots
 already generated from it. `delete_availability_rule/1` exists for a rule
 created in error, not for a schedule change.
 
+Retiring clamps the date forward to the rule's own `effective_from`: a rule
+scheduled to start next month cannot end today, and without clamping the write
+failed validation silently. The rule is deactivated either way.
+
 **A trailing part-slot is dropped, not rounded up.** A 09:00–17:00 window with
 50-minute slots yields nine whole slots and a 30-minute remainder; the
 remainder is discarded. A short slot is one an appointment cannot fit into, and
@@ -166,6 +170,31 @@ A periodic job tops the horizon up. It checks whether any availability rules
 exist **once, at boot** — adding the very first rule to a running system will
 not start it, so generate by hand or restart. The alternative was a timer that
 exists only to discover it has nothing to do.
+
+## The `/availability` screen
+
+Admin-gated, alongside the other catalog screens. Lists rules per office with
+their local window, slot length, effective range and the slots each yields;
+creates and edits through the shared inline-form pattern; and retires through
+the confirm dialog. Retired rules stay listed — a retired rule is the
+explanation for slots that already exist.
+
+Four things it cannot yet do, worth knowing before BK-8 proper:
+
+- **It cannot say what a change costs.** The edit callout warns that existing
+  slots are not revised, but not *which* ones. Saying "this leaves 47 open
+  slots on Mondays after 15:00" needs a slot-counting context function that
+  does not exist yet.
+- **It cannot show whether a rule produced anything.** A new rule generates
+  nothing until the next horizon run — and on a system with no rules at all,
+  the keeper never starts. The flash says slots arrive "on the next horizon
+  run", which is optimistic in exactly that case.
+- **It will happily create an overlap.** Generation detects colliding start
+  instants and resolves them lowest-rule-id-first, but nothing warns at write
+  time.
+- **Retirement is always "from today".** Scheduling one for a future date —
+  "this room closes at the end of the month" — is the common real case and
+  needs a date picker.
 
 ## Duration
 

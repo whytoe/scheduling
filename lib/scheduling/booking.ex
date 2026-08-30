@@ -75,11 +75,25 @@ defmodule Scheduling.Booking do
 
   Deleting a rule outright would orphan generated slots and erase why they
   exist; `delete_availability_rule/1` is there for a rule created in error.
+
+  `on` is **clamped forward to the rule's own `effective_from`**. A rule
+  scheduled to start next month cannot end today — the changeset refuses an
+  `effective_until` before the `effective_from`, so without this, retiring a
+  future-dated rule fails validation. The rule is deactivated either way
+  (`AvailabilityRule.applies_on?/2` short-circuits on `active`), so clamping
+  keeps the dates coherent without changing the outcome.
+
+  Retiring "as of" a date is a statement about when the rule stops applying,
+  not a claim that it ever applied before then.
   """
   @spec retire_availability_rule(AvailabilityRule.t(), Date.t()) ::
           {:ok, AvailabilityRule.t()} | {:error, Ecto.Changeset.t()}
   def retire_availability_rule(%AvailabilityRule{} = rule, %Date{} = on) do
-    update_availability_rule(rule, %{effective_until: on, active: false})
+    update_availability_rule(rule, %{effective_until: clamp_retire_date(rule, on), active: false})
+  end
+
+  defp clamp_retire_date(%AvailabilityRule{effective_from: from}, on) do
+    if Date.compare(on, from) == :lt, do: from, else: on
   end
 
   @doc "Deletes a rule. For one created in error — prefer `retire_availability_rule/2`."

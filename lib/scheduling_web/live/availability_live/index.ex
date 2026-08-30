@@ -172,16 +172,10 @@ defmodule SchedulingWeb.AvailabilityLive.Index do
     }
   end
 
-  # Retiring bounds the rule with `effective_until`, and the changeset refuses
-  # an `effective_until` before the `effective_from` — so a rule scheduled to
-  # start next month cannot be retired "today". Bound it at its own start date
-  # instead: it is deactivated either way (`applies_on?/2` short-circuits on
-  # `active`), and the dates stay coherent rather than the write silently
-  # failing validation.
-  defp retire_on(%AvailabilityRule{effective_from: from}) do
-    today = Date.utc_today()
-    if Date.compare(today, from) == :lt, do: from, else: today
-  end
+  # `Booking.retire_availability_rule/2` clamps forward to the rule's own
+  # `effective_from`, so a future-dated rule retires cleanly without the screen
+  # having to know that.
+  defp retire_on(_rule), do: Date.utc_today()
 
   defp day_name(day), do: Map.get(@day_names, day, "—")
 
