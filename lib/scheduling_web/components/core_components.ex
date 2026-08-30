@@ -485,10 +485,18 @@ defmodule SchedulingWeb.CoreComponents do
 
   # Lifecycle + outcome status vocabulary (single source for color + icon + text).
   @status_meta %{
+    # Queue lifecycle.
     "waiting" => {"waiting", "hero-clock", "Waiting"},
     "assigned" => {"assigned", "hero-arrow-right-circle", "Assigned"},
     "in_service" => {"active", "hero-bolt", "In service"},
     "completed" => {"success", "hero-check-circle", "Completed"},
+    # Appointment lifecycle. `completed` is shared with the queue above — an
+    # appointment and the entry it produced finish in the same state, and
+    # giving it two spellings would put two badges on one idea.
+    "booked" => {"assigned", "hero-calendar-days", "Booked"},
+    "arrived" => {"waiting", "hero-hand-raised", "Arrived"},
+    "cancelled" => {"neutral", "hero-x-circle", "Cancelled"},
+    # Routing and compliance outcomes.
     "no_eligible" => {"attention", "hero-exclamation-triangle", "No eligible office"},
     "compliance_failed" => {"error", "hero-shield-exclamation", "Compliance failed"},
     "compliance_unavailable" => {"neutral", "hero-signal-slash", "Compliance unavailable"},
@@ -499,10 +507,17 @@ defmodule SchedulingWeb.CoreComponents do
   @doc """
   PATTERN 1 — Status badge. Always renders color + icon + text (color-blind safe).
 
-  `status` is one of the lifecycle/outcome keys (`waiting`, `assigned`,
-  `in_service`, `completed`, `no_eligible`, `compliance_failed`,
-  `compliance_unavailable`, `intake_unreachable`, `sensitive`). Pass `label` to
-  override the default text (e.g. `→ Room 3`).
+  `status` is one of the lifecycle/outcome keys:
+
+    * queue — `waiting`, `assigned`, `in_service`, `completed`
+    * appointment — `booked`, `arrived`, `cancelled`, `completed`
+    * outcomes — `no_eligible`, `compliance_failed`, `compliance_unavailable`,
+      `intake_unreachable`, `sensitive`
+
+  Pass `label` to override the default text (e.g. `→ Room 3`). An unrecognised
+  status falls back to `waiting`'s styling, so a new state added to a schema
+  without a matching entry here renders plausibly rather than crashing — and
+  looks wrong enough to notice.
   """
   attr :status, :string, required: true
   attr :label, :string, default: nil

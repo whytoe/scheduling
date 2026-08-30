@@ -39,6 +39,16 @@ with HEEx + Tailwind 4 + DaisyUI 5 — no client framework.
 Built as HEEx function components; screens compose them.
 
 1. **`status_badge`** — color + icon + text, always all three (color-blind safe).
+   Its vocabulary spans three families: queue lifecycle (`waiting`, `assigned`,
+   `in_service`, `completed`), appointment lifecycle (`booked`, `arrived`,
+   `cancelled`, `completed`), and outcomes (`no_eligible`,
+   `compliance_failed`, `compliance_unavailable`, `intake_unreachable`,
+   `sensitive`). `completed` is shared between the first two on purpose — an
+   appointment and the entry it produced finish in the same state, and giving
+   that two spellings would put two badges on one idea. **Add new states here
+   rather than mapping to the nearest tone in a screen**; a caller that picks
+   its own approximation is how `cancelled` ended up borrowing
+   `compliance_unavailable`'s styling.
 2. **Patient card** (`.pcard`) — one structure, Board + Queue densities; priority
    is a numeric chip (`priority_tag`), not a hue; selection = ring + tint.
 3. **`office_card`** — segmented load meter (used / incoming-hatched / free),

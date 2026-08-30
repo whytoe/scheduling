@@ -174,7 +174,28 @@ defmodule SchedulingWeb.AppointmentLiveTest do
 
       # One eligible office, so committed — and "committed" alone tells an
       # operator nothing.
-      assert html =~ "only this room can provide it"
+      assert html =~ "Only this room can provide it"
+      assert html =~ ctx.office.name
+    end
+
+    test "does not name a room for a provisional appointment", %{conn: conn} do
+      # The room holding the slots is where the *time* is reserved, not where
+      # the patient will go — the matcher may send them elsewhere on arrival,
+      # and those differ precisely when binding is provisional. Naming it would
+      # invite someone to walk the patient to the wrong room.
+      ctx = bookable()
+      second = office_fixture([ctx.cap.id], "Second Room")
+      slots_for(second, 4)
+
+      appointment = book!(ctx)
+      assert appointment.binding == :provisional
+
+      {:ok, _live, html} = live(operator(conn), ~p"/appointments")
+
+      assert html =~ "Decided on arrival"
+      assert html =~ "Several rooms can"
+      refute html =~ ctx.office.name
+      refute html =~ second.name
     end
 
     test "filters by status", %{conn: conn} do
