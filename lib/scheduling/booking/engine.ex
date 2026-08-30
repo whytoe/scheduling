@@ -199,6 +199,62 @@ defmodule Scheduling.Booking.Engine do
     released
   end
 
+  @doc """
+  Candidate start times for a service in a window — what a booking screen needs
+  to offer someone a choice.
+
+  `book/1` deliberately takes the *earliest* qualifying run, which is right for
+  a machine caller and useless for a human choosing between 10:00 and 14:00.
+  This returns every start where a run would fit, per office.
+
+  Same rules as booking: contiguity, service duration, eligible offices only.
+  It is a **preview**, not a hold — anything listed can be taken before the
+  operator clicks, and `book/1` is still the thing that decides.
+
+  Opts: `:from`, `:to`, `:limit` (default 50).
+  """
+  @spec available_starts(map(), keyword()) ::
+          {:ok, [%{office_id: integer(), starts_at: DateTime.t()}]} | {:error, error()}
+  def available_starts(attrs, opts \\ []) do
+    attrs = normalise(attrs)
+
+    with {:ok, capabilities} <- resolve_capabilities(attrs),
+         {:ok, offices, _binding} <- resolve_binding(capabilities) do
+      from = opts[:from] || DateTime.utc_now()
+      needed_seconds = service_seconds(attrs)
+
+      starts =
+        offices
+        |> Enum.map(& &1.id)
+        |> open_slots_between(from, opts[:to])
+        |> Enum.group_by(& &1.office_id)
+        |> Enum.flat_map(fn {office_id, slots} ->
+          slots
+          |> Enum.sort_by(& &1.starts_at, DateTime)
+          |> runs_from_each_start()
+          |> Enum.filter(&take_contiguous(&1, needed_seconds))
+          |> Enum.map(&%{office_id: office_id, starts_at: hd(&1).starts_at})
+        end)
+        |> Enum.sort_by(& &1.starts_at, DateTime)
+        |> Enum.take(opts[:limit] || 50)
+
+      {:ok, starts}
+    end
+  end
+
+  defp open_slots_between(office_ids, from, nil), do: open_slots_from(office_ids, from)
+
+  defp open_slots_between(office_ids, from, to) do
+    Slot
+    |> where(
+      [s],
+      s.office_id in ^office_ids and s.status == :open and
+        s.starts_at >= ^from and s.starts_at < ^to
+    )
+    |> order_by([s], asc: s.office_id, asc: s.starts_at)
+    |> Repo.all()
+  end
+
   # --- 1. the service ---------------------------------------------------------
 
   defp resolve_capabilities(%{required_capability_ids: ids}) when is_list(ids) do

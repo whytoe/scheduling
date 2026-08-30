@@ -220,6 +220,13 @@ defmodule Scheduling.Booking do
   defdelegate reschedule_appointment(appointment, opts \\ []), to: Engine, as: :reschedule
 
   @doc """
+  Candidate start times for a service in a window — a preview for a booking
+  screen, not a hold. See `Scheduling.Booking.Engine.available_starts/2`.
+  """
+  @spec available_starts(map(), keyword()) :: {:ok, [map()]} | {:error, Engine.error()}
+  defdelegate available_starts(attrs, opts \\ []), to: Engine
+
+  @doc """
   Records a booked patient arriving — opens a visit, queues them, and for a
   committed appointment assigns the room. See `Scheduling.Booking.Arrival`.
   """
