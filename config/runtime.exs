@@ -116,6 +116,13 @@ config :scheduling, Scheduling.Core,
   scopes: comma_list.("CORE_SCOPES", "core:patients:read,core:organizations:read"),
   http_timeout_ms: String.to_integer(System.get_env("CORE_HTTP_TIMEOUT_MS", "5000"))
 
+# Booking's rolling slot horizon. Sixty days is far enough to book a couple of
+# months out and short enough that a schedule change does not strand a year of
+# stale slots — nothing prunes them, so the horizon is also the blast radius of
+# a mistake. See docs/booking.md.
+config :scheduling, Scheduling.Booking,
+  horizon_days: String.to_integer(System.get_env("BOOKING_HORIZON_DAYS", "60"))
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

@@ -105,6 +105,68 @@ availability and nobody would know why.
 `day_of_week` is 1–7 matching `Date.day_of_week/1`, so generation can compare
 directly. A different convention here would shift every rule by a day.
 
+## Slots
+
+Rules expand into concrete slots across a rolling horizon
+(`BOOKING_HORIZON_DAYS`, default 60). Slots carry a status — `:open`,
+`:blocked` or `:booked`. Blocked and booked are distinct on purpose: a room
+closed for cleaning and a room that is full are different facts, and
+collapsing them would make one look like the other on a calendar.
+
+A unique index on `(office_id, starts_at)` backs the whole thing: an office
+cannot have two slots beginning at the same instant.
+
+### A slot's start is a wall time; its length is not
+
+This is the subtlety that makes DST handling correct, and it is easy to get
+wrong in a way that looks fine for eleven months.
+
+A rule says "09:00" in the office's local time, so the **start** resolves
+through the timezone. The **end** is then simply start + `slot_minutes` as an
+absolute duration — *not* a second wall-time conversion.
+
+Resolving the end as a wall time discards real capacity. On spring-forward day
+a 01:00–02:00 slot has an end ("02:00 local") that never happens, so the slot
+gets thrown away — but it is a genuine attendable hour, 06:00Z to 07:00Z.
+Treating length as absolute keeps it, and confines DST handling to one decision
+instead of two.
+
+### The two transitions
+
+- **Spring forward** — the local start does not exist (`{:gap, _, _}`). Those
+  slots are skipped: nobody can attend a time that never happens.
+- **Fall back** — the local start happens twice (`{:ambiguous, first, second}`).
+  We take the **first**. Generating both would double a room's capacity for an
+  hour; this loses an hour of real capacity once a year per office, which is
+  the better of the two errors but is not free.
+
+### Generation is additive
+
+Regeneration never destroys a `:booked` or `:blocked` slot — that is the
+property that matters most, since silently dropping a booked slot would cancel
+an appointment with nothing to show for it. Running it twice is a no-op.
+
+**Nothing prunes.** Shortening a rule's window leaves its already-generated
+slots in place, still open and bookable. Retiring the rule and writing a new
+one is the supported path. A prune would have to be strictly `:open`-only —
+a predicate slightly wrong there deletes booked slots — so it is deliberately
+absent rather than half-done.
+
+### Overlapping rules
+
+Two rules for one office producing the same start instant is a data-entry
+error, and it is detected before insertion rather than absorbed by the unique
+index. Absorbing works, but hides the mistake behind behaviour that looks
+correct. The lowest rule id wins, deterministically, so regeneration does not
+reshuffle the calendar; the conflict is reported and logged.
+
+### The horizon keeper
+
+A periodic job tops the horizon up. It checks whether any availability rules
+exist **once, at boot** — adding the very first rule to a running system will
+not start it, so generate by hand or restart. The alternative was a timer that
+exists only to discover it has nothing to do.
+
 ## Duration
 
 Slot length comes from the availability rule; **service length comes from the
