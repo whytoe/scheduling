@@ -715,6 +715,296 @@ defmodule SchedulingWeb.Schemas do
     })
   end
 
+  defmodule Appointment do
+    @moduledoc """
+    A patient booked into a run of consecutive slots on one office.
+
+    Carries the **resolved equipment requirement** and never the service that
+    implied it — see the `required_capabilities` and `binding` descriptions.
+    """
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "Appointment",
+      type: :object,
+      properties: %{
+        id: %Schema{type: :integer},
+        status: %Schema{
+          type: :string,
+          enum: ["booked", "arrived", "completed", "cancelled"],
+          description: "Lifecycle status"
+        },
+        binding: %Schema{
+          type: :string,
+          enum: ["committed", "provisional"],
+          description:
+            "**Derived, not chosen** — it is not a confidence level and does not mean the booking is unconfirmed. " <>
+              "`committed` means exactly one office can provide the required capabilities, so there is no routing " <>
+              "decision left to make and the patient goes straight to that room on arrival. `provisional` means " <>
+              "several offices could serve it, so the best-fit matcher picks one at arrival and **may place the " <>
+              "patient in a different room than the reserved slots suggest**. Both are equally firm reservations of time."
+        },
+        patient_id: %Schema{type: :integer},
+        external_ref: %Schema{
+          type: :string,
+          nullable: true,
+          description:
+            "The caller's idempotency key, echoed back. Booking twice with the same value returns the original appointment."
+        },
+        office_id: %Schema{
+          type: :integer,
+          nullable: true,
+          description:
+            "The office whose slots are reserved. For a `provisional` appointment this is where the time is held, " <>
+              "not a guarantee of where the patient will be seen."
+        },
+        starts_at: %Schema{
+          type: :string,
+          format: :"date-time",
+          nullable: true,
+          description: "Earliest reserved slot's start. Derived from the slots, not stored."
+        },
+        ends_at: %Schema{
+          type: :string,
+          format: :"date-time",
+          nullable: true,
+          description: "Latest reserved slot's end. Derived from the slots, not stored."
+        },
+        required_capabilities: %Schema{
+          type: :array,
+          items: SchedulingWeb.Schemas.Capability,
+          description:
+            "The equipment this appointment needs. Note there is no service or diagnosis field: the service code " <>
+              "is expanded to these at booking and then discarded, so scheduling records what the patient needs " <>
+              "and never why."
+        },
+        inserted_at: %Schema{type: :string, format: :"date-time"},
+        updated_at: %Schema{type: :string, format: :"date-time"}
+      },
+      required: [:id, :status, :binding, :patient_id, :inserted_at, :updated_at]
+    })
+  end
+
+  defmodule AppointmentList do
+    @moduledoc "A list of appointments."
+    require OpenApiSpex
+
+    OpenApiSpex.schema(%{
+      title: "AppointmentList",
+      type: :array,
+      items: SchedulingWeb.Schemas.Appointment
+    })
+  end
+
+  defmodule AppointmentCreateRequest do
+    @moduledoc "Request body for booking an appointment."
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "AppointmentCreateRequest",
+      type: :object,
+      properties: %{
+        appointment: %Schema{
+          type: :object,
+          properties: %{
+            patient_id: %Schema{type: :integer, description: "Patient to book"},
+            service_code: %Schema{
+              type: :string,
+              nullable: true,
+              description:
+                "**The form external callers should use.** Names a routing template by its catalog `code` — a " <>
+                  "stable contract key rather than a row id, and one that may be opaque (`svc_7a2f`). Expanded to " <>
+                  "that template's default capabilities and its duration, which together decide how many consecutive " <>
+                  "slots are reserved; the code itself is **not stored**. Supply this or `required_capability_ids`."
+            },
+            required_capability_ids: %Schema{
+              type: :array,
+              items: %Schema{type: :integer},
+              description:
+                "Explicit equipment requirement, as an alternative to `service_code`. Takes precedence when both " <>
+                  "are given. With no service there is no duration, so a single slot is reserved."
+            },
+            from: %Schema{
+              type: :string,
+              format: :"date-time",
+              nullable: true,
+              description: "Earliest acceptable start. Defaults to now."
+            },
+            external_ref: %Schema{
+              type: :string,
+              nullable: true,
+              description:
+                "Idempotency key. Booking again with the same value returns the original appointment rather than " <>
+                  "creating a second one — safe to retry a request whose response you did not see."
+            }
+          },
+          required: [:patient_id]
+        }
+      },
+      required: [:appointment],
+      example: %{
+        "appointment" => %{
+          "patient_id" => 1,
+          "service_code" => "svc_7a2f",
+          "from" => "2026-09-07T09:00:00Z",
+          "external_ref" => "booking-4821"
+        }
+      }
+    })
+  end
+
+  defmodule AppointmentRescheduleRequest do
+    @moduledoc "Request body for rescheduling. Changes when, never what."
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "AppointmentRescheduleRequest",
+      type: :object,
+      properties: %{
+        appointment: %Schema{
+          type: :object,
+          properties: %{
+            from: %Schema{
+              type: :string,
+              format: :"date-time",
+              nullable: true,
+              description:
+                "Earliest acceptable new start. The appointment keeps its capabilities and its length — the run " <>
+                  "it currently holds is what defines how long it is — and its `binding` is re-derived, since the " <>
+                  "set of offices able to serve it may have changed since it was booked."
+            }
+          }
+        }
+      },
+      required: [:appointment],
+      example: %{"appointment" => %{"from" => "2026-09-07T14:00:00Z"}}
+    })
+  end
+
+  defmodule Slot do
+    @moduledoc "One unit of bookable capacity on an office."
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "Slot",
+      type: :object,
+      properties: %{
+        id: %Schema{type: :integer},
+        office_id: %Schema{type: :integer},
+        availability_rule_id: %Schema{type: :integer, nullable: true},
+        appointment_id: %Schema{
+          type: :integer,
+          nullable: true,
+          description: "Set when the slot is reserved"
+        },
+        starts_at: %Schema{type: :string, format: :"date-time", description: "UTC"},
+        ends_at: %Schema{type: :string, format: :"date-time", description: "UTC"},
+        status: %Schema{
+          type: :string,
+          enum: ["open", "blocked", "booked"],
+          description:
+            "`open` is bookable. `blocked` is withheld — a room closed for cleaning. `booked` is taken. " <>
+              "Blocked and booked are distinct because a closed room and a full one are different facts."
+        },
+        inserted_at: %Schema{type: :string, format: :"date-time"},
+        updated_at: %Schema{type: :string, format: :"date-time"}
+      },
+      required: [:id, :office_id, :starts_at, :ends_at, :status]
+    })
+  end
+
+  defmodule SlotList do
+    @moduledoc "A list of slots."
+    require OpenApiSpex
+
+    OpenApiSpex.schema(%{
+      title: "SlotList",
+      type: :array,
+      items: SchedulingWeb.Schemas.Slot
+    })
+  end
+
+  defmodule BookingConflictError do
+    @moduledoc """
+    Returned with HTTP 409 when the requested time could not be reserved.
+
+    **Both codes are worth retrying**, which is what separates them from the
+    422 booking errors. `slots_taken` means a concurrent booking won the race
+    for the same slots; `no_available_slots` means nothing free was found in
+    the requested window, so retrying with a different `from` may succeed.
+    """
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "BookingConflictError",
+      type: :object,
+      properties: %{
+        error: %Schema{
+          type: :object,
+          properties: %{
+            code: %Schema{type: :string, enum: ["slots_taken", "no_available_slots"]},
+            message: %Schema{type: :string}
+          },
+          required: [:code, :message]
+        }
+      },
+      required: [:error],
+      example: %{
+        "error" => %{
+          "code" => "no_available_slots",
+          "message" => "No run of consecutive open slots long enough for that service"
+        }
+      }
+    })
+  end
+
+  defmodule BookingRejectedError do
+    @moduledoc """
+    Returned with HTTP 422 when the booking can never succeed as asked.
+
+    **None of these are worth retrying** with the same arguments — unlike the
+    409 conflicts. Either the service is unknown, no office can ever provide
+    the capabilities, or the appointment has already been cancelled.
+    """
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "BookingRejectedError",
+      type: :object,
+      properties: %{
+        error: %Schema{
+          type: :object,
+          properties: %{
+            code: %Schema{
+              type: :string,
+              enum: [
+                "unknown_service",
+                "no_eligible_office",
+                "appointment_cancelled",
+                "validation_failed"
+              ]
+            },
+            message: %Schema{type: :string}
+          },
+          required: [:code, :message]
+        }
+      },
+      required: [:error],
+      example: %{
+        "error" => %{
+          "code" => "no_eligible_office",
+          "message" => "No office provides the capabilities this service requires"
+        }
+      }
+    })
+  end
+
   defmodule NoEligibleOfficeError do
     @moduledoc "Returned when accept finds no office that provides the required capabilities AND has free capacity."
     require OpenApiSpex
