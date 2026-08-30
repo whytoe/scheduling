@@ -72,6 +72,39 @@ means an appointment says *this person needs a CT scanner at 2pm*, never *why*.
 Rescheduling moves the time and keeps the capabilities, so nothing needs the
 code again.
 
+## Availability rules
+
+A rule is a recurring weekly statement: *"Room 3, Mondays, 09:00–17:00,
+20-minute slots"*, bounded by `effective_from` / `effective_until`.
+
+Three things about them are worth knowing before writing one.
+
+**Times are the office's local wall time**, stored as `:time` with no offset.
+"09:00" means nine in the morning where the room is, and it must keep meaning
+that across a DST transition. Resolving to an instant happens at generation,
+through the office's timezone. Storing an offset would freeze it at whatever it
+was the day the rule was written.
+
+**A rule is superseded, not edited.** Changing a room's hours means retiring
+the old rule (`Scheduling.Booking.retire_availability_rule/2` sets
+`effective_until` and deactivates it) and writing a new one. Editing in place
+would silently rewrite what the calendar meant last month, and orphan the slots
+already generated from it. `delete_availability_rule/1` exists for a rule
+created in error, not for a schedule change.
+
+**A trailing part-slot is dropped, not rounded up.** A 09:00–17:00 window with
+50-minute slots yields nine whole slots and a 30-minute remainder; the
+remainder is discarded. A short slot is one an appointment cannot fit into, and
+offering it would produce bookings that overrun the window.
+`AvailabilityRule.slot_count/1` is the authority, and it floors.
+
+A rule whose slot length exceeds its window is rejected at write time rather
+than silently generating nothing — otherwise a room would simply never have
+availability and nobody would know why.
+
+`day_of_week` is 1–7 matching `Date.day_of_week/1`, so generation can compare
+directly. A different convention here would shift every rule by a day.
+
 ## Duration
 
 Slot length comes from the availability rule; **service length comes from the
