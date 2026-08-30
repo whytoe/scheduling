@@ -88,24 +88,21 @@ defmodule Scheduling.Booking.BrokenCommitmentTest do
     assert missing == [ctx.cap.name]
   end
 
-  @tag :documents_a_gap
-  test "deleting the capability outright is NOT caught — a separate hole", ctx do
-    # Deleting a capability cascades through appointment_capabilities, so the
-    # appointment stops requiring it rather than becoming unservable. Nothing
-    # is "missing" because nothing is required any more.
+  test "the capability cannot be deleted while this booking needs it", ctx do
+    # This was a documented gap: deleting a capability cascaded through
+    # appointment_capabilities, so the appointment stopped *requiring* it
+    # rather than becoming unservable — a booking made for a CT scan silently
+    # became a booking for nothing, and this scan could not see it, because
+    # nothing is missing when nothing is required.
     #
-    # That is arguably worse than what this scan targets: a booking made for a
-    # CT scan silently becomes a booking for nothing. But it is a different
-    # failure — the requirement vanished, not the room's ability to meet it —
-    # and folding it in here would need a rule that cannot distinguish it from
-    # a legitimate no-capability booking in a single-office deployment.
-    #
-    # Recorded as its own bead rather than half-handled. This test exists so
-    # the behaviour is known, not because it is desirable.
-    {:ok, _} = Catalog.delete_capability(ctx.cap)
+    # Closed in Catalog.delete_capability/1 by refusing instead. The scan was
+    # always the wrong place to catch it; the right place is not letting it
+    # happen.
+    assert {:error, changeset} = Catalog.delete_capability(ctx.cap)
+    assert hd(errors_on(changeset).name) =~ "still required by"
 
+    assert Booking.get_appointment!(ctx.appointment.id).required_capabilities != []
     assert Booking.broken_commitments() == []
-    assert Booking.get_appointment!(ctx.appointment.id).required_capabilities == []
   end
 
   test "names only the capabilities actually missing", ctx do

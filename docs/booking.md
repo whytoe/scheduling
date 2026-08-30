@@ -69,14 +69,21 @@ Deleting an office cascades to its slots, so the appointment ends up holding
 none. That is the same problem reached differently and is reported with an
 empty missing-list, phrased as "the room it was booked into is gone".
 
-> **A related gap this does *not* cover.** Deleting a *capability* cascades
-> through `appointment_capabilities`, so the appointment stops requiring it
-> rather than becoming unservable — a booking made for a CT scan silently
-> becomes a booking for nothing. Arguably worse, but it is a different failure
-> (the requirement vanished, not the room's ability to meet it), and no rule
-> here can distinguish it from a legitimate no-capability booking in a
-> single-office deployment. Left as its own bead rather than half-handled;
-> `broken_commitment_test.exs` pins the current behaviour so it is known.
+**A related failure, closed at the source instead.** Deleting a *capability*
+cascades through `appointment_capabilities` and `queue_entry_capabilities`. So
+it does not make a booking unservable — it makes it require **nothing**. A
+booking made for a CT scan silently becomes a booking for nothing, and a
+waiting patient's requirement vanishes so the matcher will route them anywhere.
+Neither fails. Neither is visible. This scan cannot see it either, because
+nothing is missing when nothing is required.
+
+`Scheduling.Catalog.delete_capability/1` therefore **refuses** while a live
+appointment (`:booked` or `:arrived`) or an unfinished queue entry requires it,
+returning a changeset error naming what is in the way.
+
+Cascading is still right for the *catalog* joins — an office or a routing
+template simply stops offering it, and nothing about a patient changes. The
+line is patient-attached data, not references in general.
 
 ## What an appointment does *not* store
 
