@@ -23,6 +23,9 @@ defmodule Scheduling.Application do
         # Caches scheduling's own client-credentials token for calling ac-core.
         # nil unless core credentials are configured.
         Scheduling.Auth.ServiceToken.child_spec_if_enabled(),
+        # Keeps the rolling slot horizon topped up. nil when there are no
+        # availability rules — nothing to generate from.
+        Scheduling.Booking.HorizonKeeper.child_spec_if_enabled(),
         # Start to serve requests, typically the last entry
         SchedulingWeb.Endpoint
       ]

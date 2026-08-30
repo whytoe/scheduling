@@ -2,9 +2,9 @@ defmodule Scheduling.Booking do
   @moduledoc """
   Booking: what is bookable, and (later) what has been booked.
 
-  Today this covers **availability rules** — the recurring weekly patterns that
-  slot generation expands into concrete instants. Slots and appointments follow;
-  see `docs/booking.md` for the whole shape.
+  Today this covers **availability rules** — the recurring weekly patterns —
+  and the **slots** they expand into. Appointments follow; see
+  `docs/booking.md` for the whole shape.
 
   Booking sits beside the live-queue engine rather than replacing it. A booking
   reserves time; the matcher still decides which room, unless the service is
@@ -13,6 +13,8 @@ defmodule Scheduling.Booking do
   import Ecto.Query, warn: false
 
   alias Scheduling.Booking.AvailabilityRule
+  alias Scheduling.Booking.Slot
+  alias Scheduling.Booking.SlotGenerator
   alias Scheduling.Repo
 
   @doc """
@@ -104,11 +106,98 @@ defmodule Scheduling.Booking do
     |> Enum.filter(&AvailabilityRule.applies_on?(&1, date))
   end
 
+  # --- slots -----------------------------------------------------------------
+
+  @default_horizon_days 60
+
+  @doc """
+  How many days ahead the rolling horizon is kept topped up.
+
+  Configure with `config :scheduling, Scheduling.Booking, horizon_days: n`.
+  Sixty days is far enough to book a couple of months out and short enough
+  that a schedule change does not leave a year of stale slots behind — nothing
+  prunes them (see `Scheduling.Booking.SlotGenerator`), so the horizon is also
+  the blast radius of a mistake.
+  """
+  @spec horizon_days() :: pos_integer()
+  def horizon_days do
+    Application.get_env(:scheduling, __MODULE__, [])[:horizon_days] || @default_horizon_days
+  end
+
+  @doc """
+  Lists slots.
+
+  Opts: `:office_id`, `:status` (atom or list), `:from` / `:to` (`DateTime`
+  bounds on `starts_at`, `from` inclusive and `to` exclusive).
+  """
+  @spec list_slots(keyword()) :: [Slot.t()]
+  def list_slots(opts \\ []) do
+    Slot
+    |> filter_slots_by_office(Keyword.get(opts, :office_id))
+    |> filter_by_status(Keyword.get(opts, :status))
+    |> filter_from(Keyword.get(opts, :from))
+    |> filter_to(Keyword.get(opts, :to))
+    |> order_by([s], asc: s.starts_at, asc: s.office_id)
+    |> Repo.all()
+  end
+
+  @doc "Fetches a slot. Raises if missing."
+  @spec get_slot!(term()) :: Slot.t()
+  def get_slot!(id), do: Repo.get!(Slot, id)
+
+  @doc """
+  Generates slots for one office across a date range, inclusive.
+
+  Additive and idempotent — see `Scheduling.Booking.SlotGenerator` for what
+  that guarantees and what it deliberately does not do.
+  """
+  @spec generate_slots(Scheduling.Offices.Office.t(), Date.t(), Date.t()) ::
+          SlotGenerator.result()
+  defdelegate generate_slots(office, from, to), to: SlotGenerator, as: :generate_for_office
+
+  @doc "Generates slots for every office across a date range, inclusive."
+  @spec generate_all_slots(Date.t(), Date.t()) :: SlotGenerator.result()
+  defdelegate generate_all_slots(from, to), to: SlotGenerator, as: :generate_all
+
+  @doc "Tops the rolling horizon up: today through `horizon_days/0` ahead."
+  @spec generate_horizon() :: SlotGenerator.result()
+  defdelegate generate_horizon(), to: SlotGenerator
+
+  @doc """
+  Withholds a slot from booking — a room closed for cleaning, a one-off
+  absence.
+
+  Refuses a booked slot: cancel the appointment first. See
+  `Scheduling.Booking.Slot.block_changeset/1`.
+  """
+  @spec block_slot(Slot.t()) :: {:ok, Slot.t()} | {:error, Ecto.Changeset.t()}
+  def block_slot(%Slot{} = slot), do: slot |> Slot.block_changeset() |> Repo.update()
+
+  @doc "Returns a blocked slot to `:open`. Refuses a booked slot."
+  @spec unblock_slot(Slot.t()) :: {:ok, Slot.t()} | {:error, Ecto.Changeset.t()}
+  def unblock_slot(%Slot{} = slot), do: slot |> Slot.unblock_changeset() |> Repo.update()
+
   defp filter_by_office(query, nil), do: query
   defp filter_by_office(query, office_id), do: where(query, [r], r.office_id == ^office_id)
 
   defp filter_by_active(query, nil), do: query
   defp filter_by_active(query, active), do: where(query, [r], r.active == ^active)
+
+  defp filter_slots_by_office(query, nil), do: query
+  defp filter_slots_by_office(query, office_id), do: where(query, [s], s.office_id == ^office_id)
+
+  defp filter_by_status(query, nil), do: query
+
+  defp filter_by_status(query, statuses) when is_list(statuses),
+    do: where(query, [s], s.status in ^statuses)
+
+  defp filter_by_status(query, status), do: where(query, [s], s.status == ^status)
+
+  defp filter_from(query, nil), do: query
+  defp filter_from(query, %DateTime{} = from), do: where(query, [s], s.starts_at >= ^from)
+
+  defp filter_to(query, nil), do: query
+  defp filter_to(query, %DateTime{} = to), do: where(query, [s], s.starts_at < ^to)
 
   defp preload_office({:ok, rule}), do: {:ok, Repo.preload(rule, :office)}
   defp preload_office(other), do: other
