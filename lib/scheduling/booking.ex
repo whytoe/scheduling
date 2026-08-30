@@ -203,6 +203,21 @@ defmodule Scheduling.Booking do
   @spec book(map()) :: {:ok, Appointment.t()} | {:error, Engine.error()}
   defdelegate book(attrs), to: Engine
 
+  @doc """
+  Cancels an appointment and releases its slots. Idempotent — see
+  `Scheduling.Booking.Engine`.
+  """
+  @spec cancel_appointment(Appointment.t()) :: {:ok, Appointment.t()} | {:error, term()}
+  defdelegate cancel_appointment(appointment), to: Engine, as: :cancel
+
+  @doc """
+  Moves an appointment to a new run of slots, keeping its capabilities and
+  re-deriving its binding.
+  """
+  @spec reschedule_appointment(Appointment.t(), keyword()) ::
+          {:ok, Appointment.t()} | {:error, Engine.error()}
+  defdelegate reschedule_appointment(appointment, opts \\ []), to: Engine, as: :reschedule
+
   @doc "Fetches an appointment with patient, slots and capabilities preloaded."
   @spec get_appointment!(term()) :: Appointment.t()
   def get_appointment!(id) do

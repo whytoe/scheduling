@@ -48,6 +48,21 @@ defmodule Scheduling.Booking.Engine do
 
   Everything happens inside `Ecto.Multi`, so a refused booking leaves no
   appointment row and no half-reserved slots.
+
+  ## Releasing is the inverse, and fails differently
+
+  `cancel/1` and `reschedule/2` hand slots back. That is not a compare-and-swap:
+  nobody contends for slots this appointment already owns, so `WHERE
+  appointment_id = $1` is sufficient and matching zero rows is fine — it means
+  the release already happened, which makes cancelling idempotent.
+
+  The failure mode is the opposite of double-booking and quieter for it. A
+  release that does not happen **strands** capacity: slots stay `:booked`
+  against an appointment that no longer wants them, and the room silently
+  offers less than it has. Nobody gets an error; the calendar just shrinks. So
+  release and the status change are one transaction, and rescheduling searches
+  for its new run **after** releasing the old — which also lets an appointment
+  move to an overlapping time, since its own slots are open again by then.
   """
   import Ecto.Query, warn: false
 
@@ -94,12 +109,91 @@ defmodule Scheduling.Booking.Engine do
          :new <- existing,
          {:ok, capabilities} <- resolve_capabilities(attrs),
          {:ok, offices, binding} <- resolve_binding(capabilities),
-         {:ok, run} <- find_run(offices, capabilities, attrs) do
+         {:ok, run} <- find_run(offices, service_seconds(attrs), attrs[:from]) do
       reserve(run, capabilities, binding, attrs)
     else
       {:already_booked, appointment} -> {:ok, appointment}
       {:error, reason} -> {:error, reason}
     end
+  end
+
+  @doc """
+  Cancels an appointment and hands its slots back.
+
+  Idempotent: cancelling an already-cancelled appointment succeeds and releases
+  nothing, because there is nothing left to release.
+  """
+  @spec cancel(Appointment.t()) :: {:ok, Appointment.t()} | {:error, term()}
+  def cancel(%Appointment{} = appointment) do
+    Multi.new()
+    |> Multi.run(:released, fn repo, _ -> {:ok, release_slots(repo, appointment.id)} end)
+    |> Multi.update(:appointment, Appointment.changeset(appointment, %{status: :cancelled}))
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{appointment: cancelled}} -> {:ok, reload(cancelled)}
+      {:error, _step, reason, _changes} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Moves an appointment to a new run of slots.
+
+  Keeps its capabilities — rescheduling changes *when*, not *what*, so the
+  service code is never needed again. The binding is **re-derived**, because
+  the set of offices able to serve those capabilities may have changed since
+  the booking was made.
+
+  Opts: `:from` — earliest acceptable new start; defaults to now.
+
+  The old slots are released first, inside the transaction, so an appointment
+  can move to a time that overlaps its current one. If no new run can be found
+  the whole thing rolls back and the appointment keeps the slots it had.
+  """
+  @spec reschedule(Appointment.t(), keyword()) :: {:ok, Appointment.t()} | {:error, error()}
+  def reschedule(appointment, opts \\ [])
+
+  def reschedule(%Appointment{status: :cancelled}, _opts), do: {:error, :appointment_cancelled}
+
+  def reschedule(%Appointment{} = appointment, opts) do
+    appointment = Repo.preload(appointment, [:required_capabilities, :slots])
+    capabilities = appointment.required_capabilities
+
+    # Measured now, before the release: the run it currently holds is the only
+    # record of how long this appointment is.
+    needed_seconds = booked_seconds(appointment)
+
+    Multi.new()
+    |> Multi.run(:released, fn repo, _ -> {:ok, release_slots(repo, appointment.id)} end)
+    |> Multi.run(:placement, fn _repo, _ ->
+      with {:ok, offices, binding} <- resolve_binding(capabilities),
+           {:ok, run} <- find_run(offices, needed_seconds, opts[:from]) do
+        {:ok, {run, binding}}
+      end
+    end)
+    |> Multi.run(:claim, fn repo, %{placement: {run, _binding}} ->
+      claim_slots(Enum.map(run, & &1.id), appointment.id, repo)
+    end)
+    |> Multi.run(:appointment, fn repo, %{placement: {_run, binding}} ->
+      appointment
+      |> Appointment.changeset(%{binding: binding})
+      |> repo.update()
+    end)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{appointment: moved}} -> {:ok, reload(moved)}
+      {:error, _step, reason, _changes} -> {:error, reason}
+    end
+  end
+
+  # Not a compare-and-swap: nobody else holds these. Zero rows means the
+  # release already happened, which is what makes cancel/1 idempotent.
+  defp release_slots(repo, appointment_id) do
+    {released, _} =
+      Slot
+      |> where([s], s.appointment_id == ^appointment_id)
+      |> repo.update_all(set: [status: :open, appointment_id: nil])
+
+    released
   end
 
   # --- 1. the service ---------------------------------------------------------
@@ -132,9 +226,8 @@ defmodule Scheduling.Booking.Engine do
 
   # Slot length varies per rule, so "how many slots" is not a division — walk
   # the actual boundaries until the run is long enough.
-  defp find_run(offices, capabilities, attrs) do
-    from = attrs[:from] || DateTime.utc_now()
-    needed_seconds = service_seconds(capabilities, attrs)
+  defp find_run(offices, needed_seconds, from) do
+    from = from || DateTime.utc_now()
 
     offices
     |> Enum.map(& &1.id)
@@ -192,7 +285,7 @@ defmodule Scheduling.Booking.Engine do
     DateTime.diff(last.ends_at, first.starts_at, :second) >= needed_seconds
   end
 
-  defp service_seconds(_capabilities, %{service_code: code}) when is_binary(code) do
+  defp service_seconds(%{service_code: code}) when is_binary(code) do
     case Catalog.fetch_diagnosis_by_code(code) do
       {:ok, %{duration_minutes: minutes}} when is_integer(minutes) -> minutes * 60
       _ -> 0
@@ -201,7 +294,24 @@ defmodule Scheduling.Booking.Engine do
 
   # With an explicit capability list there is no service to take a duration
   # from, so one slot is the unit. Zero seconds is satisfied by the first slot.
-  defp service_seconds(_capabilities, _attrs), do: 0
+  defp service_seconds(_attrs), do: 0
+
+  @doc """
+  How long an appointment currently runs for, in seconds.
+
+  This is how a reschedule knows its own length. The appointment does not store
+  the service code — deliberately, see `Scheduling.Booking.Appointment` — so
+  the duration cannot be looked up again. Its existing run *is* the duration,
+  and it has to be measured before the old slots are released.
+  """
+  @spec booked_seconds(Appointment.t()) :: non_neg_integer()
+  def booked_seconds(%Appointment{slots: slots}) when is_list(slots) and slots != [] do
+    starts_at = slots |> Enum.map(& &1.starts_at) |> Enum.min(DateTime)
+    ends_at = slots |> Enum.map(& &1.ends_at) |> Enum.max(DateTime)
+    DateTime.diff(ends_at, starts_at, :second)
+  end
+
+  def booked_seconds(%Appointment{}), do: 0
 
   # --- 5. reservation ---------------------------------------------------------
 

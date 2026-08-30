@@ -260,6 +260,35 @@ same code path a genuine race takes — and separately assert that a rolled-back
 transaction releases what it claimed, since the two halves of the guarantee
 live in different places.
 
+### Releasing is the inverse, and fails differently
+
+`cancel/1` and `reschedule/2` hand slots back. That is **not** a
+compare-and-swap: nobody contends for slots an appointment already owns, so
+`WHERE appointment_id = $1` suffices, and matching zero rows is fine — it means
+the release already happened, which makes cancelling idempotent.
+
+The failure mode is the opposite of double-booking and quieter for it. A
+release that does not happen **strands** capacity: slots stay `:booked` against
+an appointment that no longer wants them, and the room silently offers less
+than it has. Nobody gets an error; the calendar just shrinks. So release and
+the status change are one transaction, and a failed reschedule rolls back to
+the slots it had.
+
+Rescheduling releases **before** it searches, which is what lets an appointment
+move to a time overlapping its current one — its own slots are open again by
+the time the search runs.
+
+### A reschedule measures itself first
+
+An appointment does not store the service code, so its length cannot be looked
+up again. **The run it currently holds is the duration**, and it has to be
+measured before the old slots are released — `Engine.booked_seconds/1`.
+
+Getting this wrong is silent: a two-hour appointment rescheduled with a
+zero-length requirement takes the first single slot it finds and quietly
+becomes twenty minutes. There is a test that books six slots, moves the
+appointment, and asserts it still holds six.
+
 ## Timezones
 
 Availability rules are written in the office's local time — "Mon–Fri
