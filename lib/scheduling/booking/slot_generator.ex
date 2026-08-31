@@ -141,6 +141,26 @@ defmodule Scheduling.Booking.SlotGenerator do
     generate_all(today, Date.add(today, Booking.horizon_days()))
   end
 
+  @doc """
+  The instants this office's current rules would generate across `from`..`to`.
+
+  Exposed for `Scheduling.Booking.SlotPruner`, which needs exactly the same
+  answer generation uses. Deriving "what should exist" a second way is how a
+  pruner ends up deleting slots that generation would immediately recreate —
+  or worse, keeping ones it should not.
+
+  Gap-skipped candidates are excluded, matching what generation actually
+  writes.
+  """
+  @spec candidate_starts(Office.t(), Date.t(), Date.t()) :: MapSet.t(DateTime.t())
+  def candidate_starts(%Office{} = office, %Date{} = from, %Date{} = to) do
+    {candidates, _skipped} = candidates_for(office, from, to)
+
+    candidates
+    |> Enum.map(& &1.starts_at)
+    |> MapSet.new()
+  end
+
   # --- candidate expansion ---------------------------------------------------
 
   defp candidates_for(%Office{} = office, from, to) do

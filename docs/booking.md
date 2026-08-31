@@ -56,6 +56,35 @@ exact — but the matcher is free to move them at arrival, releasing the slot.
   to intervene before that patient arrives, and the board is where they will
   see it.
 
+`Booking.broken_commitments/0` is a **scan, not an event**. A capability can
+leave an office by several routes — the office is edited, the join is removed,
+the office is deleted entirely — and a hook that catches some of them is worse
+than none, because it looks like coverage. The board runs the scan on every
+load.
+
+It only considers future, still-`:booked` appointments. An arrived one is past
+the point where the room mattered; a cancelled one holds nothing.
+
+Deleting an office cascades to its slots, so the appointment ends up holding
+none. That is the same problem reached differently and is reported with an
+empty missing-list, phrased as "the room it was booked into is gone".
+
+**A related failure, closed at the source instead.** Deleting a *capability*
+cascades through `appointment_capabilities` and `queue_entry_capabilities`. So
+it does not make a booking unservable — it makes it require **nothing**. A
+booking made for a CT scan silently becomes a booking for nothing, and a
+waiting patient's requirement vanishes so the matcher will route them anywhere.
+Neither fails. Neither is visible. This scan cannot see it either, because
+nothing is missing when nothing is required.
+
+`Scheduling.Catalog.delete_capability/1` therefore **refuses** while a live
+appointment (`:booked` or `:arrived`) or an unfinished queue entry requires it,
+returning a changeset error naming what is in the way.
+
+Cascading is still right for the *catalog* joins — an office or a routing
+template simply stops offering it, and nothing about a patient changes. The
+line is patient-attached data, not references in general.
+
 ## What an appointment does *not* store
 
 **The service code.** It is a transient input, expanded to the service's
@@ -150,11 +179,50 @@ Regeneration never destroys a `:booked` or `:blocked` slot — that is the
 property that matters most, since silently dropping a booked slot would cancel
 an appointment with nothing to show for it. Running it twice is a no-op.
 
-**Nothing prunes.** Shortening a rule's window leaves its already-generated
-slots in place, still open and bookable. Retiring the rule and writing a new
-one is the supported path. A prune would have to be strictly `:open`-only —
-a predicate slightly wrong there deletes booked slots — so it is deliberately
-absent rather than half-done.
+### Pruning
+
+Generation being additive is only half the story: shortening a rule's window,
+or retiring one, would otherwise leave its slots in place, still open and
+bookable, with a room offering times it no longer works.
+`Scheduling.Booking.SlotPruner` removes them.
+
+**It only ever deletes an unbooked, unblocked slot**, and that is enforced
+twice — `status == :open` *and* `is_nil(appointment_id)`, in SQL, both when
+selecting candidates and again at the point of deletion. A `:booked` slot must
+survive even when the rules stopped producing it, because deleting one cancels
+somebody's appointment with no record and no message. A `:blocked` slot must
+survive because it was withheld deliberately.
+
+The second guard is redundant while `book/1` writes status and
+`appointment_id` together. It stays because "redundant" and "load-bearing the
+moment that changes" are the same thing here.
+
+That safety argument is what makes pruning safe to run **automatically**, which
+it does after each horizon run (`BOOKING_PRUNE_STALE_SLOTS`, default on).
+Everything it can remove is unbooked capacity the current rules do not justify,
+so a rule deactivated by mistake costs a regeneration, not an appointment.
+
+### The empty-rules guard
+
+One case that argument does *not* cover, and which only became dangerous once
+pruning ran on a schedule: if an office's rules produce **no** candidates at
+all, every open slot in the horizon is "stale".
+
+"The rules justify nothing" and "we failed to read the rules" produce the same
+empty set, and the safe reading is the second. So an office with zero
+candidates is **skipped**, with a warning naming how many slots were spared.
+Booked slots would have survived either way, but nobody could have booked
+anything until the rules came back *and* generation ran.
+
+Clearing a genuinely closed office is therefore deliberate:
+`prune_for_office(office, from, to, allow_empty: true)`. The guard is about
+*no* candidates, not fewer — a shortened window still prunes normally, because
+the rules were clearly readable.
+
+It asks the generator what should exist (`SlotGenerator.candidate_starts/3`)
+rather than deriving it a second way — two answers to "what should be here"
+would drift, and the churn would show up as slots created and deleted on every
+run. A test asserts a prune immediately after a generation deletes nothing.
 
 ### Overlapping rules
 
@@ -229,6 +297,19 @@ right now — there is a test for exactly that.
 
 The default still excludes offices with `intake_capacity` 0, which is correct.
 
+### A requirement must be stated
+
+Booking takes either a `service_code` or a `required_capability_ids` list.
+Supplying **neither** is refused with `:no_service_specified`.
+
+That is not pedantry: an empty requirement is a subset of every office's
+capabilities, so it matches all of them and would quietly reserve the first
+free slot anywhere for an unspecified purpose. Almost always it means the
+caller forgot the code.
+
+An explicit `required_capability_ids: []` *is* honoured, and means "any room
+will do". Omitting the key is not the same statement as passing an empty one.
+
 ### Runs, not slot counts
 
 `slot_minutes` varies per rule, so "how many slots" is not a division. The
@@ -251,6 +332,14 @@ UPDATE slots SET status = 'booked', appointment_id = $1
 means someone took one in between; the transaction rolls back and the caller
 gets `{:error, :slots_taken}`, which is the one error worth retrying.
 
+**`:slots_taken` is currently unreachable in a single-node deployment.**
+`book/1` does the search and the write inside one call, so a competitor either
+loses the search (`:no_available_slots`) or wins it outright — there is no
+window between them for one caller. It becomes reachable the moment two nodes
+run concurrently, which is why it is in the contract and mapped to a 409. Don't
+go hunting for a test that produces it through `book/1`; there isn't one that
+could be written honestly.
+
 `Engine.claim_slots/3` is public because it is the crux, and because it cannot
 be reached through `book/1` in a test: `Ecto.Adapters.SQL.Sandbox` routes every
 process through one connection, so nothing can take a slot in the window
@@ -259,6 +348,74 @@ rigorous and prove nothing. The tests drive `claim_slots/3` directly instead —
 same code path a genuine race takes — and separately assert that a rolled-back
 transaction releases what it claimed, since the two halves of the guarantee
 live in different places.
+
+### Releasing is the inverse, and fails differently
+
+`cancel/1` and `reschedule/2` hand slots back. That is **not** a
+compare-and-swap: nobody contends for slots an appointment already owns, so
+`WHERE appointment_id = $1` suffices, and matching zero rows is fine — it means
+the release already happened, which makes cancelling idempotent.
+
+The failure mode is the opposite of double-booking and quieter for it. A
+release that does not happen **strands** capacity: slots stay `:booked` against
+an appointment that no longer wants them, and the room silently offers less
+than it has. Nobody gets an error; the calendar just shrinks. So release and
+the status change are one transaction, and a failed reschedule rolls back to
+the slots it had.
+
+Rescheduling releases **before** it searches, which is what lets an appointment
+move to a time overlapping its current one — its own slots are open again by
+the time the search runs.
+
+### A reschedule measures itself first
+
+An appointment does not store the service code, so its length cannot be looked
+up again. **The run it currently holds is the duration**, and it has to be
+measured before the old slots are released — `Engine.booked_seconds/1`.
+
+Getting this wrong is silent: a two-hour appointment rescheduled with a
+zero-length requirement takes the first single slot it finds and quietly
+becomes twenty minutes. There is a test that books six slots, moves the
+appointment, and asserts it still holds six.
+
+## Arrival
+
+A booked patient turning up produces the same things a walk-in does — a `Visit`
+and a `QueueEntry` — so the whole existing lifecycle (matching, handoffs,
+completion, the board, the audit log) takes over unchanged. Booking decides
+*when* and *what equipment*; the queue decides everything after the patient is
+through the door.
+
+`queue_entries.appointment_id` records which booking an entry came from, and is
+nil for a walk-in.
+
+**This is the only place the binding does anything.**
+
+- **Committed** — one office could ever serve it, and it holds slots there.
+  The entry is assigned directly and a handoff raised, exactly as
+  `Queue.accept/2` would. Running the matcher would ask a question with one
+  possible answer.
+- **Provisional** — the entry is left `:waiting` and goes through
+  `Queue.accept/2` like any other, so the matcher picks on **live capacity at
+  the moment of arrival** rather than what was true at booking. It may well
+  choose a different room from the one holding the slots; that is the point,
+  and there is a test that fills the booked room and asserts the patient lands
+  elsewhere.
+
+Arriving twice returns the original visit and entry rather than opening a
+second. Being checked in twice at a desk is a routine mistake, not something to
+punish with a duplicate queue entry.
+
+### Slots stay booked on arrival
+
+A committed appointment's slots represent the room's time being spent, and the
+patient is now spending it — releasing them would let a second patient be
+booked into an occupied room.
+
+Provisional slots stay booked too, **even when the matcher sends the patient
+somewhere else**. Releasing them mid-session would hand back capacity the
+original room had notionally set aside. Whether that should be reclaimed is a
+scheduling-policy question, not something to decide implicitly — see Open below.
 
 ## Timezones
 
@@ -294,3 +451,9 @@ the service requires.
   overbooking would need a per-rule allowance.
 - **Provider-level booking.** ac-core has a provider directory. Today booking
   is against rooms and equipment, not people.
+- **Rerouted provisional slots are not reclaimed.** When the matcher sends a
+  provisional patient to a different room, the slots in the originally-booked
+  room stay `:booked` for the rest of that window. Reclaiming them would return
+  real capacity, but only if it is certain the patient will not come back to
+  that room — a policy question worth deciding deliberately rather than by
+  default.

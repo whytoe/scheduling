@@ -148,6 +148,22 @@ This is the same shape as `compliance_ref`, in the other direction: an opaque
 token in, a resolved answer out, and the meaning owned by whichever system
 legitimately holds it.
 
+## Deleting catalog rows
+
+Capability joins cascade. For `office_capabilities` and
+`diagnosis_capabilities` that is correct — an office stops offering something,
+a routing template stops requiring it, and nothing about a patient changes.
+
+For `appointment_capabilities` and `queue_entry_capabilities` it is not.
+Cascading there does not make the work unservable; it makes it require
+**nothing**, silently. `Scheduling.Catalog.delete_capability/1` refuses while
+live work requires the capability, for that reason.
+
+The general shape: **cascading through catalog references is fine, cascading
+through patient-attached references is not.** Anything new that joins a
+capability, an office or a service to a patient row should decide this
+deliberately rather than inheriting `on_delete: :delete_all` by habit.
+
 ## If you need to add clinical data
 
 Don't. Put it in the EMR and reference it by an opaque id, the way

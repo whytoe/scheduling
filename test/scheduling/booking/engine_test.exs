@@ -232,6 +232,68 @@ defmodule Scheduling.Booking.EngineTest do
     end
   end
 
+  describe "available_starts/2" do
+    setup do
+      cap = capability_fixture("CT scanner")
+      a = office_fixture([cap.id])
+      b = office_fixture([cap.id])
+      slots_for(a, 4)
+      slots_for(b, 4)
+      %{cap: cap, a: a, b: b}
+    end
+
+    test "offers every start where a run would fit, not just the earliest", ctx do
+      service = service_fixture([ctx.cap.id], 20)
+
+      {:ok, starts} = Booking.available_starts(%{service_code: service.code}, from: @start)
+
+      # book/1 takes the earliest; a human choosing needs all of them.
+      assert length(starts) == 8
+
+      assert Enum.map(starts, & &1.office_id) |> Enum.uniq() |> Enum.sort() ==
+               Enum.sort([ctx.a.id, ctx.b.id])
+    end
+
+    test "a longer service has fewer viable starts", ctx do
+      service = service_fixture([ctx.cap.id], 40)
+
+      {:ok, starts} = Booking.available_starts(%{service_code: service.code}, from: @start)
+
+      # Four slots per office give three 40-minute runs each.
+      assert length(starts) == 6
+    end
+
+    test "respects the window", ctx do
+      service = service_fixture([ctx.cap.id], 20)
+
+      {:ok, starts} =
+        Booking.available_starts(%{service_code: service.code},
+          from: @start,
+          to: DateTime.add(@start, 40 * 60, :second)
+        )
+
+      assert length(starts) == 4
+      assert Enum.all?(starts, &(DateTime.compare(&1.starts_at, @start) != :lt))
+    end
+
+    test "excludes a booked slot's start", ctx do
+      service = service_fixture([ctx.cap.id], 20)
+      {:ok, _} = book(%{patient_id: patient_fixture().id, service_code: service.code})
+
+      {:ok, starts} = Booking.available_starts(%{service_code: service.code}, from: @start)
+
+      assert length(starts) == 7
+    end
+
+    test "returns nothing rather than erroring when no office is eligible" do
+      other = capability_fixture("MRI")
+      service = service_fixture([other.id], 20)
+
+      assert {:error, :no_eligible_office} =
+               Booking.available_starts(%{service_code: service.code}, from: @start)
+    end
+  end
+
   describe "the data boundary" do
     test "the service code is not stored on the appointment" do
       cap = capability_fixture("CT scanner")
@@ -247,6 +309,31 @@ defmodule Scheduling.Booking.EngineTest do
 
       # What it keeps is the equipment the service implied.
       assert Enum.map(appointment.required_capabilities, & &1.name) == [cap.name]
+    end
+
+    test "a booking with no requirement at all is refused" do
+      # Found by the API work. An empty requirement matches every office, so
+      # this would quietly reserve the first free slot anywhere for an
+      # unspecified purpose. Almost always a caller that forgot the code.
+      cap = capability_fixture("CT scanner")
+      office = office_fixture([cap.id])
+      slots_for(office, 2)
+
+      assert {:error, :no_service_specified} = book(%{patient_id: patient_fixture().id})
+      assert Booking.list_appointments() == []
+      assert Booking.list_slots(status: :booked) == []
+    end
+
+    test "an explicit empty capability list is honoured as 'any room'" do
+      # Distinct from omitting it: the caller has said what they want.
+      cap = capability_fixture("CT scanner")
+      office = office_fixture([cap.id])
+      slots_for(office, 2)
+
+      assert {:ok, appointment} =
+               book(%{patient_id: patient_fixture().id, required_capability_ids: []})
+
+      assert appointment.required_capabilities == []
     end
 
     test "an unknown service code is refused rather than booked blind" do

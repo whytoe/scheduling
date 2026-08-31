@@ -13,6 +13,7 @@ defmodule Scheduling.Booking do
   import Ecto.Query, warn: false
 
   alias Scheduling.Booking.Appointment
+  alias Scheduling.Booking.Arrival
   alias Scheduling.Booking.AvailabilityRule
   alias Scheduling.Booking.Engine
   alias Scheduling.Booking.Slot
@@ -202,6 +203,85 @@ defmodule Scheduling.Booking do
   """
   @spec book(map()) :: {:ok, Appointment.t()} | {:error, Engine.error()}
   defdelegate book(attrs), to: Engine
+
+  @doc """
+  Cancels an appointment and releases its slots. Idempotent — see
+  `Scheduling.Booking.Engine`.
+  """
+  @spec cancel_appointment(Appointment.t()) :: {:ok, Appointment.t()} | {:error, term()}
+  defdelegate cancel_appointment(appointment), to: Engine, as: :cancel
+
+  @doc """
+  Moves an appointment to a new run of slots, keeping its capabilities and
+  re-deriving its binding.
+  """
+  @spec reschedule_appointment(Appointment.t(), keyword()) ::
+          {:ok, Appointment.t()} | {:error, Engine.error()}
+  defdelegate reschedule_appointment(appointment, opts \\ []), to: Engine, as: :reschedule
+
+  @doc """
+  Candidate start times for a service in a window — a preview for a booking
+  screen, not a hold. See `Scheduling.Booking.Engine.available_starts/2`.
+  """
+  @spec available_starts(map(), keyword()) :: {:ok, [map()]} | {:error, Engine.error()}
+  defdelegate available_starts(attrs, opts \\ []), to: Engine
+
+  @doc """
+  Records a booked patient arriving — opens a visit, queues them, and for a
+  committed appointment assigns the room. See `Scheduling.Booking.Arrival`.
+  """
+  @spec arrive(Appointment.t(), keyword()) :: {:ok, Arrival.result()} | {:error, Arrival.error()}
+  defdelegate arrive(appointment, opts \\ []), to: Arrival
+
+  @doc """
+  Committed appointments whose pinned room can no longer serve them.
+
+  A committed appointment is bound to the **only** office that could provide
+  its capabilities. If that office later loses one — someone edits the
+  capability list, or the room is repurposed — the booking becomes
+  unfulfillable, and does so silently: nothing fails until the patient is
+  standing at the desk.
+
+  So this is a *scan*, not an event. There is no hook on capability removal
+  that could catch every path (a capability can be deleted, an office edited,
+  an office-capability join removed), and a check that misses one path is worse
+  than no check because it looks like coverage. The board runs this on every
+  load and raises what it finds.
+
+  Only future, still-booked appointments are returned: an arrived or completed
+  one is already past the point where the room mattered, and a cancelled one
+  holds nothing.
+
+  Returns `{appointment, missing_capability_names}` pairs. `missing` is empty
+  when the appointment has no slots at all — its office was deleted, taking
+  them with it, which is the same problem arrived at differently.
+  """
+  @spec broken_commitments() :: [{Appointment.t(), [String.t()]}]
+  def broken_commitments do
+    Appointment
+    |> where([a], a.binding == :committed and a.status == :booked)
+    |> preload([:patient, :required_capabilities, slots: [office: :capabilities]])
+    |> Repo.all()
+    |> Enum.map(&{&1, missing_capabilities(&1)})
+    |> Enum.reject(fn {_appointment, missing} -> missing == :ok end)
+  end
+
+  # `:ok` rather than `[]` for the healthy case, so "no missing capabilities"
+  # cannot be confused with "an office we could not inspect".
+  defp missing_capabilities(%Appointment{slots: []}), do: []
+
+  defp missing_capabilities(%Appointment{slots: [%{office: office} | _]} = appointment) do
+    provided = MapSet.new(office.capabilities, & &1.id)
+
+    appointment.required_capabilities
+    |> Enum.reject(&MapSet.member?(provided, &1.id))
+    |> case do
+      [] -> :ok
+      missing -> Enum.map(missing, & &1.name)
+    end
+  end
+
+  defp missing_capabilities(%Appointment{}), do: []
 
   @doc "Fetches an appointment with patient, slots and capabilities preloaded."
   @spec get_appointment!(term()) :: Appointment.t()

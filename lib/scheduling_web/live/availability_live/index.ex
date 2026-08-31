@@ -26,6 +26,7 @@ defmodule SchedulingWeb.AvailabilityLive.Index do
 
   alias Scheduling.Booking
   alias Scheduling.Booking.AvailabilityRule
+  alias Scheduling.Booking.HorizonKeeper
   alias Scheduling.Offices
 
   @day_names %{
@@ -107,7 +108,8 @@ defmodule SchedulingWeb.AvailabilityLive.Index do
          |> put_flash(
            :info,
            "Retired from #{Date.to_iso8601(retired.effective_until)}. " <>
-             "Slots already generated are unchanged."
+             "Its unbooked slots are removed on the next pass; booked and blocked " <>
+             "ones stay."
          )
          |> load_rules()}
 
@@ -122,9 +124,17 @@ defmodule SchedulingWeb.AvailabilityLive.Index do
   defp save_rule(socket, :new, params) do
     case Booking.create_availability_rule(params) do
       {:ok, _rule} ->
+        # Ask for a generation pass now rather than leaving the admin to wait a
+        # day. This is the case the keeper used to miss entirely: the first
+        # rule on a running system started nothing.
+        HorizonKeeper.nudge()
+
         {:noreply,
          socket
-         |> put_flash(:info, "Rule created. Slots generate on the next horizon run.")
+         |> put_flash(
+           :info,
+           "Rule created. Generating slots now — reload in a moment to see them."
+         )
          |> load_rules()
          |> push_patch(to: ~p"/availability")}
 
@@ -136,9 +146,15 @@ defmodule SchedulingWeb.AvailabilityLive.Index do
   defp save_rule(socket, :edit, params) do
     case Booking.update_availability_rule(socket.assigns.rule, params) do
       {:ok, _rule} ->
+        HorizonKeeper.nudge()
+
         {:noreply,
          socket
-         |> put_flash(:info, "Rule updated. Slots already generated are unchanged.")
+         |> put_flash(
+           :info,
+           "Rule updated. Generating slots now. Times the rule no longer covers are " <>
+             "removed unless they are already booked or blocked."
+         )
          |> load_rules()
          |> push_patch(to: ~p"/availability")}
 

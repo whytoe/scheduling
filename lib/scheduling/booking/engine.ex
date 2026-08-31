@@ -48,6 +48,21 @@ defmodule Scheduling.Booking.Engine do
 
   Everything happens inside `Ecto.Multi`, so a refused booking leaves no
   appointment row and no half-reserved slots.
+
+  ## Releasing is the inverse, and fails differently
+
+  `cancel/1` and `reschedule/2` hand slots back. That is not a compare-and-swap:
+  nobody contends for slots this appointment already owns, so `WHERE
+  appointment_id = $1` is sufficient and matching zero rows is fine — it means
+  the release already happened, which makes cancelling idempotent.
+
+  The failure mode is the opposite of double-booking and quieter for it. A
+  release that does not happen **strands** capacity: slots stay `:booked`
+  against an appointment that no longer wants them, and the room silently
+  offers less than it has. Nobody gets an error; the calendar just shrinks. So
+  release and the status change are one transaction, and rescheduling searches
+  for its new run **after** releasing the old — which also lets an appointment
+  move to an overlapping time, since its own slots are open again by then.
   """
   import Ecto.Query, warn: false
 
@@ -66,7 +81,8 @@ defmodule Scheduling.Booking.Engine do
   not — asking again with the same arguments gives the same answer.
   """
   @type error ::
-          :unknown_service
+          :no_service_specified
+          | :unknown_service
           | :no_eligible_office
           | :no_available_slots
           | :slots_taken
@@ -76,7 +92,9 @@ defmodule Scheduling.Booking.Engine do
   Books an appointment.
 
   Required: `:patient_id`, and one of `:service_code` or
-  `:required_capability_ids`.
+  `:required_capability_ids`. Supplying neither is refused with
+  `:no_service_specified` — see `resolve_capabilities/1` for why an omitted
+  requirement is not treated as an empty one.
 
   Optional:
 
@@ -94,12 +112,147 @@ defmodule Scheduling.Booking.Engine do
          :new <- existing,
          {:ok, capabilities} <- resolve_capabilities(attrs),
          {:ok, offices, binding} <- resolve_binding(capabilities),
-         {:ok, run} <- find_run(offices, capabilities, attrs) do
+         {:ok, run} <- find_run(offices, service_seconds(attrs), attrs[:from]) do
       reserve(run, capabilities, binding, attrs)
     else
       {:already_booked, appointment} -> {:ok, appointment}
       {:error, reason} -> {:error, reason}
     end
+  end
+
+  @doc """
+  Cancels an appointment and hands its slots back.
+
+  Idempotent: cancelling an already-cancelled appointment succeeds and releases
+  nothing, because there is nothing left to release.
+  """
+  @spec cancel(Appointment.t()) :: {:ok, Appointment.t()} | {:error, term()}
+  def cancel(%Appointment{} = appointment) do
+    Multi.new()
+    |> Multi.run(:released, fn repo, _ -> {:ok, release_slots(repo, appointment.id)} end)
+    |> Multi.update(:appointment, Appointment.changeset(appointment, %{status: :cancelled}))
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{appointment: cancelled}} -> {:ok, reload(cancelled)}
+      {:error, _step, reason, _changes} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Moves an appointment to a new run of slots.
+
+  Keeps its capabilities — rescheduling changes *when*, not *what*, so the
+  service code is never needed again. The binding is **re-derived**, because
+  the set of offices able to serve those capabilities may have changed since
+  the booking was made.
+
+  Opts: `:from` — earliest acceptable new start; defaults to now.
+
+  The old slots are released first, inside the transaction, so an appointment
+  can move to a time that overlaps its current one. If no new run can be found
+  the whole thing rolls back and the appointment keeps the slots it had.
+  """
+  @spec reschedule(Appointment.t(), keyword()) :: {:ok, Appointment.t()} | {:error, error()}
+  def reschedule(appointment, opts \\ [])
+
+  def reschedule(%Appointment{status: :cancelled}, _opts), do: {:error, :appointment_cancelled}
+
+  def reschedule(%Appointment{} = appointment, opts) do
+    appointment = Repo.preload(appointment, [:required_capabilities, :slots])
+    capabilities = appointment.required_capabilities
+
+    # Measured now, before the release: the run it currently holds is the only
+    # record of how long this appointment is.
+    needed_seconds = booked_seconds(appointment)
+
+    Multi.new()
+    |> Multi.run(:released, fn repo, _ -> {:ok, release_slots(repo, appointment.id)} end)
+    |> Multi.run(:placement, fn _repo, _ ->
+      with {:ok, offices, binding} <- resolve_binding(capabilities),
+           {:ok, run} <- find_run(offices, needed_seconds, opts[:from]) do
+        {:ok, {run, binding}}
+      end
+    end)
+    |> Multi.run(:claim, fn repo, %{placement: {run, _binding}} ->
+      claim_slots(Enum.map(run, & &1.id), appointment.id, repo)
+    end)
+    |> Multi.run(:appointment, fn repo, %{placement: {_run, binding}} ->
+      appointment
+      |> Appointment.changeset(%{binding: binding})
+      |> repo.update()
+    end)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{appointment: moved}} -> {:ok, reload(moved)}
+      {:error, _step, reason, _changes} -> {:error, reason}
+    end
+  end
+
+  # Not a compare-and-swap: nobody else holds these. Zero rows means the
+  # release already happened, which is what makes cancel/1 idempotent.
+  defp release_slots(repo, appointment_id) do
+    {released, _} =
+      Slot
+      |> where([s], s.appointment_id == ^appointment_id)
+      |> repo.update_all(set: [status: :open, appointment_id: nil])
+
+    released
+  end
+
+  @doc """
+  Candidate start times for a service in a window — what a booking screen needs
+  to offer someone a choice.
+
+  `book/1` deliberately takes the *earliest* qualifying run, which is right for
+  a machine caller and useless for a human choosing between 10:00 and 14:00.
+  This returns every start where a run would fit, per office.
+
+  Same rules as booking: contiguity, service duration, eligible offices only.
+  It is a **preview**, not a hold — anything listed can be taken before the
+  operator clicks, and `book/1` is still the thing that decides.
+
+  Opts: `:from`, `:to`, `:limit` (default 50).
+  """
+  @spec available_starts(map(), keyword()) ::
+          {:ok, [%{office_id: integer(), starts_at: DateTime.t()}]} | {:error, error()}
+  def available_starts(attrs, opts \\ []) do
+    attrs = normalise(attrs)
+
+    with {:ok, capabilities} <- resolve_capabilities(attrs),
+         {:ok, offices, _binding} <- resolve_binding(capabilities) do
+      from = opts[:from] || DateTime.utc_now()
+      needed_seconds = service_seconds(attrs)
+
+      starts =
+        offices
+        |> Enum.map(& &1.id)
+        |> open_slots_between(from, opts[:to])
+        |> Enum.group_by(& &1.office_id)
+        |> Enum.flat_map(fn {office_id, slots} ->
+          slots
+          |> Enum.sort_by(& &1.starts_at, DateTime)
+          |> runs_from_each_start()
+          |> Enum.filter(&take_contiguous(&1, needed_seconds))
+          |> Enum.map(&%{office_id: office_id, starts_at: hd(&1).starts_at})
+        end)
+        |> Enum.sort_by(& &1.starts_at, DateTime)
+        |> Enum.take(opts[:limit] || 50)
+
+      {:ok, starts}
+    end
+  end
+
+  defp open_slots_between(office_ids, from, nil), do: open_slots_from(office_ids, from)
+
+  defp open_slots_between(office_ids, from, to) do
+    Slot
+    |> where(
+      [s],
+      s.office_id in ^office_ids and s.status == :open and
+        s.starts_at >= ^from and s.starts_at < ^to
+    )
+    |> order_by([s], asc: s.office_id, asc: s.starts_at)
+    |> Repo.all()
   end
 
   # --- 1. the service ---------------------------------------------------------
@@ -115,7 +268,15 @@ defmodule Scheduling.Booking.Engine do
     end
   end
 
-  defp resolve_capabilities(_attrs), do: {:ok, []}
+  # Neither a service code nor a capability list. Almost always a caller that
+  # forgot one — and booking a room for an unspecified purpose is worse than
+  # refusing, because an empty requirement matches *every* office and quietly
+  # reserves the first free slot anywhere.
+  #
+  # An explicit empty `required_capability_ids: []` is honoured above and means
+  # "any room will do", which is a real intent. Omitting the key entirely is
+  # not the same statement.
+  defp resolve_capabilities(_attrs), do: {:error, :no_service_specified}
 
   # --- 2 & 3. offices and binding ---------------------------------------------
 
@@ -132,9 +293,8 @@ defmodule Scheduling.Booking.Engine do
 
   # Slot length varies per rule, so "how many slots" is not a division — walk
   # the actual boundaries until the run is long enough.
-  defp find_run(offices, capabilities, attrs) do
-    from = attrs[:from] || DateTime.utc_now()
-    needed_seconds = service_seconds(capabilities, attrs)
+  defp find_run(offices, needed_seconds, from) do
+    from = from || DateTime.utc_now()
 
     offices
     |> Enum.map(& &1.id)
@@ -192,7 +352,7 @@ defmodule Scheduling.Booking.Engine do
     DateTime.diff(last.ends_at, first.starts_at, :second) >= needed_seconds
   end
 
-  defp service_seconds(_capabilities, %{service_code: code}) when is_binary(code) do
+  defp service_seconds(%{service_code: code}) when is_binary(code) do
     case Catalog.fetch_diagnosis_by_code(code) do
       {:ok, %{duration_minutes: minutes}} when is_integer(minutes) -> minutes * 60
       _ -> 0
@@ -201,7 +361,24 @@ defmodule Scheduling.Booking.Engine do
 
   # With an explicit capability list there is no service to take a duration
   # from, so one slot is the unit. Zero seconds is satisfied by the first slot.
-  defp service_seconds(_capabilities, _attrs), do: 0
+  defp service_seconds(_attrs), do: 0
+
+  @doc """
+  How long an appointment currently runs for, in seconds.
+
+  This is how a reschedule knows its own length. The appointment does not store
+  the service code — deliberately, see `Scheduling.Booking.Appointment` — so
+  the duration cannot be looked up again. Its existing run *is* the duration,
+  and it has to be measured before the old slots are released.
+  """
+  @spec booked_seconds(Appointment.t()) :: non_neg_integer()
+  def booked_seconds(%Appointment{slots: slots}) when is_list(slots) and slots != [] do
+    starts_at = slots |> Enum.map(& &1.starts_at) |> Enum.min(DateTime)
+    ends_at = slots |> Enum.map(& &1.ends_at) |> Enum.max(DateTime)
+    DateTime.diff(ends_at, starts_at, :second)
+  end
+
+  def booked_seconds(%Appointment{}), do: 0
 
   # --- 5. reservation ---------------------------------------------------------
 

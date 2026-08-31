@@ -35,12 +35,89 @@ defmodule Scheduling.Catalog do
   end
 
   @doc """
-  Deletes a capability. Foreign keys on `office_capabilities`,
-  `diagnosis_capabilities`, and `queue_entry_capabilities` cascade, so the
-  capability is removed from every office, diagnosis default, and pending
-  queue requirement that referenced it.
+  Deletes a capability, unless something live still requires it.
+
+  ## Why this refuses rather than cascading
+
+  `appointment_capabilities` and `queue_entry_capabilities` cascade on delete.
+  That is right for the catalog joins — an office or a routing template simply
+  stops offering it — and quietly wrong for anything attached to a patient.
+
+  Deleting a capability does not make those bookings *unservable*; it makes
+  them require **nothing**. A booking made for a CT scan silently becomes a
+  booking for nothing, and a waiting patient's requirement vanishes so the
+  matcher will route them anywhere. Neither fails. Neither is visible. The
+  broken-commitment scan cannot see it either, because nothing is missing when
+  nothing is required.
+
+  So the check is here, before the delete: a capability required by a live
+  appointment (`:booked` or `:arrived`) or an unfinished queue entry cannot be
+  removed. Retire it from the offices and templates that offer it, let the
+  work in flight finish, then delete.
+
+  Returns `{:error, changeset}` with a usable message rather than a bare atom,
+  so a form renders it without translating.
   """
-  def delete_capability(%Capability{} = capability), do: Repo.delete(capability)
+  @spec delete_capability(Capability.t()) ::
+          {:ok, Capability.t()} | {:error, Ecto.Changeset.t()}
+  def delete_capability(%Capability{} = capability) do
+    case capability_usage(capability.id) do
+      {0, 0} ->
+        Repo.delete(capability)
+
+      {appointments, entries} ->
+        {:error,
+         capability
+         |> Ecto.Changeset.change()
+         |> Ecto.Changeset.add_error(:name, usage_message(appointments, entries))}
+    end
+  end
+
+  @doc """
+  How many live appointments and unfinished queue entries require a capability.
+
+  Public because a UI wants to say *why* a delete is refused before someone
+  clicks, not only after.
+  """
+  @spec capability_usage(integer()) :: {non_neg_integer(), non_neg_integer()}
+  def capability_usage(capability_id) do
+    appointments =
+      from(ac in "appointment_capabilities",
+        join: a in Scheduling.Booking.Appointment,
+        on: a.id == ac.appointment_id,
+        where: ac.capability_id == ^capability_id and a.status in [:booked, :arrived],
+        select: count(ac.capability_id)
+      )
+      |> Repo.one()
+
+    entries =
+      from(qc in "queue_entry_capabilities",
+        join: e in Scheduling.Queue.QueueEntry,
+        on: e.id == qc.queue_entry_id,
+        where: qc.capability_id == ^capability_id and e.status != :completed,
+        select: count(qc.capability_id)
+      )
+      |> Repo.one()
+
+    {appointments, entries}
+  end
+
+  defp usage_message(appointments, entries) do
+    parts =
+      []
+      |> maybe_part(appointments, "appointment")
+      |> maybe_part(entries, "waiting patient")
+      |> Enum.reverse()
+
+    "is still required by " <>
+      Enum.join(parts, " and ") <>
+      ". Remove it from the offices and services that offer it, and let that work finish, " <>
+      "before deleting it."
+  end
+
+  defp maybe_part(parts, 0, _noun), do: parts
+  defp maybe_part(parts, 1, noun), do: ["1 #{noun}" | parts]
+  defp maybe_part(parts, n, noun), do: ["#{n} #{noun}s" | parts]
 
   @doc "Returns a changeset for tracking capability form changes."
   def change_capability(%Capability{} = capability, attrs \\ %{}) do
