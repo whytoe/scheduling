@@ -90,6 +90,35 @@ defmodule Scheduling.Auth do
     not (is_nil(issuer()) or is_nil(client_id()) or is_nil(client_secret()))
   end
 
+  @doc """
+  Whether the *environment* supplies all three OIDC settings.
+
+  This exists for one caller: the `:prod` boot guard in `config/runtime.exs`.
+
+  It must read `System.get_env/1` and **must never read the application
+  environment**, because it is called from inside `runtime.exs` while that file
+  is still assembling the very config `enabled?/0` reads. A config file
+  accumulates a keyword list that is applied only once evaluation finishes, so
+  `Application.get_env/3` during evaluation sees the build-time value — for
+  this key, nothing. Wiring the guard to `enabled?/0` made it raise on every
+  `:prod` boot no matter how the release was configured, which is not the sort
+  of thing the test suite catches: `:test` applies its config normally long
+  before anything starts.
+
+  Blank is treated as absent. A provider will not accept an empty client
+  secret, and refusing at boot beats a confusing failure at the token
+  exchange.
+  """
+  @spec configured_from_env?() :: boolean()
+  def configured_from_env? do
+    Enum.all?(["OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET"], fn var ->
+      case System.get_env(var) do
+        value when is_binary(value) -> String.trim(value) != ""
+        nil -> false
+      end
+    end)
+  end
+
   @doc "Issuer URL, e.g. `https://sso.example.org/realms/clinic`."
   @spec issuer() :: String.t() | nil
   def issuer, do: get(:issuer)
