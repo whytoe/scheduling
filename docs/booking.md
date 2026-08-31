@@ -202,6 +202,23 @@ it does after each horizon run (`BOOKING_PRUNE_STALE_SLOTS`, default on).
 Everything it can remove is unbooked capacity the current rules do not justify,
 so a rule deactivated by mistake costs a regeneration, not an appointment.
 
+### The empty-rules guard
+
+One case that argument does *not* cover, and which only became dangerous once
+pruning ran on a schedule: if an office's rules produce **no** candidates at
+all, every open slot in the horizon is "stale".
+
+"The rules justify nothing" and "we failed to read the rules" produce the same
+empty set, and the safe reading is the second. So an office with zero
+candidates is **skipped**, with a warning naming how many slots were spared.
+Booked slots would have survived either way, but nobody could have booked
+anything until the rules came back *and* generation ran.
+
+Clearing a genuinely closed office is therefore deliberate:
+`prune_for_office(office, from, to, allow_empty: true)`. The guard is about
+*no* candidates, not fewer — a shortened window still prunes normally, because
+the rules were clearly readable.
+
 It asks the generator what should exist (`SlotGenerator.candidate_starts/3`)
 rather than deriving it a second way — two answers to "what should be here"
 would drift, and the churn would show up as slots created and deleted on every

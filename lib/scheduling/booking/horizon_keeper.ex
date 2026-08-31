@@ -160,10 +160,12 @@ defmodule Scheduling.Booking.HorizonKeeper do
   # Rescued separately: a prune failure must not make the generation that just
   # succeeded look like it failed.
   defp prune do
-    if SlotPruner.enabled?(), do: SlotPruner.prune_horizon(), else: %{deleted: 0, protected: 0}
+    if SlotPruner.enabled?(),
+      do: SlotPruner.prune_horizon(),
+      else: %{deleted: 0, protected: 0, skipped: 0}
   rescue
     error ->
       Logger.error("Slot pruning failed: #{Exception.message(error)}")
-      %{deleted: 0, protected: 0}
+      %{deleted: 0, protected: 0, skipped: 0}
   end
 end

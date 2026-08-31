@@ -44,20 +44,75 @@ defmodule Scheduling.Booking.SlotPruner do
   alias Scheduling.Offices.Office
   alias Scheduling.Repo
 
-  @typedoc "What a prune removed, and what it deliberately left alone."
-  @type result :: %{deleted: non_neg_integer(), protected: non_neg_integer()}
+  @typedoc """
+  What a prune removed, what it left alone because it was booked or blocked,
+  and what it refused to touch because the office's rules read as empty.
+  """
+  @type result :: %{
+          deleted: non_neg_integer(),
+          protected: non_neg_integer(),
+          skipped: non_neg_integer()
+        }
 
   @doc """
   Removes stale open slots for one office across `from`..`to` inclusive.
 
   Stale means: inside the window, and not among the instants the office's
   current rules would generate for those dates.
+
+  ## The empty-rules guard
+
+  If the office's rules produce **no** candidates at all, this skips the office
+  entirely unless `allow_empty: true`.
+
+  "The rules justify nothing" and "we failed to read the rules" produce the
+  same empty set, and the safe reading is the second. Without the guard, a
+  transient condition that made rule loading return nothing — a bad migration
+  state, an accidental mass-deactivation, a query that legitimately finds none
+  because a date boundary moved — would delete **every open slot in the
+  horizon** on the very next keeper tick. Booked slots would survive, but
+  nobody could book anything until the rules came back *and* generation ran.
+
+  That risk was acceptable when pruning was something you ran deliberately. It
+  is not, now that it runs after every horizon pass.
+
+  A genuinely retired office therefore keeps its stale open slots under
+  automatic pruning. Clearing those is a deliberate act:
+  `prune_for_office(office, from, to, allow_empty: true)`.
   """
-  @spec prune_for_office(Office.t(), Date.t(), Date.t()) :: result()
-  def prune_for_office(%Office{} = office, %Date{} = from, %Date{} = to) do
+  @spec prune_for_office(Office.t(), Date.t(), Date.t(), keyword()) :: result()
+  def prune_for_office(%Office{} = office, %Date{} = from, %Date{} = to, opts \\ []) do
     wanted = SlotGenerator.candidate_starts(office, from, to)
     {window_start, window_end} = window(from, to)
 
+    if MapSet.size(wanted) == 0 and not Keyword.get(opts, :allow_empty, false) do
+      skip_empty(office, window_start, window_end)
+    else
+      do_prune(office, wanted, window_start, window_end)
+    end
+  end
+
+  defp skip_empty(office, window_start, window_end) do
+    open_count =
+      Slot
+      |> where([s], s.office_id == ^office.id)
+      |> where([s], s.starts_at >= ^window_start and s.starts_at < ^window_end)
+      |> where([s], s.status == :open and is_nil(s.appointment_id))
+      |> Repo.aggregate(:count)
+
+    if open_count > 0 do
+      Logger.warning(
+        "Skipped pruning #{office.name}: its rules produce no slots at all, and " <>
+          "#{open_count} open slot(s) exist. Refusing to delete them automatically — " <>
+          "an unreadable rule set looks identical to a retired one. " <>
+          "Prune with allow_empty: true if the office really is closed."
+      )
+    end
+
+    %{deleted: 0, protected: 0, skipped: open_count}
+  end
+
+  defp do_prune(%Office{} = office, wanted, window_start, window_end) do
     stale =
       Slot
       |> where([s], s.office_id == ^office.id)
@@ -78,8 +133,12 @@ defmodule Scheduling.Booking.SlotPruner do
     Office
     |> Repo.all()
     |> Enum.map(&prune_for_office(&1, from, to))
-    |> Enum.reduce(%{deleted: 0, protected: 0}, fn r, acc ->
-      %{deleted: acc.deleted + r.deleted, protected: acc.protected + r.protected}
+    |> Enum.reduce(%{deleted: 0, protected: 0, skipped: 0}, fn r, acc ->
+      %{
+        deleted: acc.deleted + r.deleted,
+        protected: acc.protected + r.protected,
+        skipped: acc.skipped + r.skipped
+      }
     end)
   end
 
@@ -102,7 +161,7 @@ defmodule Scheduling.Booking.SlotPruner do
     |> Keyword.get(:prune_stale_slots, true)
   end
 
-  defp delete([], _office, protected), do: %{deleted: 0, protected: protected}
+  defp delete([], _office, protected), do: %{deleted: 0, protected: protected, skipped: 0}
 
   defp delete(stale, office, protected) do
     ids = Enum.map(stale, & &1.id)
@@ -122,7 +181,7 @@ defmodule Scheduling.Booking.SlotPruner do
       )
     end
 
-    %{deleted: deleted, protected: protected}
+    %{deleted: deleted, protected: protected, skipped: 0}
   end
 
   # Slots the rules no longer justify but which are booked or blocked. Counted
