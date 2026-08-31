@@ -267,6 +267,17 @@ defmodule SchedulingWeb.AppointmentLive.Index do
     end
   end
 
+  # Only a *committed* appointment has a room to name. A provisional one holds
+  # slots in some office, but the matcher may send the patient elsewhere on
+  # arrival — so that office is where the **time** is reserved, not where the
+  # patient will go, and the two differ precisely when binding is provisional.
+  #
+  # Naming it would invite someone to walk the patient to a room they may not
+  # be going to. The held office is capacity information, useful to whoever
+  # manages the calendar and misleading to whoever greets the patient, so this
+  # screen does not show it.
+  defp office_label(%{binding: :provisional}, _offices_by_id), do: "Decided on arrival"
+
   defp office_label(appointment, offices_by_id) do
     case office_for(appointment, offices_by_id) do
       nil -> "—"
@@ -278,15 +289,13 @@ defmodule SchedulingWeb.AppointmentLive.Index do
     appointment.required_capabilities |> Enum.map(& &1.name) |> Enum.sort()
   end
 
-  # The appointment statuses do not map onto the badge's lifecycle vocabulary,
-  # so the closest tone is chosen and the label given explicitly. Adding
-  # appointment states to the shared component would be the tidier fix.
-  defp badge_status("booked"), do: "assigned"
-  defp badge_status("arrived"), do: "waiting"
-  defp badge_status("completed"), do: "completed"
-  defp badge_status("cancelled"), do: "compliance_unavailable"
-  defp badge_status(_other), do: "waiting"
-
+  # Appointment statuses now live in the shared badge vocabulary
+  # (`SchedulingWeb.CoreComponents`), so the badges need no mapping or label
+  # override here — `booked`, `arrived`, `cancelled` and `completed` render
+  # themselves.
+  #
+  # The filter tabs still need this: they include "all", which is not a status
+  # and has no badge.
   defp status_label(status), do: status |> to_string() |> String.capitalize()
 
   defp booked_message(appointment) do
@@ -422,10 +431,7 @@ defmodule SchedulingWeb.AppointmentLive.Index do
             </td>
             <td><.cap_row caps={capability_names(appointment)} /></td>
             <td>
-              <.status_badge
-                status={badge_status(to_string(appointment.status))}
-                label={status_label(appointment.status)}
-              />
+              <.status_badge status={to_string(appointment.status)} />
             </td>
             <td>
               <form
@@ -489,8 +495,11 @@ defmodule SchedulingWeb.AppointmentLive.Index do
     """
   end
 
-  defp binding_hint(:committed), do: "Fixed — only this room can provide it"
-  defp binding_hint(:provisional), do: "Chosen on arrival"
+  # Says *why* the cell above reads as it does, rather than repeating it.
+  # "Provisional" is the word an operator most reliably misreads — it sounds
+  # like the booking is unconfirmed, when what is unfixed is only the room.
+  defp binding_hint(:committed), do: "Only this room can provide it"
+  defp binding_hint(:provisional), do: "Several rooms can — the matcher picks"
   defp binding_hint(_), do: ""
 
   attr :booking, :map, required: true

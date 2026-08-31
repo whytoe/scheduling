@@ -126,7 +126,17 @@ config :scheduling, Scheduling.Booking,
   # default because it can only ever delete an *unbooked, unblocked* slot, and
   # regeneration restores anything removed in error. Off means a shortened rule
   # leaves a room offering times it no longer works.
-  prune_stale_slots: System.get_env("BOOKING_PRUNE_STALE_SLOTS", "true") == "true"
+  prune_stale_slots: System.get_env("BOOKING_PRUNE_STALE_SLOTS", "true") == "true",
+  # The daily job that extends the horizon. Runs whether or not any
+  # availability rules exist yet — it used to be omitted from the supervision
+  # tree when there were none, which meant adding the *first* rule to a running
+  # system silently produced nothing. See Scheduling.Booking.HorizonKeeper.
+  #
+  # Never in :test. This file is evaluated for every environment and would
+  # otherwise override config/test.exs, starting a process that queries the
+  # Repo from outside any sandbox-owned connection.
+  horizon_keeper_enabled:
+    config_env() != :test and System.get_env("BOOKING_HORIZON_KEEPER", "true") == "true"
 
 if config_env() == :prod do
   database_url =
