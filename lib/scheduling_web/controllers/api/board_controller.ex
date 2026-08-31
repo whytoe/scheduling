@@ -7,6 +7,7 @@ defmodule SchedulingWeb.Api.BoardController do
   use OpenApiSpex.ControllerSpecs
 
   alias Scheduling.Handoffs
+  alias Scheduling.Auth.Scope
   alias Scheduling.Offices
   alias Scheduling.Queue
   alias SchedulingWeb.Schemas
@@ -32,7 +33,7 @@ defmodule SchedulingWeb.Api.BoardController do
       waiting: Enum.map(Queue.list_waiting_entries(), &serialize_entry/1),
       active: Enum.map(Queue.list_active_entries(), &serialize_entry/1),
       offices:
-        Enum.map(Offices.list_offices(), fn office ->
+        Enum.map(Offices.list_offices(location_ids: caller_location_ids(conn)), fn office ->
           load = Map.get(loads, office.id, 0)
           serialize_office_with_load(office, load)
         end),
@@ -115,5 +116,12 @@ defmodule SchedulingWeb.Api.BoardController do
         updated_at: c.updated_at
       }
     end)
+  end
+
+  defp caller_location_ids(conn) do
+    case conn.assigns[:current_identity] do
+      nil -> nil
+      identity -> identity |> Scope.for_identity() |> Scope.location_ids()
+    end
   end
 end

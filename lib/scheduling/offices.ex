@@ -14,12 +14,37 @@ defmodule Scheduling.Offices do
   # `Scheduling.Catalog`. This module only consumes capabilities to attach
   # them to offices via the office_capabilities join.
 
-  @doc "Lists all offices ordered by name, with capabilities preloaded."
-  def list_offices do
+  @doc """
+  Lists offices ordered by name, with capabilities and location preloaded.
+
+  `:location_ids` restricts the result to offices at those ac-core locations.
+  `nil` — the default — applies no filter, which is what an unscoped identity,
+  an admin, and an auth-disabled deployment all get. See
+  `Scheduling.Auth.Scope.location_ids/1`.
+
+  Offices with no location are **always included**. A room that has not been
+  linked to a site cannot be attributed to one, and dropping it would make it
+  vanish from the board with nothing to explain why; an operator would see a
+  shorter list and no error. Including it errs toward the behaviour that
+  existed before scoping, which is the safer direction for a filter added to a
+  running system.
+  """
+  @spec list_offices(keyword()) :: [Office.t()]
+  def list_offices(opts \\ []) do
     Office
+    |> scope_to_locations(Keyword.get(opts, :location_ids))
     |> order_by(asc: :name)
     |> Repo.all()
-    |> Repo.preload(:capabilities)
+    |> Repo.preload([:capabilities, :location])
+  end
+
+  defp scope_to_locations(query, nil), do: query
+
+  defp scope_to_locations(query, location_ids) do
+    from(o in query,
+      left_join: l in assoc(o, :location),
+      where: is_nil(o.location_id) or l.core_location_id in ^location_ids
+    )
   end
 
   @doc "Fetches a single office by id with capabilities preloaded. Raises if missing."

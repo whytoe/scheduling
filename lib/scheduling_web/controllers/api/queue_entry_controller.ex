@@ -8,6 +8,7 @@ defmodule SchedulingWeb.Api.QueueEntryController do
   use OpenApiSpex.ControllerSpecs
 
   alias Scheduling.Catalog
+  alias Scheduling.Auth.Scope
   alias Scheduling.Queue
   alias SchedulingWeb.Api.Actor
   alias SchedulingWeb.ErrorEnvelope
@@ -184,6 +185,11 @@ defmodule SchedulingWeb.Api.QueueEntryController do
         by -> [accepted_by: by]
       end
 
+    # The same office restriction the browser surface applies. A service token
+    # scoped to a site must not be able to place a patient at another one just
+    # because it came through the API.
+    opts = Keyword.put(opts, :location_ids, caller_location_ids(conn))
+
     with {:ok, entry} <- fetch(id) do
       case Queue.accept(entry, opts) do
         {:ok, assigned, _result} ->
@@ -283,6 +289,17 @@ defmodule SchedulingWeb.Api.QueueEntryController do
     with {:ok, entry} <- fetch(id),
          {:ok, requeued} <- Queue.requeue(entry, opts) do
       json(conn, serialize(reload(requeued)))
+    end
+  end
+
+  # The API surface assigns `current_identity` rather than a Scope, so wrap it
+  # to reuse the same admin-bypass and absent-means-unrestricted rules the
+  # browser path gets. Absent identity means auth is disabled, which is
+  # unrestricted by definition.
+  defp caller_location_ids(conn) do
+    case conn.assigns[:current_identity] do
+      nil -> nil
+      identity -> identity |> Scope.for_identity() |> Scope.location_ids()
     end
   end
 

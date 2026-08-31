@@ -85,9 +85,17 @@ defmodule Scheduling.Matching do
   default of `%{}` treats every office as idle.
   """
   @spec match_queue_entry(QueueEntry.t(), loads()) :: Result.t()
-  def match_queue_entry(%QueueEntry{} = entry, loads \\ %{}) do
+  def match_queue_entry(%QueueEntry{} = entry, loads \\ %{}, opts \\ []) do
     entry = Repo.preload(entry, :required_capabilities)
-    match(entry.required_capabilities, Offices.list_offices(), loads)
+
+    # `:location_ids` narrows the candidate offices to the sites the acting
+    # operator may work in. Without it the matcher would happily choose a room
+    # the operator cannot see, producing an assignment they can neither find
+    # nor undo — and placing a patient's record in front of staff at a site
+    # that has no business with them.
+    offices = Offices.list_offices(location_ids: Keyword.get(opts, :location_ids))
+
+    match(entry.required_capabilities, offices, loads)
   end
 
   defp eligible?(office, required_keys, loads) do
