@@ -665,6 +665,40 @@ html:not([data-theme])   .themetoggle [data-phx-theme="system"] {
 .errpage__ref { font-family: var(--font-mono); font-size: 12px; color: var(--color-base-content-faint); margin-top: var(--s-1); }
 .errpage__actions { display: flex; gap: var(--s-2); margin-top: var(--s-4); flex-wrap: wrap; justify-content: center; }
 
+/* Sign-in — the front door, not a closed one. Shares the tokens with
+   .errpage but not its furniture: no alarm glyph, no error tone. The card is
+   the only thing on the page, so it carries a border and sits on the base
+   surface rather than floating. */
+.loginpage {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  gap: var(--s-3); padding: var(--s-10) var(--s-8); max-width: 420px; margin: 0 auto;
+  background: var(--color-base-100); border: 1px solid var(--color-base-300);
+  border-radius: var(--radius-box);
+}
+.loginpage__brand { display: flex; align-items: center; gap: var(--s-2); margin-bottom: var(--s-2); }
+.loginpage__mark {
+  width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center;
+  background: var(--color-primary); color: var(--color-primary-content);
+}
+.loginpage__word {
+  font-size: 17px; font-weight: 600; letter-spacing: -0.01em; color: var(--color-base-content);
+}
+.loginpage__title { font-size: 24px; font-weight: 600; letter-spacing: -0.01em; }
+.loginpage__body { font-size: var(--t-body-lg); color: var(--color-base-content-muted); line-height: 1.55; }
+.loginpage__cta { margin-top: var(--s-2); width: 100%; }
+.loginpage__note {
+  font-size: 13px; color: var(--color-base-content-faint); line-height: 1.5; margin-top: var(--s-1);
+}
+/* A failed sign-in lands back here, so the reason has to be readable before
+   the button is pressed again. */
+.loginpage__alert {
+  display: flex; align-items: flex-start; gap: var(--s-2); text-align: left;
+  width: 100%; padding: var(--s-2) var(--s-3); border-radius: var(--radius-field);
+  font-size: 14px; line-height: 1.5;
+  background: var(--st-attention-bg); color: var(--st-attention-fg);
+  border: 1px solid var(--st-attention-line);
+}
+
 .spin { animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }

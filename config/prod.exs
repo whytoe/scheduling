@@ -15,7 +15,14 @@ config :scheduling, SchedulingWeb.Endpoint,
   force_ssl: [
     rewrite_on: [:x_forwarded_proto],
     exclude: [
-      # paths: ["/health"],
+      # The readiness/liveness probe connects to the pod IP over plain HTTP,
+      # so it matches neither excluded host and got a 301 to https instead of
+      # the health check's answer. Kubernetes counts 3xx as success, so the
+      # pod stayed up and nothing looked broken — it just logged a redirect
+      # every few seconds, which buries anything worth reading. The endpoint
+      # returns no data and requires no auth, so there is nothing to protect
+      # by upgrading it.
+      paths: ["/api/health"],
       hosts: ["localhost", "127.0.0.1"]
     ]
   ]

@@ -149,8 +149,16 @@ if config_env() == :prod do
   # Fail-closed on configuration, not on requests: a release that boots with
   # auth silently off would serve PHI to anyone who found the hostname. Opting
   # out is possible but must be deliberate and is announced at boot.
+  #
+  # `configured_from_env?/0`, NOT `enabled?/0`. The `config :scheduling,
+  # Scheduling.Auth` block ~90 lines above has not been applied yet: config
+  # files accumulate a keyword list that reaches the application environment
+  # only after this file finishes evaluating. `Application.get_env/3` — which
+  # is what `enabled?/0` reads — therefore returns the *build-time* value here,
+  # and nothing sets this key at build time. Calling `enabled?/0` made this
+  # guard raise unconditionally in :prod however the release was configured.
   cond do
-    Scheduling.Auth.enabled?() ->
+    Scheduling.Auth.configured_from_env?() ->
       :ok
 
     System.get_env("AUTH_DISABLED") == "true" ->

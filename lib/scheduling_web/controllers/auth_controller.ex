@@ -43,10 +43,40 @@ defmodule SchedulingWeb.AuthController do
   @verifier_key :oidc_pkce_verifier
 
   @doc """
-  Starts the login. `?return_to=` (a local path) is remembered so the user
-  lands where they were headed rather than always on the board.
+  The sign-in page.
+
+  A deliberate stop rather than an immediate bounce to the IdP. Redirecting
+  straight out means an operator who lands here — session expired mid-shift,
+  or a bookmark opened cold — is thrown to another origin before they have
+  read anything, and a provider that is down or misconfigured produces a
+  bare browser error on a hostname they do not recognise. A page that names
+  where they are going, and goes only when they ask, fails visibly here
+  instead.
+
+  `?return_to=` (a local path) is remembered now, so `start/2` needs nothing
+  from the query string and the value never round-trips through the rendered
+  page. `BrowserAuth.require_authenticated/2` has usually stored it already.
   """
   def login(conn, params) do
+    if Auth.enabled?() do
+      conn
+      |> BrowserAuth.put_return_to(params["return_to"])
+      |> standalone()
+      |> render(:login)
+    else
+      redirect(conn, to: ~p"/board")
+    end
+  end
+
+  @doc """
+  Hands off to the IdP: builds the authorization URL and redirects.
+
+  Split from `login/2` so the page above can exist. Everything
+  security-relevant to the flow — `state`, `nonce`, PKCE verifier — is minted
+  here, at the moment of departure, rather than when the page was rendered:
+  a login page left open in a tab overnight should still start a fresh flow.
+  """
+  def start(conn, _params) do
     if Auth.enabled?() do
       state = random_value()
       nonce = random_value()
@@ -71,7 +101,6 @@ defmodule SchedulingWeb.AuthController do
           |> put_session(@state_key, state)
           |> put_session(@nonce_key, nonce)
           |> put_session(@verifier_key, verifier)
-          |> BrowserAuth.put_return_to(params["return_to"])
           |> redirect(external: IO.iodata_to_binary(url))
 
         {:error, reason} ->

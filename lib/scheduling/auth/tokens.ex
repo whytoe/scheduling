@@ -36,8 +36,6 @@ defmodule Scheduling.Auth.Tokens do
   """
   @type error :: :invalid_token | :token_expired | :provider_unavailable
 
-  @role_claims ["realm_access", "resource_access"]
-
   @backchannel_logout_event "http://schemas.openid.net/event/backchannel-logout"
 
   @doc """
@@ -79,17 +77,37 @@ defmodule Scheduling.Auth.Tokens do
   end
 
   defp merge_role_claims(id_claims, %Oidcc.Token{access: %Oidcc.Token.Access{token: access_token}}) do
-    if Enum.any?(@role_claims, &Map.has_key?(id_claims, &1)) do
+    claims = role_claim_roots()
+
+    if Enum.any?(claims, &Map.has_key?(id_claims, &1)) do
       id_claims
     else
       case validate_claims(access_token) do
-        {:ok, access_claims} -> Map.merge(id_claims, Map.take(access_claims, @role_claims))
+        {:ok, access_claims} -> Map.merge(id_claims, Map.take(access_claims, claims))
         {:error, _reason} -> id_claims
       end
     end
   end
 
   defp merge_role_claims(id_claims, _token), do: id_claims
+
+  # The top-level key of each configured role claim, since that is the depth a
+  # claims map is keyed at: `realm_access.roles` lives under `realm_access`.
+  #
+  # Derived from `Auth.role_claims/0` rather than hardcoded. It used to be a
+  # fixed `["realm_access", "resource_access"]` — the two Keycloak shapes — so
+  # against a provider that puts roles anywhere else (ac-core uses
+  # `astrum_roles`) the check above never matched, and *every* sign-in fell
+  # through to validating the access token it did not need. That logged a
+  # "Rejected bearer token" line on each successful login and asked for a JWKS
+  # refresh to go with it. Roles still resolved, because `Identity.from_claims/2`
+  # reads the configured list; the fallback was pure waste, and the false
+  # rejection made real bearer-token failures impossible to spot in the log.
+  defp role_claim_roots do
+    Auth.role_claims()
+    |> Enum.map(&(&1 |> String.split(".", parts: 2) |> hd()))
+    |> Enum.uniq()
+  end
 
   @doc """
   Validates a back-channel logout token and returns what it says to end.

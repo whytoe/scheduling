@@ -1,14 +1,62 @@
 defmodule SchedulingWeb.AuthHTML do
   @moduledoc """
-  The two pages a signed-out or under-privileged operator can land on.
+  The pages a signed-out or under-privileged operator can land on.
 
-  Both render as self-contained documents rather than through
+  All render as self-contained documents rather than through
   `SchedulingWeb.Layouts.app/1`: the app layout's navbar links to eight
   screens the viewer cannot open, which reads as a broken app rather than a
-  closed door. They reuse the `errpage` pattern from the styled 404/500 pages
-  so the whole "you can't get there" family looks like one thing.
+  closed door.
+
+  `signed_out/1` and `forbidden/1` reuse the `errpage` pattern from the styled
+  404/500 pages, so the whole "you can't get there" family looks like one
+  thing. `login/1` deliberately does **not**: it is the front door, not a
+  closed one, and dressing it in the error furniture would tell an operator
+  starting their shift that something has gone wrong. It shares the document
+  shell and the tokens, and nothing else.
   """
   use SchedulingWeb, :html
+
+  @doc """
+  The sign-in page.
+
+  One route in, so there is one button. This deployment has no local password
+  — identity comes from the organisation's provider — and offering an empty
+  credential form beside the only control that works would just invite people
+  to try their EMR password against it.
+  """
+  def login(assigns) do
+    ~H"""
+    <.auth_document title={gettext("Sign in")}>
+      <main class="app grid place-items-center">
+        <div class="loginpage">
+          <div class="loginpage__brand">
+            <span class="loginpage__mark"><.icon name="hero-calendar-days" class="size-5" /></span>
+            <span class="loginpage__word">{gettext("Scheduling")}</span>
+          </div>
+
+          <h1 class="loginpage__title">{gettext("Sign in")}</h1>
+          <p class="loginpage__body">
+            {gettext("Use your organisation account to continue.")}
+          </p>
+
+          <p :if={flash_message(@flash)} class="loginpage__alert" role="alert">
+            <.icon name="hero-exclamation-triangle" class="size-4 shrink-0" />
+            <span>{flash_message(@flash)}</span>
+          </p>
+
+          <a href={~p"/auth/start"} class="btn btn-primary loginpage__cta">
+            <.icon name="hero-arrow-right-on-rectangle" class="size-4" />
+            {gettext("Login with Astrum SSO")}
+          </a>
+
+          <p class="loginpage__note">
+            {gettext("You will be taken to your provider to sign in, then returned here.")}
+          </p>
+        </div>
+      </main>
+    </.auth_document>
+    """
+  end
 
   @doc """
   Landing page after logout, and the destination for a failed or
@@ -61,6 +109,27 @@ defmodule SchedulingWeb.AuthHTML do
 
   defp auth_page(assigns) do
     ~H"""
+    <.auth_document title={@title}>
+      <main class="app grid place-items-center">
+        <div class="errpage">
+          <div class={["errpage__glyph", @tone]}><.icon name={@icon} class="size-[30px]" /></div>
+          <h1 class="errpage__title">{@title}</h1>
+          <p class="errpage__body">{render_slot(@message)}</p>
+          <div class="errpage__actions">{render_slot(@inner_block)}</div>
+        </div>
+      </main>
+    </.auth_document>
+    """
+  end
+
+  attr :title, :string, required: true
+  slot :inner_block, required: true
+
+  # The shell every page here shares. These render outside the app layout, so
+  # each one needs its own head; keeping that in one place is what stops the
+  # font links and stylesheet drifting apart between them.
+  defp auth_document(assigns) do
+    ~H"""
     <!DOCTYPE html>
     <html lang="en">
       <head>
@@ -76,14 +145,7 @@ defmodule SchedulingWeb.AuthHTML do
         <link rel="stylesheet" href={~p"/assets/css/app.css"} />
       </head>
       <body>
-        <main class="app grid place-items-center">
-          <div class="errpage">
-            <div class={["errpage__glyph", @tone]}><.icon name={@icon} class="size-[30px]" /></div>
-            <h1 class="errpage__title">{@title}</h1>
-            <p class="errpage__body">{render_slot(@message)}</p>
-            <div class="errpage__actions">{render_slot(@inner_block)}</div>
-          </div>
-        </main>
+        {render_slot(@inner_block)}
       </body>
     </html>
     """

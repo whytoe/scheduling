@@ -64,6 +64,7 @@ defmodule SchedulingWeb.Router do
 
     get "/", PageController, :home
     get "/auth/login", AuthController, :login
+    get "/auth/start", AuthController, :start
     get "/auth/callback", AuthController, :callback
     get "/auth/logout", AuthController, :logout
     get "/auth/signed_out", AuthController, :signed_out
