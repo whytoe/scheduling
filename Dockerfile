@@ -71,8 +71,12 @@ ENV LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8
 
 WORKDIR /app
 
-RUN groupadd --system --gid 1001 phoenix \
- && useradd  --system --uid 1001 --gid phoenix --home-dir /app phoenix \
+# UID 1000, not an arbitrary one: the target platform (lmfarm) imposes
+# runAsUser 1000 on every container. A release owned by any other uid is
+# unreadable to the process and the pod CrashLoopBackOffs with nothing
+# obviously wrong in the logs.
+RUN groupadd --system --gid 1000 phoenix \
+ && useradd  --system --uid 1000 --gid phoenix --home-dir /app phoenix \
  && chown phoenix:phoenix /app
 
 USER phoenix

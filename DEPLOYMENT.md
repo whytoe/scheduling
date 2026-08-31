@@ -51,7 +51,7 @@ mix phx.server
 | Image base          | `debian:bookworm-slim` (multi-stage from `hexpm/elixir`)         |
 | Exposed port        | `4000` (override with `PORT`)                                    |
 | Listen address      | `::` (IPv6 + IPv4 dual-stack)                                    |
-| User                | non-root (`phoenix`, uid 1001)                                   |
+| User                | non-root (`phoenix`, uid 1000 — matches platforms that impose `runAsUser: 1000`) |
 | Health check        | `GET /api/health` → `200 {"status":"ok"}` (`503 {"status":"degraded"}` if the DB is unreachable) |
 | Startup command     | `bin/scheduling eval 'Scheduling.Release.migrate()'` then `bin/scheduling start` |
 | Stateless           | Yes — no local disk writes; scale horizontally                   |
