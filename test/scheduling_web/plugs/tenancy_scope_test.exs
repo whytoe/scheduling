@@ -191,14 +191,14 @@ defmodule SchedulingWeb.Plugs.TenancyScopeTest do
 
   # --- Browser sign-in -------------------------------------------------------
   #
-  # Drives the real authorization-code flow: start at /auth/login to get a state
+  # Drives the real authorization-code flow: start at /auth/start to get a state
   # and nonce into the session, stub the provider's token endpoint to return an
   # ID token bound to that nonce, then follow the redirect back to
   # /auth/callback. This is the only place the code exchange runs end-to-end, so
   # it covers the happy path as well as the tenancy refusal.
 
   defp complete_login(ctx, claim_overrides \\ %{}) do
-    conn = get(ctx.conn, ~p"/auth/login")
+    conn = get(ctx.conn, ~p"/auth/start")
     state = Plug.Conn.get_session(conn, :oidc_state)
     nonce = Plug.Conn.get_session(conn, :oidc_nonce)
 

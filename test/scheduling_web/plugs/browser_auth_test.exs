@@ -117,9 +117,27 @@ defmodule SchedulingWeb.Plugs.BrowserAuthTest do
     end
   end
 
+  describe "the sign-in page" do
+    # html_response/2 asserts the status, so a 200 here is itself the claim
+    # that the page no longer bounces the browser to another origin on sight.
+    test "offers the provider button rather than bouncing straight out", %{conn: conn} do
+      html = conn |> get(~p"/auth/login") |> html_response(200)
+
+      assert html =~ "Login with Astrum SSO"
+      assert html =~ ~p"/auth/start"
+    end
+
+    test "does not mint flow state — that belongs to the departure", %{conn: conn} do
+      conn = get(conn, ~p"/auth/login")
+
+      assert Plug.Conn.get_session(conn, :oidc_state) == nil
+      assert Plug.Conn.get_session(conn, :oidc_pkce_verifier) == nil
+    end
+  end
+
   describe "starting the handshake" do
     test "redirects to the provider with state and PKCE", %{conn: conn} do
-      conn = get(conn, ~p"/auth/login")
+      conn = get(conn, ~p"/auth/start")
 
       assert location = redirected_to(conn, 302)
       assert location =~ "/protocol/openid-connect/auth"
