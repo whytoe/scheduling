@@ -20,6 +20,17 @@ tmp
 
 priv/static/assets
 
+# Vendored tailwind/esbuild binaries (~118 MB). The Dockerfile treats these as
+# an optional short-circuit for `mix assets.setup` when build egress is flaky,
+# but they are per-arch: shipping the local arm64 ones to an amd64 builder
+# uploads 47 MB that Mix then re-downloads anyway.
+#
+# If a build ever fails because the builder cannot reach the GitHub releases
+# that assets.setup pulls from, drop the matching line and vendor the binary
+# for the BUILDER'S architecture, not this laptop's.
+assets/vendor/tailwind-*
+assets/vendor/esbuild-*
+
 .env
 .env.*
 *.log
