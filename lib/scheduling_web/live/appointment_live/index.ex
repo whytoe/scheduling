@@ -404,8 +404,16 @@ defmodule SchedulingWeb.AppointmentLive.Index do
         icon="hero-calendar-days"
         title="Nothing here"
       >
-        No appointments with that status. Booking one needs an office with availability —
-        see the Availability screen.
+        <%!-- Two different situations. Telling someone to go set up availability
+              when they are simply on the wrong filter tab sends them off to fix
+              something that is not broken. --%>
+        <span :if={@status_filter != "all"}>
+          No appointments with that status. Try <b>All</b> to see every appointment.
+        </span>
+        <span :if={@status_filter == "all"}>
+          No appointments yet. Booking one needs an office with availability —
+          see the Availability screen.
+        </span>
       </.empty_state>
 
       <table :if={@appointments != []} class="table" style="margin-top:var(--s-4)">
