@@ -140,6 +140,77 @@ within a deployment: no query filters by tenant. If one deployment ever needs
 to serve several practices, that is a schema change (tenant id on patients,
 visits, queue entries, offices) plus scoping every query and PubSub topic.
 
+## Per-office access
+
+Roles say *what* someone may do. `astrum_location` says *where*.
+
+An identity carrying that claim is restricted to the ac-core locations it
+names; offices are matched through `locations.core_location_id`. The location
+is the unit of access, not the office — the provider knows nothing about our
+rooms, and several rooms sit in one site, so a person is granted a site and
+reaches every room in it.
+
+| `astrum_location` | Result |
+|---|---|
+| absent | unrestricted |
+| `"loc_abc"` | that site's rooms |
+| `["loc_abc", "loc_def"]` | both sites' rooms |
+| `[]` or `""` | unrestricted — see below |
+| any value, role `admin` | unrestricted |
+
+Configurable as `OIDC_LOCATION_CLAIM`; `astrum_location` is the default because
+ac-core advertises it in `claims_supported`.
+
+### Why absent means unrestricted
+
+Because the alternative locks everyone out of everything at once.
+
+We do not yet know whether ac-core populates this claim, and if it does not,
+reading "no claim" as "no sites" would take a working deployment to a state
+where every operator sees an empty board and no error explains it. That is the
+same failure `astrum_roles` nearly produced — a claim assumption that fails
+closed for *everybody* — and it is worth designing against specifically.
+
+An empty list is folded into the same case for the same reason: it cannot be
+told apart from a provider that does not populate the claim for that user.
+
+Both are revisitable once the claim's behaviour is confirmed against a real
+token for a user with no site assignment. Until then the feature is inert for
+identities that carry nothing, which means turning it on is a provider-side
+change rather than a deploy.
+
+### Where it is enforced
+
+Filtering the board would only *hide* offices. The load-bearing enforcement is
+in the matcher:
+
+```
+Queue.accept(entry, location_ids: …)
+  └─ Matching.match_queue_entry(entry, loads, location_ids: …)
+       └─ Offices.list_offices(location_ids: …)
+```
+
+so an office outside the scope is never a candidate. Without that, an operator
+could accept a patient into a room they cannot see, in front of staff who have
+no business with that patient — and then be unable to find or undo it.
+
+Applied on both surfaces: the browser path reads `current_scope`, the API path
+wraps `current_identity` through the same `Scope.location_ids/1` so a scoped
+service token cannot place a patient at another site either.
+
+The queue's routing *preview* is scoped identically to the accept that follows
+it. A preview that named an office the accept would not choose is worse than
+no preview.
+
+### Offices with no location
+
+Always visible, to everyone. A room not yet linked to a site cannot be
+attributed to one, and dropping it would make it disappear from the board with
+nothing on screen to explain why. This errs toward the behaviour that existed
+before scoping, which is the safer direction for a filter added to a running
+system — but it does mean an unlinked office is effectively unscoped, so link
+rooms to sites if that matters.
+
 ## Scheduling as an OAuth *client*
 
 Everything above is scheduling as a **resource server** — validating tokens

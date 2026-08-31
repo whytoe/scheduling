@@ -243,6 +243,36 @@ defmodule Scheduling.Auth do
   def tenant_claim, do: get(:tenant_claim) || "astrum_tenant"
 
   @doc """
+  Claim listing the ac-core locations an identity may work in.
+
+  Defaults to `astrum_location`, which ac-core advertises in
+  `claims_supported` — singular, so it is read as either one id or a list.
+
+  These are **ac-core location ids**, matched against
+  `locations.core_location_id`. That is deliberately the identity of record
+  rather than a local office id: the provider knows nothing about our offices,
+  and several offices sit in one location, so a person is granted a site and
+  reaches every room in it.
+
+  ## Absent means unrestricted
+
+  An identity with no value here is scoped to nothing and therefore sees
+  everything, exactly as before this existed. That is the only safe default
+  for a live deployment: if the provider turns out not to populate this claim,
+  failing the other way would lock every operator out of every office at once
+  — the failure mode `astrum_roles` nearly produced (see the module doc on
+  roles) and the one worth designing against.
+
+  An empty list is treated the same as absent, for the same reason: it is
+  indistinguishable from a provider that does not populate the claim for this
+  user, and refusing everything on that basis is a worse error than granting
+  what was already granted yesterday. Revisit once the claim's behaviour is
+  confirmed against real tokens for a user with no site assignment.
+  """
+  @spec location_claim() :: String.t()
+  def location_claim, do: get(:location_claim) || "astrum_location"
+
+  @doc """
   Values merged over the provider's discovery document before `oidcc` validates
   it, for filling in fields a provider omits.
 

@@ -36,6 +36,56 @@ defmodule Scheduling.Auth.Scope do
   def has_any_role?(nil, _roles), do: false
 
   @doc """
+  The ac-core location ids this scope may work in, or `nil` for unrestricted.
+
+  `nil` is the permissive answer and is returned in three cases, all
+  deliberate:
+
+    * **No scope at all.** Auth is disabled; there is nobody to restrict.
+    * **The identity carries no location claim.** Scoping is inactive for that
+      person — see `Scheduling.Auth.location_claim/0` for why absent means
+      unrestricted rather than the reverse.
+    * **The identity is an admin.** An admin already administers offices,
+      capabilities and availability across the whole deployment; granting them
+      a subset of sites would half-break administration in a way that reads as
+      a bug rather than a policy. `admin` already satisfies every role check
+      (`Identity.has_role?/2`), so this is consistent rather than a new
+      exception.
+
+  Callers pass the result straight to `Scheduling.Offices.list_offices/1`,
+  which treats `nil` as "no filter".
+  """
+  @spec location_ids(t() | nil) :: [String.t()] | nil
+  def location_ids(%__MODULE__{identity: identity}) do
+    if Identity.has_role?(identity, "admin") do
+      nil
+    else
+      identity.location_ids
+    end
+  end
+
+  def location_ids(nil), do: nil
+
+  @doc """
+  True when this scope may act on `office`.
+
+  The office's location is the unit of access: a person is granted a site and
+  reaches every room in it. An office with no location is visible to everyone,
+  because an unlinked room cannot be attributed to a site and hiding it would
+  make rooms disappear from the board for no reason the operator could see.
+  """
+  @spec may_use_office?(t() | nil, %{optional(:location) => term()}) :: boolean()
+  def may_use_office?(scope, office) do
+    case location_ids(scope) do
+      nil -> true
+      ids -> office_location_id(office) in [nil | ids]
+    end
+  end
+
+  defp office_location_id(%{location: %{core_location_id: id}}), do: id
+  defp office_location_id(_office), do: nil
+
+  @doc """
   The `[actor_type: ..., actor_id: ...]` options passed into the context
   functions that write `visit_events`.
 

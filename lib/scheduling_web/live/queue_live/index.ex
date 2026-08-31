@@ -11,6 +11,7 @@ defmodule SchedulingWeb.QueueLive.Index do
   alias Scheduling.Matching
   alias Scheduling.Matching.{Candidate, Result}
   alias Scheduling.Offices
+  alias Scheduling.Auth.Scope
   alias Scheduling.Queue
 
   @impl true
@@ -28,13 +29,18 @@ defmodule SchedulingWeb.QueueLive.Index do
   end
 
   def handle_event("select", %{"id" => id}, socket) do
-    {:noreply, assign(socket, :selected, build_preview(id))}
+    {:noreply,
+     assign(
+       socket,
+       :selected,
+       build_preview(id, Scope.location_ids(socket.assigns.current_scope))
+     )}
   end
 
   def handle_event("accept", %{"id" => id}, socket) do
     entry = Queue.get_entry!(id)
 
-    case Queue.accept(entry) do
+    case Queue.accept(entry, location_ids: Scope.location_ids(socket.assigns.current_scope)) do
       {:ok, assigned, %Result{} = result} ->
         {:noreply,
          socket
@@ -58,12 +64,13 @@ defmodule SchedulingWeb.QueueLive.Index do
 
   defp load_waiting(socket) do
     waiting = Queue.list_waiting_entries()
+    location_ids = Scope.location_ids(socket.assigns.current_scope)
 
     # Pre-select the top of the queue so the routing preview is populated on
     # first paint (and without JS); the hook then drives selection client-side.
     selected =
       case waiting do
-        [first | _] -> build_preview(first.id)
+        [first | _] -> build_preview(first.id, location_ids)
         [] -> nil
       end
 
@@ -79,11 +86,15 @@ defmodule SchedulingWeb.QueueLive.Index do
 
   # Builds the routing preview for a single entry without committing, using the
   # same matcher the accept path runs.
-  defp build_preview(id) do
+  #
+  # `location_ids` has to match what `accept` will pass or the preview lies:
+  # it would show an office the operator cannot be assigned to, and the accept
+  # that followed would pick a different one — or none.
+  defp build_preview(id, location_ids) do
     entry = Queue.get_entry!(id)
     loads = Queue.current_loads()
-    offices = Offices.list_offices()
-    result = Matching.match_queue_entry(entry, loads)
+    offices = Offices.list_offices(location_ids: location_ids)
+    result = Matching.match_queue_entry(entry, loads, location_ids: location_ids)
 
     %{
       name: patient_name(entry),

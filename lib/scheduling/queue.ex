@@ -302,7 +302,10 @@ defmodule Scheduling.Queue do
   end
 
   defp do_accept(entry, opts) do
-    result = Matching.match_queue_entry(entry, current_loads())
+    result =
+      Matching.match_queue_entry(entry, current_loads(),
+        location_ids: Keyword.get(opts, :location_ids)
+      )
 
     case Result.chosen_office(result) do
       nil ->

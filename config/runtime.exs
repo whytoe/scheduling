@@ -95,6 +95,10 @@ config :scheduling, Scheduling.Auth,
   org_claim: System.get_env("OIDC_ORG_CLAIM", "astrum_org"),
   org_id_claim: System.get_env("OIDC_ORG_ID_CLAIM", "astrum_org_id"),
   tenant_claim: System.get_env("OIDC_TENANT_CLAIM", "astrum_tenant"),
+  # Locations an operator may work in. ac-core advertises `astrum_location` in
+  # claims_supported. Absent or empty means unrestricted — see
+  # Scheduling.Auth.location_claim/0 for why that direction and not the other.
+  location_claim: System.get_env("OIDC_LOCATION_CLAIM", "astrum_location"),
   session_ttl_seconds: String.to_integer(System.get_env("AUTH_SESSION_TTL_SECONDS", "28800"))
 
 # ---------------------------------------------------------------------------
