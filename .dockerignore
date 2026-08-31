@@ -1,7 +1,10 @@
 .git
 .gitignore
 .dockerignore
-Dockerfile*
+# NOT Dockerfile — excluding it is a normal `docker build` pattern (the daemon
+# reads it out-of-band) but breaks builders that ship the context as an archive
+# and look for the Dockerfile inside it. lmfarm's kaniko builder fails with
+# "Dockerfile is not at the context root".
 docker-compose*
 DEPLOYMENT.md
 README.md
