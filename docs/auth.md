@@ -93,7 +93,7 @@ to ask an administrator for access.
 ### Why the catalog is admin-only
 
 Offices, capabilities and diagnoses are not per-patient records — they are the
-rules the matcher routes by, and `diagnoses.required_form_types` in particular
+rules the matcher routes by, and `diagnoses.required_compliance_refs` in particular
 decides which intake forms gate an assignment. A change there silently
 re-routes every future patient. That is a different kind of act from accepting
 the person in front of you, so it takes a different role.

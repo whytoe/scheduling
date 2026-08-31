@@ -88,21 +88,22 @@ defmodule Scheduling.PhiBoundaryTest do
       %{bypass: bypass}
     end
 
-    test "a compliance block records the reference, never the form types",
+    test "a compliance block records the references, never the form types",
          %{bypass: bypass} do
-      Bypass.expect(bypass, "GET", "/api/v1/compliance/status", fn conn ->
+      # No completed response on file for the reference, so it is unmet.
+      Bypass.expect(bypass, "GET", "/api/v1/responses", fn conn ->
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, Jason.encode!(%{"compliant" => false}))
+        |> Plug.Conn.resp(200, Jason.encode!([]))
       end)
 
       {:ok, entry} =
         Queue.create_entry(%{
           "patient_id" => patient_fixture().id,
-          "compliance_ref" => @reference
+          "required_compliance_refs" => [@reference]
         })
 
-      assert {:compliance_failed, @reference} = Queue.accept(Queue.get_entry!(entry.id))
+      assert {:compliance_failed, [@reference]} = Queue.accept(Queue.get_entry!(entry.id))
 
       assert [decision] = Audit.list_decisions()
       assert decision.rationale =~ "Compliance check failed"

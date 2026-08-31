@@ -81,19 +81,36 @@ That is the leak `docs/integrations.md` warned about, realised in code.
 It now works the other way round:
 
 ```
-scheduling ──► intake:  GET /compliance/status?reference=<opaque>&patient_id=<uuid>
-scheduling ◄── intake:  {"compliant": true|false}
+scheduling ──► intake:  GET /responses?patient_id=<uuid>&compliance_ref=<opaque>&status=completed
+scheduling ◄── intake:  [] | [ {...} ]      (zero rows = unmet)
 ```
 
-Intake owns the mapping from reference to required forms — legitimately, since
-it owns the forms. Scheduling passes an opaque token through and receives a
-verdict. It cannot leak what it never learns.
+Intake owns the mapping from reference to form — legitimately, since it owns
+the forms — and mints a random `cref_` per `(organization_id, form_type)`.
+Random rather than derived, so a reference cannot be recovered by hashing
+plausible form-type names. Scheduling holds only the references an encounter
+requires, resolved at creation, and compares what came back against what it
+required.
 
-**The `/compliance/status` endpoint is not built yet.** It is a request to the
-intake team, analogous to the `?patient_id=` filter they added for `sc-c9j`.
-Until it ships, entries carry no `compliance_ref`, `Compliance.verify/1`
-returns `:not_configured`, and the gate is skipped — the same fail-open posture
-as an unconfigured intake.
+**Scheduling computes the verdict, and that is deliberate.** We first asked
+intake for a pass/fail endpoint. They declined, correctly: the policy about
+which forms an encounter requires is ours, so a verdict endpoint would have
+made intake the authority on a decision whose inputs it cannot see — and a bare
+pass/fail cannot be explained to a patient at a desk. Keeping the verdict here
+means we can say *which* requirement is outstanding. The full exchange is in
+`docs/intake-compliance-reply.md`.
+
+**The `compliance_ref` filter is not built yet.** It is a request to the intake
+team, analogous to the `?patient_id=` filter they added for `sc-c9j`. Until it
+ships the gate stays unconfigured, `Compliance.verify/1` returns
+`:not_configured`, and entries pass — the same fail-open posture as an
+unconfigured intake.
+
+Note the limit of this control: it stops scheduling *storing* form-type names,
+but a block against a named patient still says "this patient has an unmet
+requirement". The control that keeps sensitive encounters out of scheduling
+entirely is the intake bridge's exclusion list, not this gate. See
+`docs/integrations.md`.
 
 ## Reading from ac-core
 

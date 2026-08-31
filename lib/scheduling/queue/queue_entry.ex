@@ -32,6 +32,7 @@ defmodule Scheduling.Queue.QueueEntry do
     field :status, Ecto.Enum, values: @statuses, default: :waiting
     field :priority, :integer, default: 0
     field :compliance_ref, :string
+    field :required_compliance_refs, {:array, :string}, default: []
 
     belongs_to :patient, Patient
     belongs_to :assigned_office, Office
@@ -67,7 +68,8 @@ defmodule Scheduling.Queue.QueueEntry do
       :appointment_id,
       :status,
       :priority,
-      :compliance_ref
+      :compliance_ref,
+      :required_compliance_refs
     ])
     |> validate_required([:patient_id, :status, :priority])
     |> validate_inclusion(:status, @statuses)

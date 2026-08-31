@@ -13,7 +13,7 @@ defmodule Scheduling.Catalog.Diagnosis do
     field :name, :string
     field :code, :string
     field :duration_minutes, :integer, default: 20
-    field :required_form_types, {:array, :string}, default: []
+    field :required_compliance_refs, {:array, :string}, default: []
 
     many_to_many :capabilities, Capability,
       join_through: Scheduling.Catalog.DiagnosisCapability,
@@ -25,7 +25,7 @@ defmodule Scheduling.Catalog.Diagnosis do
   @doc false
   def changeset(diagnosis, attrs) do
     diagnosis
-    |> cast(attrs, [:name, :code, :duration_minutes, :required_form_types])
+    |> cast(attrs, [:name, :code, :duration_minutes, :required_compliance_refs])
     |> validate_required([:name, :duration_minutes])
     |> validate_length(:name, min: 1, max: 255)
     # A booking has to occupy a whole number of slots, and a zero-length
