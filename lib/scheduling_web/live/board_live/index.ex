@@ -11,6 +11,7 @@ defmodule SchedulingWeb.BoardLive.Index do
   """
   use SchedulingWeb, :live_view
 
+  alias Scheduling.Auth.Scope
   alias Scheduling.Handoffs
   alias Scheduling.Offices
   alias Scheduling.Booking
@@ -134,12 +135,13 @@ defmodule SchedulingWeb.BoardLive.Index do
 
   defp load_board(socket, animate?) do
     loads = Queue.current_loads()
+    location_ids = Scope.location_ids(socket.assigns.current_scope)
     pending = Handoffs.list_pending()
     incoming_by_office = Enum.group_by(pending, & &1.office_id)
     now = DateTime.utc_now()
 
     offices =
-      Enum.map(Offices.list_offices(), fn office ->
+      Enum.map(Offices.list_offices(location_ids: location_ids), fn office ->
         load = Map.get(loads, office.id, 0)
 
         %{

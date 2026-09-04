@@ -8,6 +8,7 @@ defmodule SchedulingWeb.Api.QueueEntryController do
   use OpenApiSpex.ControllerSpecs
 
   alias Scheduling.Catalog
+  alias Scheduling.Auth.Scope
   alias Scheduling.Queue
   alias SchedulingWeb.Api.Actor
   alias SchedulingWeb.ErrorEnvelope
@@ -184,6 +185,11 @@ defmodule SchedulingWeb.Api.QueueEntryController do
         by -> [accepted_by: by]
       end
 
+    # The same office restriction the browser surface applies. A service token
+    # scoped to a site must not be able to place a patient at another one just
+    # because it came through the API.
+    opts = Keyword.put(opts, :location_ids, caller_location_ids(conn))
+
     with {:ok, entry} <- fetch(id) do
       case Queue.accept(entry, opts) do
         {:ok, assigned, _result} ->
@@ -199,14 +205,14 @@ defmodule SchedulingWeb.Api.QueueEntryController do
             )
           )
 
-        {:compliance_failed, reference} ->
+        {:compliance_failed, unmet} ->
           conn
           |> put_status(:unprocessable_entity)
           |> json(
             ErrorEnvelope.error_envelope(
               "compliance_failed",
               "The patient hasn't completed every required intake form",
-              compliance_details(reference)
+              compliance_details(unmet)
             )
           )
 
@@ -286,6 +292,17 @@ defmodule SchedulingWeb.Api.QueueEntryController do
     end
   end
 
+  # The API surface assigns `current_identity` rather than a Scope, so wrap it
+  # to reuse the same admin-bypass and absent-means-unrestricted rules the
+  # browser path gets. Absent identity means auth is disabled, which is
+  # unrestricted by definition.
+  defp caller_location_ids(conn) do
+    case conn.assigns[:current_identity] do
+      nil -> nil
+      identity -> identity |> Scope.for_identity() |> Scope.location_ids()
+    end
+  end
+
   defp fetch(id) do
     case Integer.parse(to_string(id)) do
       {int_id, ""} ->
@@ -302,14 +319,15 @@ defmodule SchedulingWeb.Api.QueueEntryController do
 
   defp reload(entry), do: Queue.get_entry!(entry.id)
 
-  # Names the reference the caller can look up in the intake system, never the
-  # form types behind it — those are health data and scheduling does not hold
-  # them. Omitted entirely when the entry carries no reference, so the envelope
-  # stays compact rather than carrying a null.
-  defp compliance_details(reference) when is_binary(reference) and reference != "",
-    do: %{compliance_ref: reference}
+  # Names the references the caller can look up in the intake system, never the
+  # form types behind them — those are health data and scheduling does not hold
+  # them. Every unmet requirement is listed rather than just the first, so a
+  # front desk can tell a patient everything outstanding in one go instead of
+  # turning them away twice. Omitted entirely when nothing is outstanding, so
+  # the envelope stays compact rather than carrying an empty list.
+  defp compliance_details([_ | _] = unmet), do: %{unmet_compliance_refs: unmet}
 
-  defp compliance_details(_reference), do: nil
+  defp compliance_details(_unmet), do: nil
 
   defp serialize(entry) do
     %{

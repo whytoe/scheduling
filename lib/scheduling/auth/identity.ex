@@ -72,6 +72,7 @@ defmodule Scheduling.Auth.Identity do
           org: String.t() | nil,
           org_id: String.t() | nil,
           tenant: String.t() | nil,
+          location_ids: [String.t()] | nil,
           sid: String.t() | nil,
           expires_at: integer() | nil
         }
@@ -88,6 +89,7 @@ defmodule Scheduling.Auth.Identity do
     :org,
     :org_id,
     :tenant,
+    :location_ids,
     :sid,
     :expires_at
   ]
@@ -114,11 +116,38 @@ defmodule Scheduling.Auth.Identity do
       org: claim(claims, Auth.org_claim()),
       org_id: claim(claims, Auth.org_id_claim()),
       tenant: claim(claims, Auth.tenant_claim()),
+      location_ids: location_ids(claims),
       # Kept so back-channel logout can name this exact session later; see
       # `Scheduling.Auth.SessionRevocation`.
       sid: claim(claims, "sid"),
       expires_at: claim(claims, "exp")
     }
+  end
+
+  # The claim is advertised singular (`astrum_location`) but a person may work
+  # across sites, so accept either one id or a list and normalise to a list.
+  #
+  # `nil` means unscoped — no claim, or an empty one. An empty list is folded
+  # into `nil` on purpose: it cannot be told apart from a provider that does
+  # not populate the claim for this user, and reading it as "no sites" would
+  # lock that person out of everything. See `Scheduling.Auth.location_claim/0`.
+  defp location_ids(claims) do
+    case claim(claims, Auth.location_claim()) do
+      nil ->
+        nil
+
+      value ->
+        value
+        |> List.wrap()
+        |> Enum.filter(&is_binary/1)
+        |> Enum.map(&String.trim/1)
+        |> Enum.reject(&(&1 == ""))
+        |> Enum.uniq()
+        |> case do
+          [] -> nil
+          ids -> ids
+        end
+    end
   end
 
   @doc """
@@ -144,6 +173,10 @@ defmodule Scheduling.Auth.Identity do
       "org" => identity.org,
       "org_id" => identity.org_id,
       "tenant" => identity.tenant,
+      # Must round-trip. Dropping it here would silently widen a scoped
+      # operator to every office on their next request, which is the one
+      # direction this field must never fail in.
+      "locs" => identity.location_ids,
       "sid" => identity.sid,
       "exp" => identity.expires_at
     }
@@ -164,12 +197,24 @@ defmodule Scheduling.Auth.Identity do
       org: data["org"],
       org_id: data["org_id"],
       tenant: data["tenant"],
+      location_ids: session_location_ids(data["locs"]),
       sid: data["sid"],
       expires_at: data["exp"]
     }
   end
 
   def from_session(_), do: nil
+
+  # Mirrors the normalisation in `location_ids/1`: absent or empty is unscoped.
+  # A malformed value is treated as unscoped rather than as an empty
+  # allow-list, matching the claim path — a broken session should not silently
+  # revoke every office from someone who had them a moment ago.
+  defp session_location_ids(value) do
+    case List.wrap(value) |> Enum.filter(&is_binary/1) do
+      [] -> nil
+      ids -> ids
+    end
+  end
 
   @doc """
   The `{actor_type, actor_id}` pair recorded on `visit_events` for actions

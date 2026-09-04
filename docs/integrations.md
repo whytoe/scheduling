@@ -20,8 +20,8 @@ pending — see `integration-contracts.md` for the decision record.
                                 │  on POST /queue_entries/:id/accept:
                                 │
                                 ├─► [Intake-form system]  compliance gate
-                                │     GET /compliance/status?reference=…
-                                │     (opaque ref in, verdict out)
+                                │     GET /responses?compliance_ref=…&status=completed
+                                │     (opaque refs out, rows back; we decide)
                                 │
                                 ├─► [matcher]             best-fit office
                                 ├─► [routing_decisions]   audit row
@@ -142,19 +142,25 @@ Two things wire a scheduling row to the intake system:
   error details — where it is actionable. Deliberate minimal exposure rather
   than an oversight; making it readable later would be an additive change.
 
-`diagnoses.required_form_types` still exists as catalog data but is **no longer
-read at accept time**. It is a routing-template attribute, not something
-scheduling evaluates against a patient.
+`diagnoses.required_compliance_refs` (renamed from `required_form_types`) is
+catalog data: the references a pathway requires by default. It **is** read, but
+at *creation* — expanded onto the entry alongside the default capabilities and
+then the diagnosis is discarded. That is what lets the gate work at accept time
+without the entry holding a diagnosis, and it is why an entry raised from a
+booking screen is gated the same as one from the bridge.
 
 ### Behavior
 
 `POST /api/v1/queue_entries/:id/accept`:
 
 1. **Compliance gate** runs first, when all of: `INTAKE_API_KEY` is set, the
-   entry carries a `compliance_ref`, and the patient has an
-   `intake_patient_id`. Any of those missing → the gate is skipped.
-2. `GET {INTAKE_API_URL}/compliance/status?reference=<ref>&patient_id=<uuid>`
-3. Intake answers `{"compliant": true|false}`.
+   entry has at least one `required_compliance_refs` value, and the patient has
+   an `intake_patient_id`. Any of those missing → the gate is skipped.
+2. For each required reference,
+   `GET {INTAKE_API_URL}/responses?patient_id=<uuid>&compliance_ref=<ref>&status=completed&limit=1`
+3. One or more rows → that requirement is satisfied; zero rows → it is unmet.
+   Scheduling collects every unmet reference rather than stopping at the first,
+   so the whole outstanding set can be reported at once.
 4. **Matcher** runs next (unchanged — best-fit office with free capacity).
 
 Outcomes (all written to the `routing_decisions` audit log with a
@@ -164,17 +170,25 @@ human-readable rationale):
 |----------------------------------------|------|----------------------------------------------------------------------------|-------------|
 | Assigned                               | 200  | `QueueEntry` (status=`assigned`)                                           | assigned    |
 | Compliant → matcher had no eligible office | 409  | `error.code = "no_eligible_office"`                                        | waiting     |
-| Intake says not compliant              | 422  | `error.code = "compliance_failed"`, `error.details.compliance_ref`         | waiting     |
-| Intake unreachable or the reference unresolvable | 503 | `error.code = "compliance_unavailable"`, `error.details.reason`      | waiting     |
+| One or more requirements unmet         | 422  | `error.code = "compliance_failed"`, `error.details.unmet_compliance_refs`  | waiting     |
+| Intake unreachable, or a reference it does not recognise | 503 | `error.code = "compliance_unavailable"`, `error.details.reason` | waiting     |
 
 **Fail-closed**: an unreachable intake blocks new bookings, and so does a
-reference intake cannot resolve — passing an unknown encounter through the gate
-would defeat the point. Bookings resume automatically when intake recovers.
+reference intake cannot resolve — passing an unknown requirement through the
+gate would defeat the point. Bookings resume automatically when intake
+recovers.
 
-> **This endpoint does not exist yet.** `/compliance/status` is a request to
-> the intake team, analogous to the `?patient_id=` filter they added for
-> `sc-c9j`. Until it ships, leave `INTAKE_API_KEY` unset — or simply create
-> entries without a `compliance_ref`, which skips the gate.
+Note the two are reported differently on purpose. An unmet requirement is a
+`422 compliance_failed` — the patient genuinely owes a form. An unrecognised
+reference is a `503 compliance_unavailable`, because a stale `cref_` left
+behind after a form type was retired is *our* configuration being wrong, and
+the front desk must not be told a patient owes paperwork they do not owe.
+
+> **This filter does not exist yet.** `compliance_ref` on `/responses` is a
+> request to the intake team, analogous to the `?patient_id=` filter they added
+> for `sc-c9j`, and they have agreed to it in principle — see
+> `docs/intake-compliance-reply.md`. Until it ships, leave `INTAKE_API_KEY`
+> unset, which skips the gate.
 
 ### The data boundary (why the gate looks like this)
 
@@ -193,9 +207,32 @@ they used to reach four surfaces:
 
 Earlier revisions of this document warned operators not to put sensitive
 `formType` values into `required_form_types` for exactly that reason. That was
-a policy asking humans to compensate for a design flaw. The design is now the
-control: scheduling never receives the form types, so it cannot leak them, and
-`test/scheduling/phi_boundary_test.exs` asserts it at each egress path.
+a policy asking humans to compensate for a design flaw. The field is now
+`required_compliance_refs` and holds opaque `cref_` values minted by intake, so
+scheduling never receives the form types and cannot leak them;
+`test/scheduling/phi_boundary_test.exs` asserts it at each egress path. The
+diagnosis catalog screen flags any value that is not reference-shaped, which
+catches a form name typed by hand — including classes nobody thought to list.
+
+### Which control is actually load-bearing
+
+Worth being blunt about, because it is easy to over-credit the gate.
+
+Reference blinding stops scheduling **storing** form-type names. It does not
+stop the more interesting fact leaking: a `compliance_failed` outcome against a
+named patient says *"this patient has an unmet requirement"*, and that is
+equally true whether the reference is opaque or not. A reference is a pseudonym
+with a stable mapping — anyone holding both sides once learns the table
+permanently.
+
+The control that keeps sensitive encounters out of this system altogether is
+the **exclusion list on the intake bridge** (`BRIDGE_FORM_TYPE_MAP`): a form
+type left out of it never produces a queue entry here at all. That is a real
+boundary. Reference blinding is defence-in-depth stacked on top of it, and
+should be evaluated as such rather than as the thing that makes the gate safe.
+
+This framing is intakeform's, from their reply to `sc-s9x`, and they were right
+to push on it — see `docs/intake-compliance-reply.md`.
 
 For the same reason `queue_entries` no longer has a `diagnosis_id`. A diagnosis
 may be passed to `POST /api/v1/queue_entries` as a convenience — it is expanded
@@ -204,16 +241,24 @@ never stored.
 
 ### Known limitations
 
-- The compliance call is **synchronous** inside `accept`. Slow intake = slow
-  accept. It is now a single request per accept rather than one per required
-  form type, so this matters less than it did. If it still bites:
-  1. Short-TTL cache on the per-`(intake_patient_id, compliance_ref)` verdict.
+- The compliance call is **synchronous** inside `accept`, and currently issues
+  one request per required reference. Slow intake = slow accept. Batching needs
+  intake to return the reference on each row — without that a multi-ref query
+  says how many requirements are met but not which, which is not an answer the
+  gate can use. Requested; `Scheduling.Compliance.Client.satisfied_refs/2` is
+  already list-shaped so the swap is one function. If it bites sooner:
+  1. Short-TTL cache on the per-`(intake_patient_id, compliance_ref)` result.
   2. Precompute at entry creation and revalidate on a TTL.
   3. Move the check off the accept path entirely: a background job marks
      entries pre-cleared and `accept` only books those.
-- The gate is **skipped when an entry has no `compliance_ref`**, which is every
-  entry until ac-checkin starts supplying one. Fail-open, matching the
-  unconfigured-intake default.
+- The gate is **skipped when an entry requires no references**. Requirements are
+  resolved at creation — from `service_code`/`diagnosis_id` against the catalog,
+  or from an explicit `required_compliance_refs` — so an entry created with
+  neither passes. Fail-open, matching the unconfigured-intake default.
+- An **unrecognised reference is not a block**. Intake answers `400`, which maps
+  to `compliance_unavailable`, not `compliance_failed`. A stale `cref_` left
+  after a form type is retired is our configuration being wrong, and the front
+  desk must not be told a patient owes paperwork they do not owe.
 
 ## What's pending: Check-in / queueing app
 

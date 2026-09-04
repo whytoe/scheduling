@@ -49,3 +49,6 @@ npm-debug.log
 /.claude/
 /.runtime/
 /CLAUDE.md
+
+# macOS
+.DS_Store

@@ -163,7 +163,7 @@ defmodule SchedulingWeb.Schemas do
           items: SchedulingWeb.Schemas.Capability,
           description: "Default required capabilities for this diagnosis"
         },
-        required_form_types: %Schema{
+        required_compliance_refs: %Schema{
           type: :array,
           items: %Schema{type: :string},
           description:
@@ -172,13 +172,13 @@ defmodule SchedulingWeb.Schemas do
         inserted_at: %Schema{type: :string, format: :"date-time"},
         updated_at: %Schema{type: :string, format: :"date-time"}
       },
-      required: [:id, :name, :capabilities, :required_form_types, :inserted_at, :updated_at],
+      required: [:id, :name, :capabilities, :required_compliance_refs, :inserted_at, :updated_at],
       example: %{
         "id" => 1,
         "name" => "Stroke Workup",
         "code" => "DX-STRK",
         "capabilities" => [],
-        "required_form_types" => ["stroke-consent"],
+        "required_compliance_refs" => ["cref_7f3a91c4e2b8"],
         "inserted_at" => "2026-06-01T12:34:56Z",
         "updated_at" => "2026-06-01T12:34:56Z"
       }
@@ -220,7 +220,7 @@ defmodule SchedulingWeb.Schemas do
               description:
                 "Capability ids that become this diagnosis's default required capabilities. Omit to leave existing associations unchanged; pass [] to clear them."
             },
-            required_form_types: %Schema{
+            required_compliance_refs: %Schema{
               type: :array,
               items: %Schema{type: :string},
               description: "Intake form types required for compliance. Pass [] to clear."
@@ -235,7 +235,7 @@ defmodule SchedulingWeb.Schemas do
           "name" => "Stroke Workup",
           "code" => "DX-STRK",
           "capability_ids" => [1, 2],
-          "required_form_types" => ["stroke-consent"]
+          "required_compliance_refs" => ["cref_7f3a91c4e2b8"]
         }
       }
     })
@@ -574,7 +574,14 @@ defmodule SchedulingWeb.Schemas do
               type: :string,
               nullable: true,
               description:
-                "Opaque reference the intake-form system resolves to the forms this encounter requires. Scheduling passes it through and never learns the form types. Omit to skip the compliance gate. **Write-only** — it is not returned on QueueEntry reads, only in the `compliance_failed` error details where it is actionable."
+                "Opaque encounter reference, carried for audit so an operator can look the encounter up in the originating system. Not used by the compliance gate — see `required_compliance_refs`. **Write-only**; never returned on reads."
+            },
+            required_compliance_refs: %Schema{
+              type: :array,
+              items: %Schema{type: :string},
+              description:
+                "Opaque compliance references this encounter must satisfy, minted by the intake-form system (one per form type) and resolved there. Scheduling never learns the form-type names behind them. Takes precedence over the catalog defaults that `service_code` or `diagnosis_id` would supply. Omit and supply neither template and the gate has nothing to check, so it passes. **Write-only**; never returned on reads.",
+              example: ["cref_7f3a91c4e2b8"]
             },
             required_capability_ids: %Schema{
               type: :array,
@@ -653,10 +660,11 @@ defmodule SchedulingWeb.Schemas do
               type: :object,
               nullable: true,
               properties: %{
-                compliance_ref: %Schema{
-                  type: :string,
+                unmet_compliance_refs: %Schema{
+                  type: :array,
+                  items: %Schema{type: :string},
                   description:
-                    "The entry's opaque compliance reference; resolve it in the intake system to see which forms are outstanding. Absent when the entry carries no reference."
+                    "Every compliance reference the patient has not satisfied — resolve them in the intake system to see which forms are outstanding. All of them are listed, not just the first, so a front desk can tell the patient everything needed in one go. Absent when nothing is outstanding."
                 }
               }
             }
@@ -669,7 +677,7 @@ defmodule SchedulingWeb.Schemas do
         "error" => %{
           "code" => "compliance_failed",
           "message" => "The patient hasn't completed every required intake form",
-          "details" => %{"compliance_ref" => "enc_01HV3K7Q"}
+          "details" => %{"unmet_compliance_refs" => ["cref_7f3a91c4e2b8"]}
         }
       }
     })

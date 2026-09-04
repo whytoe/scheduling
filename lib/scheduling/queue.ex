@@ -193,14 +193,16 @@ defmodule Scheduling.Queue do
         expand_template(
           changeset,
           :service_code,
-          Catalog.fetch_diagnosis_by_code(Map.get(attrs, "service_code"))
+          Catalog.fetch_diagnosis_by_code(Map.get(attrs, "service_code")),
+          attrs
         )
 
       present?(Map.get(attrs, "diagnosis_id")) ->
         expand_template(
           changeset,
           :diagnosis_id,
-          Catalog.fetch_diagnosis(Map.get(attrs, "diagnosis_id"))
+          Catalog.fetch_diagnosis(Map.get(attrs, "diagnosis_id")),
+          attrs
         )
 
       true ->
@@ -208,13 +210,31 @@ defmodule Scheduling.Queue do
     end
   end
 
-  defp expand_template(changeset, _field, {:ok, template}) do
-    Ecto.Changeset.put_assoc(changeset, :required_capabilities, template.capabilities)
+  # A template supplies both halves of an encounter's requirements: the
+  # capabilities that decide which room can serve it, and the compliance
+  # references that decide whether it may be served at all. Resolving both here
+  # is what lets the gate work without the entry holding a diagnosis — see the
+  # migration that added `required_compliance_refs`.
+  #
+  # An explicit `required_compliance_refs` in the request wins, so a caller
+  # that knows the encounter's requirements (the intake bridge does) is not
+  # overridden by the catalog default.
+  defp expand_template(changeset, _field, {:ok, template}, attrs) do
+    changeset = Ecto.Changeset.put_assoc(changeset, :required_capabilities, template.capabilities)
+
+    if Map.has_key?(attrs, "required_compliance_refs") do
+      changeset
+    else
+      Ecto.Changeset.put_change(
+        changeset,
+        :required_compliance_refs,
+        template.required_compliance_refs || []
+      )
+    end
   end
 
-  defp expand_template(changeset, field, :error) do
-    Ecto.Changeset.add_error(changeset, field, "does not exist")
-  end
+  defp expand_template(changeset, field, :error, _attrs),
+    do: Ecto.Changeset.add_error(changeset, field, "does not exist")
 
   defp present?(value), do: (is_binary(value) and value != "") or is_integer(value)
 
@@ -265,24 +285,27 @@ defmodule Scheduling.Queue do
   @spec accept(QueueEntry.t(), keyword()) ::
           {:ok, QueueEntry.t(), Result.t()}
           | {:no_eligible_office, Result.t()}
-          | {:compliance_failed, String.t() | nil}
+          | {:compliance_failed, [String.t()]}
           | {:compliance_unavailable, term()}
           | {:error, Ecto.Changeset.t()}
   def accept(%QueueEntry{} = entry, opts \\ []) do
-    # Compliance.verify/1 needs the entry's compliance_ref and the patient's
-    # intake_patient_id; get_entry!/1 preloads the patient already. It no
-    # longer needs a diagnosis — the gate now sends an opaque reference and
-    # intake decides which forms it implies.
+    # Compliance.verify/1 needs the entry's required_compliance_refs and the
+    # patient's intake_patient_id; get_entry!/1 preloads the patient already.
+    # It no longer needs a diagnosis — the references were resolved when the
+    # entry was created.
     case Compliance.verify(entry) do
       :ok -> do_accept(entry, opts)
       :not_configured -> do_accept(entry, opts)
-      :blocked -> record_compliance_block(entry, opts)
+      {:blocked, unmet} -> record_compliance_block(entry, unmet, opts)
       {:error, reason} -> record_compliance_unavailable(entry, reason, opts)
     end
   end
 
   defp do_accept(entry, opts) do
-    result = Matching.match_queue_entry(entry, current_loads())
+    result =
+      Matching.match_queue_entry(entry, current_loads(),
+        location_ids: Keyword.get(opts, :location_ids)
+      )
 
     case Result.chosen_office(result) do
       nil ->
@@ -310,14 +333,11 @@ defmodule Scheduling.Queue do
   # every webhook subscriber, so it names the reference, never the form types
   # behind it. The "Compliance check failed" prefix is load-bearing —
   # SchedulingWeb.RoutingDecisionLive.Index derives the outcome filter from it.
-  defp record_compliance_block(entry, opts) do
+  defp record_compliance_block(entry, unmet, opts) do
     rationale =
-      case entry.compliance_ref do
-        ref when is_binary(ref) and ref != "" ->
-          "Compliance check failed for reference " <> ref
-
-        _ ->
-          "Compliance check failed"
+      case unmet do
+        [] -> "Compliance check failed"
+        refs -> "Compliance check failed for reference " <> Enum.join(refs, ", ")
       end
 
     result = %Result{
@@ -328,7 +348,7 @@ defmodule Scheduling.Queue do
     }
 
     Audit.record_decision(entry, result, opts)
-    {:compliance_failed, entry.compliance_ref}
+    {:compliance_failed, unmet}
   end
 
   defp record_compliance_unavailable(entry, reason, opts) do

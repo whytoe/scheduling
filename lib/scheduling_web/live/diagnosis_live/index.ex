@@ -1,18 +1,34 @@
 defmodule SchedulingWeb.DiagnosisLive.Index do
   @moduledoc """
   CRUD for the diagnosis catalog. Each diagnosis carries default required
-  capabilities and a set of required form types. As the operator types a form
-  type, any value matching a sensitive class (PHQ-9, GAD-7, AUDIT-C, HIV consent,
-  substance-use, psychiatric-intake, …) is flagged with an amber callout — it
-  informs and confirms intent, it does **not** block, since a clinician may
-  legitimately need a sensitive form.
+  capabilities and a set of **compliance references** — opaque identifiers
+  minted by intakeform, one per form type, which an admin reads from
+  `GET /api/v1/forms` and pastes here.
+
+  As the operator types, a value that does not look like a reference is flagged
+  with an amber callout. This used to be the other way round: the field held
+  form-type names and we warned when one matched a known-sensitive class
+  (PHQ-9, GAD-7, HIV consent, …). That required scheduling to carry a
+  vocabulary of clinical form names in its own source, and it only caught the
+  classes we had thought of.
+
+  Inverting it is strictly better. Scheduling cannot tell what a reference
+  means — that is the point — so instead of guessing which names are sensitive
+  we flag anything that is *not* a reference. A form name entered here now
+  fails the check by construction rather than by matching a list.
+
+  It informs rather than blocks: the reference format is intake's to change,
+  and a hard rule here would break the catalog the day they change it.
   """
   use SchedulingWeb, :live_view
 
   alias Scheduling.Catalog
   alias Scheduling.Catalog.Diagnosis
 
-  @sensitive_forms ~w(phq-9 gad-7 audit-c hiv-consent substance-use psychiatric-intake)
+  # Intake mints these as a `cref_` prefix followed by random hex — random, not
+  # derived from the form-type name, so they cannot be reversed by guessing.
+  # Matched loosely on purpose: this is a nudge, not validation.
+  @reference_pattern ~r/^cref_[a-z0-9]{8,}$/i
 
   @impl true
   def mount(_params, _session, socket) do
@@ -36,7 +52,7 @@ defmodule SchedulingWeb.DiagnosisLive.Index do
     |> assign(:selected_capability_ids, [])
     |> assign(:form_types, [])
     |> assign(:draft, "")
-    |> assign(:draft_sensitive, false)
+    |> assign(:draft_unreferenced, false)
   end
 
   defp apply_action(socket, :new, _params) do
@@ -47,7 +63,7 @@ defmodule SchedulingWeb.DiagnosisLive.Index do
     |> assign(:diagnosis, diagnosis)
     |> assign(:form_types, [])
     |> assign(:draft, "")
-    |> assign(:draft_sensitive, false)
+    |> assign(:draft_unreferenced, false)
     |> assign_form(Catalog.change_diagnosis(diagnosis))
   end
 
@@ -57,9 +73,9 @@ defmodule SchedulingWeb.DiagnosisLive.Index do
     socket
     |> assign(:page_title, "Edit #{diagnosis.name}")
     |> assign(:diagnosis, diagnosis)
-    |> assign(:form_types, diagnosis.required_form_types || [])
+    |> assign(:form_types, diagnosis.required_compliance_refs || [])
     |> assign(:draft, "")
-    |> assign(:draft_sensitive, false)
+    |> assign(:draft_unreferenced, false)
     |> assign_form(Catalog.change_diagnosis(diagnosis))
   end
 
@@ -70,7 +86,7 @@ defmodule SchedulingWeb.DiagnosisLive.Index do
   end
 
   def handle_event("type_form", %{"draft" => draft}, socket) do
-    {:noreply, assign(socket, draft: draft, draft_sensitive: sensitive?(draft))}
+    {:noreply, assign(socket, draft: draft, draft_unreferenced: not_a_reference?(draft))}
   end
 
   def handle_event("add_form", %{"draft" => draft}, socket) do
@@ -79,7 +95,7 @@ defmodule SchedulingWeb.DiagnosisLive.Index do
 
     types = if value != "" and value not in types, do: types ++ [value], else: types
 
-    {:noreply, assign(socket, form_types: types, draft: "", draft_sensitive: false)}
+    {:noreply, assign(socket, form_types: types, draft: "", draft_unreferenced: false)}
   end
 
   def handle_event("remove_form", %{"form" => form}, socket) do
@@ -87,7 +103,7 @@ defmodule SchedulingWeb.DiagnosisLive.Index do
   end
 
   def handle_event("save", %{"diagnosis" => params}, socket) do
-    params = Map.put(params, "required_form_types", socket.assigns.form_types)
+    params = Map.put(params, "required_compliance_refs", socket.assigns.form_types)
     save_diagnosis(socket, socket.assigns.live_action, params)
   end
 
@@ -150,10 +166,17 @@ defmodule SchedulingWeb.DiagnosisLive.Index do
     |> assign(:selected_capability_ids, selected)
   end
 
-  @doc false
-  def sensitive?(form) do
-    f = form |> to_string() |> String.downcase() |> String.trim()
-    f != "" and Enum.any?(@sensitive_forms, fn s -> f == s or String.contains?(f, s) end)
+  @doc """
+  True when a value does not look like an intakeform compliance reference.
+
+  Named for what it flags rather than what it accepts, because the flag is the
+  interesting state: a bare form name is the mistake this catches, and a form
+  name bound to a diagnosis is precisely the clinical content scheduling must
+  not store.
+  """
+  def not_a_reference?(value) do
+    v = value |> to_string() |> String.trim()
+    v != "" and not Regex.match?(@reference_pattern, v)
   end
 
   defp capability_list(diagnosis) do
@@ -184,7 +207,7 @@ defmodule SchedulingWeb.DiagnosisLive.Index do
         selected_capability_ids={@selected_capability_ids}
         form_types={@form_types}
         draft={@draft}
-        draft_sensitive={@draft_sensitive}
+        draft_unreferenced={@draft_unreferenced}
       />
 
       <div :if={@diagnoses == []} class="card">
@@ -212,11 +235,11 @@ defmodule SchedulingWeb.DiagnosisLive.Index do
               <td>
                 <span class="chiprow">
                   <span
-                    :for={f <- d.required_form_types || []}
-                    class={["badge", (sensitive?(f) && "attention") || "neutral"]}
-                    title={(sensitive?(f) && "Sensitive form type") || nil}
+                    :for={f <- d.required_compliance_refs || []}
+                    class={["badge", (not_a_reference?(f) && "attention") || "neutral"]}
+                    title={(not_a_reference?(f) && "Sensitive form type") || nil}
                   >
-                    <.icon :if={sensitive?(f)} name="hero-eye-slash" class="size-[12px]" />
+                    <.icon :if={not_a_reference?(f)} name="hero-eye-slash" class="size-[12px]" />
                     <span class="mono" style="font-size:12px">{f}</span>
                   </span>
                 </span>
@@ -269,10 +292,15 @@ defmodule SchedulingWeb.DiagnosisLive.Index do
   attr :selected_capability_ids, :list, required: true
   attr :form_types, :list, required: true
   attr :draft, :string, required: true
-  attr :draft_sensitive, :boolean, required: true
+  attr :draft_unreferenced, :boolean, required: true
 
   defp diagnosis_form(assigns) do
-    assigns = assign(assigns, :sensitive_selected, Enum.filter(assigns.form_types, &sensitive?/1))
+    assigns =
+      assign(
+        assigns,
+        :unreferenced_selected,
+        Enum.filter(assigns.form_types, &not_a_reference?/1)
+      )
 
     ~H"""
     <div class="editform">
@@ -340,35 +368,37 @@ defmodule SchedulingWeb.DiagnosisLive.Index do
             name="draft"
             value={@draft}
             phx-debounce="120"
-            class={["input mono flex-1", @draft_sensitive && "input--error"]}
-            placeholder="e.g. vitals-baseline"
+            class={["input mono flex-1", @draft_unreferenced && "input--error"]}
+            placeholder="e.g. cref_7f3a91c4e2b8"
             autocomplete="off"
-            aria-describedby={(@draft_sensitive && "sens-warn") || nil}
+            aria-describedby={(@draft_unreferenced && "sens-warn") || nil}
           />
           <.button variant="subtle" type="submit">Add</.button>
         </form>
         <div class="field__hint">
-          Press Enter to add. Form types matching a sensitive class are flagged.
+          Press Enter to add. Paste the reference from intakeform, not the form's name.
         </div>
 
-        <div :if={@draft_sensitive} id="sens-warn" style="margin-top:var(--s-2)">
+        <div :if={@draft_unreferenced} id="sens-warn" style="margin-top:var(--s-2)">
           <.callout
             tone="attention"
-            icon="hero-eye-slash"
-            title={~s["#{String.trim(@draft)}" looks like a sensitive form type]}
+            icon="hero-exclamation-triangle"
+            title={~s["#{String.trim(@draft)}" is not a compliance reference]}
           >
-            Sensitive forms gate routing through the compliance check and are handled under
-            stricter access rules. Confirm this is intended before saving.
+            References come from intakeform and look like <code>cref_7f3a91c4e2b8</code>.
+            A form's name entered here is clinical content, which this system does not
+            carry — and intake will not recognise it, so the check will report as
+            unavailable rather than gating anything.
           </.callout>
         </div>
 
         <div class="chiprow" style="margin-top:var(--s-3)">
           <span
             :for={f <- @form_types}
-            class={["badge", (sensitive?(f) && "attention") || "neutral"]}
+            class={["badge", (not_a_reference?(f) && "attention") || "neutral"]}
             style="gap:6px"
           >
-            <.icon :if={sensitive?(f)} name="hero-eye-slash" class="size-[12px]" />
+            <.icon :if={not_a_reference?(f)} name="hero-eye-slash" class="size-[12px]" />
             <span class="mono" style="font-size:12px">{f}</span>
             <button
               type="button"
@@ -383,13 +413,19 @@ defmodule SchedulingWeb.DiagnosisLive.Index do
       </div>
 
       <.callout
-        :if={@sensitive_selected != []}
-        tone="info"
+        :if={@unreferenced_selected != []}
+        tone="attention"
         icon="hero-shield-exclamation"
-        title={"#{length(@sensitive_selected)} sensitive form #{ngettext("type", "types", length(@sensitive_selected))} on this diagnosis"}
+        title={"#{length(@unreferenced_selected)} #{ngettext("value is", "values are", length(@unreferenced_selected))} not a compliance reference"}
       >
-        Patients with this diagnosis must have <b>{Enum.join(@sensitive_selected, ", ")}</b>
-        completed before they can be routed.
+        <b>{Enum.join(@unreferenced_selected, ", ")}</b>
+        {ngettext("does", "do", length(@unreferenced_selected))} not look like an intakeform reference. Intake will not recognise {ngettext(
+          "it",
+          "them",
+          length(@unreferenced_selected)
+        )}, so the compliance check will
+        report as unavailable rather than passing or failing. Replace with the <code>cref_</code>
+        value from intakeform.
       </.callout>
 
       <div class="flex gap-2" style="margin-top:var(--s-4)">
