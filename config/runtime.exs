@@ -120,6 +120,18 @@ config :scheduling, Scheduling.Core,
   scopes: comma_list.("CORE_SCOPES", "core:patients:read,core:organizations:read"),
   http_timeout_ms: String.to_integer(System.get_env("CORE_HTTP_TIMEOUT_MS", "5000"))
 
+# Projecting ac-core's site list into `locations`. This is what makes
+# per-office access control actually restrict anything: with no locations every
+# office is unlinked, and unlinked offices are visible to everyone. See
+# `Scheduling.Locations.Syncer`.
+#
+# Hourly because sites change rarely but a new one should not wait a day to
+# become assignable, and one paginated GET an hour costs nothing. The syncer
+# does not start at all without core credentials.
+config :scheduling, Scheduling.Locations,
+  sync_enabled: System.get_env("LOCATION_SYNC_ENABLED", "true") != "false",
+  sync_interval_ms: String.to_integer(System.get_env("LOCATION_SYNC_INTERVAL_MS", "3600000"))
+
 # Booking's rolling slot horizon. Sixty days is far enough to book a couple of
 # months out and short enough that a schedule change does not strand a year of
 # stale slots — nothing prunes them, so the horizon is also the blast radius of

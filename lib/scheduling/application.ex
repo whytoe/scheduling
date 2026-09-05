@@ -23,6 +23,11 @@ defmodule Scheduling.Application do
         # Caches scheduling's own client-credentials token for calling ac-core.
         # nil unless core credentials are configured.
         Scheduling.Auth.ServiceToken.child_spec_if_enabled(),
+        # Projects ac-core's site list into `locations`. nil without core
+        # credentials. Started after the token holder it depends on, and
+        # before the endpoint so the first board request reads a cache that is
+        # at least being filled.
+        Scheduling.Locations.Syncer.child_spec_if_enabled(),
         # Keeps the rolling slot horizon topped up. nil when there are no
         # availability rules — nothing to generate from.
         Scheduling.Booking.HorizonKeeper.child_spec_if_enabled(),

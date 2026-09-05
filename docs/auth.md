@@ -161,6 +161,23 @@ reaches every room in it.
 Configurable as `OIDC_LOCATION_CLAIM`; `astrum_location` is the default because
 ac-core advertises it in `claims_supported`.
 
+### It needs locations to exist
+
+Scoping matches the claim against `locations.core_location_id`, and that table
+is a projection of ac-core's site list — nothing else writes to it. There is no
+locations UI and no API route for one.
+
+So the sync is not an optimisation, it is what makes the control a control.
+With an empty `locations` table every office is unlinked, unlinked offices are
+visible to everyone by design, and the deployment behaves exactly like one with
+no scoping configured. Nothing is broken and nothing is enforced.
+
+`Scheduling.Locations.Syncer` runs the pass hourly under the supervisor, from
+boot, whenever core credentials are present. Deliberately a supervised process
+rather than an admin button: a control that only works if someone remembers to
+press it is not a control. `LOCATION_SYNC_ENABLED=false` switches it off for a
+deployment that fills `locations` some other way.
+
 ### Why absent means unrestricted
 
 Because the alternative locks everyone out of everything at once.
