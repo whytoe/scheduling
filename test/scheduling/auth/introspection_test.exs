@@ -20,6 +20,8 @@ defmodule Scheduling.Auth.IntrospectionTest do
 
   import Scheduling.OidcProvider
 
+  require Logger
+
   alias Scheduling.Auth.Introspection
   alias Scheduling.Auth.Tokens
 
@@ -78,6 +80,33 @@ defmodule Scheduling.Auth.IntrospectionTest do
       stub_introspection(ctx, %{"active" => false})
 
       assert {:error, :invalid_token} = Tokens.validate(@opaque_token)
+    end
+
+    test "and says so in the log, so the path is not invisible", ctx do
+      # The most common outcome. Without a line for it, "introspection ran and
+      # was told no" is indistinguishable from "introspection never ran" — and
+      # that is precisely the question when a token is being rejected and
+      # nobody knows why. Established by having to answer it from request
+      # latency once, in production.
+      stub_introspection(ctx, %{"active" => false})
+
+      # The suite runs at :warning and this is deliberately an :info — normal
+      # traffic, not a problem. Lift the level for this process only; the
+      # primary level filters before any capture handler sees the message, so
+      # capture_log's own :level option cannot reach it.
+      # The primary Logger level filters before any capture handler sees a
+      # message, so capture_log's own :level option cannot reach an :info while
+      # the suite runs at :warning. Lower the primary level for this test only.
+      previous = Logger.level()
+      Logger.configure(level: :info)
+      on_exit(fn -> Logger.configure(level: previous) end)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, :invalid_token} = Tokens.validate(@opaque_token)
+        end)
+
+      assert log =~ "not active"
     end
 
     test "is rejected when the response omits active entirely", ctx do

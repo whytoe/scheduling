@@ -147,6 +147,16 @@ defmodule Scheduling.Auth.Introspection do
   defp interpret(%Oidcc.TokenIntrospection{active: _inactive}) do
     # Expired, revoked, or never issued — RFC 7662 §2.2 deliberately does not
     # distinguish them, and neither should the response we give the caller.
+    #
+    # Logged even though it says nothing the caller does not already know,
+    # because of what its absence would mean here. This is the most common
+    # outcome by far, and without a line for it the fallback leaves no trace at
+    # all on the path it takes most often — so "introspection ran and the
+    # provider said no" and "introspection never ran" look identical from the
+    # log. That is exactly the question someone debugging a rejected token
+    # needs answered, and working it out from request latency is not a
+    # reasonable thing to ask of them.
+    Logger.info("Introspection reported the token is not active")
     {:error, :invalid_token}
   end
 
