@@ -130,6 +130,7 @@ defmodule Scheduling.Auth.ServiceToken do
   defp request_token do
     case exchange() do
       {:ok, %Oidcc.Token{access: %Oidcc.Token.Access{token: token, expires: expires}}} ->
+        log_shape(token, expires)
         {:ok, token, serve_until(expires)}
 
       {:ok, other} ->
@@ -155,6 +156,34 @@ defmodule Scheduling.Auth.ServiceToken do
     )
   catch
     :exit, reason -> {:error, {:provider_unavailable, reason}}
+  end
+
+  # Reports the token's *shape* — never the token. Three dot-separated segments
+  # is a JWS; anything else is opaque to us.
+  #
+  # This is the cheapest available answer to a question that otherwise needs a
+  # live integration to settle: whether ac-core's access tokens can be
+  # validated locally at all. If they are opaque, `SchedulingWeb.Plugs.ApiAuth`
+  # cannot verify a bearer token against the JWKS and every `/api/v1` caller
+  # depends on the introspection fallback — while browser SSO keeps working,
+  # because that path needs only the ID token. The failure is therefore
+  # invisible from the UI, and this line is what makes it visible from a log
+  # the moment the app first mints a token, rather than when an integrator
+  # reports being unable to authenticate.
+  #
+  # Logged on mint only, which is once per token lifetime rather than per
+  # request.
+  defp log_shape(token, expires) do
+    format =
+      case token |> String.split(".") |> length() do
+        3 -> "JWT"
+        _ -> "opaque"
+      end
+
+    Logger.info(
+      "Core service token minted: format=#{format} length=#{String.length(token)} " <>
+        "expires_in=#{inspect(expires)}"
+    )
   end
 
   # `expires` is expires_in (seconds of validity), so the deadline is relative

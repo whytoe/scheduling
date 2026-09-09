@@ -12,6 +12,8 @@ defmodule Scheduling.Auth.ServiceTokenTest do
   """
   use ExUnit.Case, async: false
 
+  require Logger
+
   alias Scheduling.Auth.ServiceToken
 
   setup do
@@ -199,6 +201,65 @@ defmodule Scheduling.Auth.ServiceTokenTest do
       assert {:ok, "tok_1"} = ServiceToken.fetch(pid)
       assert {:ok, "tok_1"} = ServiceToken.fetch(pid)
       assert :counters.get(counter, 1) == 1
+    end
+  end
+
+  describe "reporting the token's shape" do
+    # Whether ac-core's access tokens are JWTs decides whether /api/v1 can
+    # validate a bearer token locally at all, or depends entirely on the
+    # introspection fallback. Nothing else in the system reveals it until an
+    # integrator reports being unable to authenticate — browser SSO is
+    # unaffected either way, because that path needs only the ID token.
+    test "says opaque when the token is not a JWS", ctx do
+      start_provider!(ctx.issuer)
+      stub_token(ctx.bypass, &token_response(&1, "an_opaque_string", 300))
+
+      previous = Logger.level()
+      Logger.configure(level: :info)
+      on_exit(fn -> Logger.configure(level: previous) end)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          pid = start_supervised!(ServiceToken)
+          assert {:ok, _} = ServiceToken.fetch(pid)
+        end)
+
+      assert log =~ "format=opaque"
+    end
+
+    test "says JWT when it has three segments", ctx do
+      start_provider!(ctx.issuer)
+      stub_token(ctx.bypass, &token_response(&1, "header.payload.signature", 300))
+
+      previous = Logger.level()
+      Logger.configure(level: :info)
+      on_exit(fn -> Logger.configure(level: previous) end)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          pid = start_supervised!(ServiceToken)
+          assert {:ok, _} = ServiceToken.fetch(pid)
+        end)
+
+      assert log =~ "format=JWT"
+    end
+
+    test "never writes the token itself into the log", ctx do
+      # The whole reason this reports a shape rather than a value.
+      start_provider!(ctx.issuer)
+      stub_token(ctx.bypass, &token_response(&1, "sup3r-s3cret-token-value", 300))
+
+      previous = Logger.level()
+      Logger.configure(level: :info)
+      on_exit(fn -> Logger.configure(level: previous) end)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          pid = start_supervised!(ServiceToken)
+          assert {:ok, _} = ServiceToken.fetch(pid)
+        end)
+
+      refute log =~ "sup3r-s3cret-token-value"
     end
   end
 
