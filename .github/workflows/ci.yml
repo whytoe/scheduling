@@ -48,6 +48,14 @@ jobs:
       - name: Install dependencies
         run: mix deps.get
 
+      # `mix precommit` runs `deps.unlock --unused`, which *rewrites* mix.lock.
+      # CI verifies instead of rewriting — same split as `mix format` locally
+      # versus `--check-formatted` here. Without this, an unused dependency
+      # passes CI and then fails precommit on the next person's machine, which
+      # reads as their change having broken something.
+      - name: Check for unused dependencies
+        run: mix deps.unlock --check-unused
+
       - name: Compile (warnings as errors)
         run: mix compile --warnings-as-errors
 
