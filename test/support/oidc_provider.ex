@@ -31,6 +31,32 @@ defmodule Scheduling.OidcProvider do
   @client_id "scheduling"
   @client_secret "test-secret"
 
+  @doc """
+  Stubs the provider's RFC 7662 introspection endpoint.
+
+  `response` is the JSON body to return, so a test can say `active: false`, or
+  hand back an `exp` in the past, or name an audience belonging to somebody
+  else. Returns a counter reporting how many times the endpoint was called,
+  which is how a test asserts the *fast path* never reached for it.
+
+      counter = stub_introspection(ctx, %{"active" => true, "sub" => "svc-1"})
+      ...
+      assert :counters.get(counter, 1) == 0
+  """
+  def stub_introspection(context, response, status \\ 200) do
+    counter = :counters.new(1, [])
+
+    Bypass.stub(context.bypass, "POST", "/protocol/openid-connect/token/introspect", fn conn ->
+      :counters.add(counter, 1, 1)
+
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.resp(status, Jason.encode!(response))
+    end)
+
+    counter
+  end
+
   @doc "Setup callback. Returns bypass, issuer, jwk and client_id in the context."
   def setup_oidc_provider(_context \\ %{}) do
     bypass = Bypass.open()
@@ -40,6 +66,15 @@ defmodule Scheduling.OidcProvider do
     stub_discovery(bypass, issuer, jwk)
     put_auth_config(issuer)
     start_provider!()
+
+    # A real provider advertising an introspection endpoint answers on it, so
+    # the default here is a provider that says "no". Without this, every test
+    # whose token is *meant* to be rejected would trip the introspection
+    # fallback into an unstubbed path and fail on plumbing rather than on the
+    # thing it asserts. Answering `active: false` also makes those tests
+    # stronger: a forged token is now rejected through the whole path — JWKS
+    # first, then introspection — rather than only the first half.
+    stub_introspection(%{bypass: bypass}, %{"active" => false})
 
     ExUnit.Callbacks.on_exit(fn -> Application.delete_env(:scheduling, Scheduling.Auth) end)
 

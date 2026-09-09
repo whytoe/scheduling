@@ -486,18 +486,50 @@ screens and the catalog screens are separate sessions, so a mounted socket
 cannot be carried by live navigation into a route that requires more than it
 mounted under.
 
+## Opaque access tokens
+
+An access token is opaque by specification unless the provider chooses
+otherwise: OIDC defines the shape of the *ID* token only. ac-core appears to
+issue opaque access tokens — in production its ID token validated while its
+access token failed `:no_matching_key`, from the same token response.
+
+So `Scheduling.Auth.Tokens.validate/1` tries JWT validation first and falls
+back to RFC 7662 introspection. Without the fallback, **every** `/api/v1`
+bearer token is rejected while browser SSO keeps working, because that path
+needs only the ID token — an outage confined to the surface nobody watches.
+
+The fallback runs only after JWT validation has already failed, so the
+round-trip is not on the hot path for a JWT-issuing provider, and nothing needs
+reconfiguring if ac-core starts issuing JWTs. `OIDC_INTROSPECTION=false`
+disables it.
+
+Two things are worth knowing about how it trusts the answer. oidcc's
+`client_self_only` is deliberately **off** — every token this API sees was
+issued to another client, so the default would reject exactly the traffic the
+API exists for. In its place `active`, `exp` and `aud` are checked here. And
+because RFC 7662 does not require `aud` in the response, a provider that omits
+it reduces that check to "any live token from this realm carrying a role we
+recognise"; the absence is logged. See `Scheduling.Auth.Introspection`.
+
 ## What is not covered
 
-- **No token revocation check.** A token stays valid until `exp` even if the
-  provider's session is ended. Keeping access-token lifetimes short is the
-  mitigation. Astrum exposes `/oauth/introspect`; calling it per request would
-  close the window at the cost of a round-trip per call.
+- **Revocation is checked for opaque tokens only.** A token that validates as
+  a JWT stays valid until `exp` even if the provider's session has ended —
+  nothing is asked, so nothing can have changed. A token that *fails* JWT
+  validation goes to `/oauth/introspect` (see "Opaque access tokens" below),
+  and an introspected answer is current, so revocation takes effect on the next
+  request. The asymmetry is a side effect of the fallback, not a design: short
+  access-token lifetimes remain the mitigation for the JWT path.
 - **No rate limiting.** Tracked as `sc-c41`.
 - **No multi-tenant data scoping.** `SCHEDULING_TENANCY_ID` keeps other tenants
   *out*; it does not partition data within a deployment. No query filters by
   tenant. See "One tenant per deployment" above.
-- **`astrum_location` is ignored.** If offices map onto it, that is the natural
-  key for per-location scoping.
+- **Per-office scoping restricts nothing until locations are synced.** The
+  `astrum_location` claim *is* read and enforced — see "Per-office access"
+  above — but it matches against `locations.core_location_id`, and that table
+  is populated only by `Scheduling.Locations.Syncer`. Where ac-core returns no
+  locations, every office is unlinked and unlinked offices are visible to
+  everyone.
 - **`astrum_apps` is ignored.** It looks like an app-entitlement list; gating
   sign-in on it containing `scheduling` is Phase 2b, pending confirmation
   against a real token.
