@@ -26,6 +26,7 @@ defmodule Scheduling.Auth.Tokens do
 
   alias Scheduling.Auth
   alias Scheduling.Auth.Identity
+  alias Scheduling.Auth.Introspection
   alias Scheduling.Auth.Provider
 
   @typedoc """
@@ -41,12 +42,66 @@ defmodule Scheduling.Auth.Tokens do
   @doc """
   Validates a raw bearer token and returns the identity it names.
 
+  Tries JWT validation first and falls back to RFC 7662 introspection when it
+  fails — see `Scheduling.Auth.Introspection` for why that fallback has to
+  exist at all, and why it is a fallback rather than the primary path.
+
   Callers must have already confirmed `Scheduling.Auth.enabled?/0`.
   """
   @spec validate(String.t()) :: {:ok, Identity.t()} | {:error, error()}
   def validate(token) when is_binary(token) do
-    with {:ok, claims} <- validate_claims(token) do
+    with {:ok, claims} <- validate_bearer_claims(token) do
       {:ok, Identity.from_claims(claims, Auth.client_id())}
+    end
+  end
+
+  # Only `:invalid_token` is worth a second opinion. An expired JWT is
+  # definitively expired — its `exp` is signed, and asking the provider cannot
+  # make it later. And `:provider_unavailable` means the provider is the thing
+  # that is broken, so introspecting against it would fail the same way and
+  # turn one round-trip into two.
+  defp validate_bearer_claims(token) do
+    case validate_claims(token) do
+      {:ok, claims} ->
+        {:ok, claims}
+
+      {:error, :invalid_token} ->
+        if Introspection.enabled?(), do: introspect(token), else: {:error, :invalid_token}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # The fallback can only ever *upgrade* a rejection to an acceptance. JWT
+  # validation has already returned a definite negative; introspection is a
+  # second opinion, and where one cannot be obtained the first stands.
+  #
+  # This matters because the alternative is worse in the common case. Letting
+  # `:provider_unavailable` through would turn every forged or malformed token
+  # into a 503 — including against a provider with no introspection endpoint at
+  # all, where the second opinion was never available in the first place. A
+  # caller sending garbage would be told the identity provider is down.
+  #
+  # The cost is the reverse case: a genuinely valid opaque token, arriving
+  # while introspection is unreachable, is answered 401 rather than 503. That
+  # is a real outage being reported as a bad credential, so it is logged at
+  # error rather than swallowed.
+  defp introspect(token) do
+    case Introspection.validate(token) do
+      {:ok, claims} ->
+        # The line that says which kind of provider we are actually talking to.
+        # A token the JWKS rejected and introspection accepted is not a JWT —
+        # the open question this fallback was built for, answered by production
+        # traffic rather than by inspection.
+        Logger.info("Bearer token failed JWT validation and was accepted by introspection")
+        {:ok, claims}
+
+      {:error, :provider_unavailable} ->
+        {:error, :invalid_token}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

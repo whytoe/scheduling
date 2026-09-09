@@ -67,6 +67,14 @@ config :scheduling, Scheduling.Auth,
   trusted_audiences: comma_list.("OIDC_API_AUDIENCES", ""),
   # Pinned rather than read from the token header — see Scheduling.Auth.Tokens.
   signing_algs: comma_list.("OIDC_SIGNING_ALGS", "RS256"),
+  # Fall back to RFC 7662 introspection when a bearer token fails JWT
+  # validation. On by default: an access token is opaque by specification
+  # unless the provider chooses otherwise, and ac-core appears to be a provider
+  # that does — without this, every /api/v1 bearer token is rejected while
+  # browser SSO keeps working, so the failure is invisible from the UI. Costs a
+  # round-trip only on tokens that already failed. See
+  # Scheduling.Auth.Introspection.
+  introspection: System.get_env("OIDC_INTROSPECTION", "true") != "false",
   # Dotted claim paths searched for roles; every one present is unioned.
   # `<client_id>` is substituted with OIDC_CLIENT_ID.
   role_claims:
