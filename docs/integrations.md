@@ -111,6 +111,15 @@ to be granted, and a client-credentials token minted without it will
 authenticate and then be refused on every write. That is a 403 rather than a
 401, which is the fastest way to tell this case apart from the two above.
 
+> **Against ac-core this is currently unsatisfiable**, and it is the reason no
+> service can call this API yet. A verified client-credentials token from
+> ac-core carries no `astrum_roles` and no other claim describing authority, so
+> it authenticates and is then refused everything. The fix belongs in ac-core —
+> a scheduling-namespace scope, or the role claim populated on machine tokens —
+> and is asked for in `ac-core-asks.md`. Deciding here which clients may act,
+> from a list of client ids, would put a second source of truth for
+> authorisation in this deployment's configuration.
+
 The claim path is configurable (`OIDC_ROLE_CLAIMS`) and several are searched,
 so `roles`, `realm_access.roles` and
 `resource_access.<client_id>.roles` work too — every one present is unioned.
