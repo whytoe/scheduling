@@ -77,6 +77,67 @@ one can be revoked without affecting the others and the audit log names which
 system acted. Full realm setup, the role table and the auth error codes are in
 **`auth.md`**.
 
+#### What your token must carry
+
+Three things, checked in this order. All three are required — a token that
+authenticates is not automatically a token that may act.
+
+| # | Requirement | Failure |
+|---|---|---|
+| 1 | The provider says it is live | 401 `invalid_token` |
+| 2 | `aud` names this deployment | 401 `invalid_token` |
+| 3 | A role in `astrum_roles` we recognise | 403 `forbidden` |
+
+**1 — live.** Either the token validates as a JWT against the realm's JWKS, or
+the realm's introspection endpoint reports it `active`. Which of those applies
+is the provider's choice, not yours: ac-core issues **opaque** access tokens,
+so every token there takes the introspection path. Nothing about that changes
+what you send.
+
+**2 — audience.** This is the one that catches people, because a provider does
+not necessarily name *us* in a token minted for *your* client. Keycloak needs
+an explicit audience mapper; other providers vary. Whatever value your tokens
+carry in `aud`, it must appear in this deployment's `OIDC_API_AUDIENCES`
+(comma-separated) — the deployment's own client id is always accepted, and
+anything else has to be listed. Getting this wrong looks exactly like a bad
+credential, so check it before rotating anything.
+
+If your provider's introspection response omits `aud` entirely, this check
+cannot run and is skipped; see `auth.md` for what that costs.
+
+**3 — role.** `astrum_roles` must contain `service` (or `operator`, or
+`admin`). A machine client does not get one by default in most realms — it has
+to be granted, and a client-credentials token minted without it will
+authenticate and then be refused on every write. That is a 403 rather than a
+401, which is the fastest way to tell this case apart from the two above.
+
+> **Against ac-core this is currently unsatisfiable**, and it is the reason no
+> service can call this API yet. A verified client-credentials token from
+> ac-core carries no `astrum_roles` and no other claim describing authority, so
+> it authenticates and is then refused everything. The fix belongs in ac-core —
+> a scheduling-namespace scope, or the role claim populated on machine tokens —
+> and is asked for in `ac-core-asks.md`. Deciding here which clients may act,
+> from a list of client ids, would put a second source of truth for
+> authorisation in this deployment's configuration.
+
+The claim path is configurable (`OIDC_ROLE_CLAIMS`) and several are searched,
+so `roles`, `realm_access.roles` and
+`resource_access.<client_id>.roles` work too — every one present is unioned.
+
+#### Checking it before you integrate
+
+```sh
+TOKEN=$(curl -s -X POST "$OIDC_ISSUER/oauth/token" \
+  -d grant_type=client_credentials \
+  -d client_id=... -d client_secret=... | jq -r .access_token)
+
+# What the realm thinks your token is. Confirms 2 and 3 without involving us.
+curl -s -X POST "$OIDC_ISSUER/oauth/introspect" -d "token=$TOKEN" | jq '{aud, astrum_roles, active}'
+
+# Then the real thing. 401 means 1 or 2; 403 means 3.
+curl -si "$SCHEDULING_URL/api/v1/board" -H "Authorization: Bearer $TOKEN" | head -1
+```
+
 The API mirrors every operation the LiveView UI offers — 41 endpoints across
 11 tag groups (`capabilities`, `diagnoses`, `patients`, `offices`, `visits`,
 `queue`, `handoffs`, `routing_decisions`, `visit_events`, `board`, `health`).
