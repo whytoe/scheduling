@@ -20,8 +20,6 @@ defmodule Scheduling.Auth.IntrospectionTest do
 
   import Scheduling.OidcProvider
 
-  require Logger
-
   alias Scheduling.Auth.Introspection
   alias Scheduling.Auth.Tokens
 
@@ -30,6 +28,35 @@ defmodule Scheduling.Auth.IntrospectionTest do
   # Not a JWT at all — three dots' worth of nothing. This is what an opaque
   # access token looks like to us, and it must never validate locally.
   @opaque_token "aXQgaXMgb3BhcXVlLCB0aGF0IGlzIHRoZSBwb2ludA"
+
+  # Introspects once and reports the client id actually presented to the
+  # endpoint, however oidcc chose to authenticate — Basic or form post are both
+  # advertised by the discovery document, and which one it picks is not the
+  # point of these tests.
+  defp capture_presented_client(ctx) do
+    test_pid = self()
+
+    Bypass.stub(ctx.bypass, "POST", "/protocol/openid-connect/token/introspect", fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+      presented =
+        case Plug.BasicAuth.parse_basic_auth(conn) do
+          {user, _pass} -> user
+          :error -> body |> URI.decode_query() |> Map.get("client_id")
+        end
+
+      send(test_pid, {:presented, presented})
+
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.resp(200, Jason.encode!(%{"active" => false}))
+    end)
+
+    Tokens.validate(@opaque_token)
+
+    assert_receive {:presented, presented}
+    presented
+  end
 
   defp active_response(overrides \\ %{}) do
     Map.merge(
@@ -113,6 +140,35 @@ defmodule Scheduling.Auth.IntrospectionTest do
       stub_introspection(ctx, %{"sub" => "svc-checkin"})
 
       assert {:error, :invalid_token} = Tokens.validate(@opaque_token)
+    end
+  end
+
+  describe "which client does the introspecting" do
+    # It used to be the browser client, which was wrong twice: introspection is
+    # a resource-server operation, and ac-core explicitly refuses that client
+    # the client_credentials grant. It worked only because ac-core's
+    # /oauth/introspect does not enforce client authentication — a dependency
+    # on a bug we have asked them to fix, which would have taken every
+    # /api/v1 token down with it while browser SSO kept working.
+    test "the machine client, when core access is configured", ctx do
+      Application.put_env(:scheduling, Scheduling.Core,
+        base_url: "http://localhost:#{ctx.bypass.port}",
+        client_id: "scheduling-machine",
+        client_secret: "machine-secret"
+      )
+
+      on_exit(fn -> Application.delete_env(:scheduling, Scheduling.Core) end)
+
+      assert Introspection.credentials() == {"scheduling-machine", "machine-secret"}
+      assert capture_presented_client(ctx) == "scheduling-machine"
+    end
+
+    test "the browser client when core access is unconfigured", ctx do
+      # Local dev, and the only case where there is no better option.
+      Application.delete_env(:scheduling, Scheduling.Core)
+
+      assert Introspection.credentials() == {client_id(), "test-secret"}
+      assert capture_presented_client(ctx) == client_id()
     end
   end
 

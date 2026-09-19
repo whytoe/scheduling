@@ -75,6 +75,27 @@ defmodule Scheduling.Auth.Introspection do
 
   Tenancy and roles are enforced downstream by `ApiAuth`, unchanged.
 
+  ## Which client does the introspecting
+
+  The **machine** client (`CORE_CLIENT_ID`), not the browser one, whenever core
+  access is configured.
+
+  This started as the browser client and that was wrong twice over. The browser
+  client identifies the web app to end users; introspection is a resource-server
+  operation, and scheduling-as-a-service is what the machine client is for.
+  Worse, ac-core explicitly refuses the browser client the `client_credentials`
+  grant — so it was only working because ac-core's `/oauth/introspect` does not
+  currently enforce client authentication at all.
+
+  That is a dependency on a bug, and one we have asked ac-core to fix
+  (`docs/ac-core-asks.md`, item 4). Had it been fixed first, **every** `/api/v1`
+  bearer token would have started failing — ac-core issues opaque access tokens,
+  so introspection is the only path — while browser SSO carried on working and
+  the deployment looked healthy.
+
+  Falls back to the browser client when core access is unconfigured, which is
+  the local-dev default and the only case where there is no better option.
+
   **Known gap:** RFC 7662 does not require `aud` in the response, and a token
   whose response omits it is accepted. Rejecting instead would make the API
   depend on an optional field, and get us back to the outage this module
@@ -88,6 +109,7 @@ defmodule Scheduling.Auth.Introspection do
 
   alias Scheduling.Auth
   alias Scheduling.Auth.Tokens
+  alias Scheduling.Core
 
   @doc """
   Whether to attempt introspection when JWT validation fails.
@@ -113,15 +135,37 @@ defmodule Scheduling.Auth.Introspection do
   """
   @spec validate(String.t()) :: {:ok, map()} | {:error, Tokens.error()}
   def validate(token) when is_binary(token) do
+    {client_id, client_secret} = credentials()
+
     case Oidcc.introspect_token(
            token,
            Auth.provider_name(),
-           Auth.client_id(),
-           Auth.client_secret(),
+           client_id,
+           client_secret,
            %{client_self_only: false}
          ) do
       {:ok, introspection} -> interpret(introspection)
       {:error, reason} -> unavailable(reason)
+    end
+  end
+
+  @doc """
+  The credentials this app presents when introspecting.
+
+  The **machine** client when core access is configured, the browser client
+  otherwise. This is not a preference — see the moduledoc for why the browser
+  client was the wrong identity here and why it currently works anyway.
+
+  Public so a deployment can be checked without inferring it from a packet
+  capture: `Scheduling.Auth.Introspection.credentials() |> elem(0)` names the
+  client without revealing the secret.
+  """
+  @spec credentials() :: {String.t() | nil, String.t() | nil}
+  def credentials do
+    if Core.enabled?() do
+      {Core.client_id(), Core.client_secret()}
+    else
+      {Auth.client_id(), Auth.client_secret()}
     end
   end
 
