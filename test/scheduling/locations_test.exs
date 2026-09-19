@@ -134,6 +134,78 @@ defmodule Scheduling.LocationsTest do
       assert Locations.get_by_core_location_id("loc-1").active == true
     end
 
+    test "will not deactivate every site at once", %{bypass: bypass} do
+      # The failure this guard exists for. From 2026-09-05 to 2026-09-19 this
+      # deployment received an empty list on every hourly sync, because its
+      # ac-core client was bound to no practices. It escaped a total wipe only
+      # because no locations had been projected yet. Had the binding been
+      # revoked a day later, every site would have gone inactive silently.
+      #
+      # An empty registry is read as a scope change, not as every clinic
+      # closing on the same afternoon.
+      stub_locations(bypass, [
+        %{"data" => [site("loc-1"), site("loc-2")], "page" => 1, "pageSize" => 100, "total" => 2},
+        %{"data" => [], "page" => 1, "pageSize" => 100, "total" => 0}
+      ])
+
+      assert {:ok, _} = Locations.sync_from_core()
+      assert {:ok, %{deactivated: 0, withheld: 2}} = Locations.sync_from_core()
+
+      assert Locations.get_by_core_location_id("loc-1").active == true
+      assert Locations.get_by_core_location_id("loc-2").active == true
+    end
+
+    test "a non-empty response is taken at face value, even when nothing matches",
+         %{bypass: bypass} do
+      # The guard is deliberately narrow. Here ac-core returned a site — just
+      # not either of the ones we held — so it has told us something specific
+      # and we act on it. Widening the rule to "every id changed" would also
+      # trip on a legitimate re-provision, and a threshold nobody can predict
+      # is worse than a rule anyone can state.
+      stub_locations(bypass, [
+        %{"data" => [site("loc-1"), site("loc-2")], "page" => 1, "pageSize" => 100, "total" => 2},
+        %{"data" => [site("loc-9")], "page" => 1, "pageSize" => 100, "total" => 1}
+      ])
+
+      assert {:ok, _} = Locations.sync_from_core()
+      assert {:ok, %{deactivated: 2, withheld: 0}} = Locations.sync_from_core()
+
+      assert Locations.get_by_core_location_id("loc-1").active == false
+      assert Locations.get_by_core_location_id("loc-9").active == true
+    end
+
+    test "still deactivates a genuine single closure", %{bypass: bypass} do
+      # The guard must not swallow the case it was built around. One site of
+      # three disappearing is the event deactivation is FOR.
+      stub_locations(bypass, [
+        %{
+          "data" => [site("loc-1"), site("loc-2"), site("loc-3")],
+          "page" => 1,
+          "pageSize" => 100,
+          "total" => 3
+        },
+        %{
+          "data" => [site("loc-1"), site("loc-2")],
+          "page" => 1,
+          "pageSize" => 100,
+          "total" => 2
+        }
+      ])
+
+      assert {:ok, _} = Locations.sync_from_core()
+      assert {:ok, %{deactivated: 1, withheld: 0}} = Locations.sync_from_core()
+
+      assert Locations.get_by_core_location_id("loc-3").active == false
+    end
+
+    test "an empty registry with nothing projected yet is not an alarm", %{bypass: bypass} do
+      # Exactly this deployment's state for two weeks. Nothing to deactivate,
+      # so nothing is withheld and there is nothing to report.
+      stub_locations(bypass, [%{"data" => [], "page" => 1, "pageSize" => 100, "total" => 0}])
+
+      assert {:ok, %{upserted: 0, deactivated: 0, withheld: 0}} = Locations.sync_from_core()
+    end
+
     test "walks pages", %{bypass: bypass} do
       stub_locations(bypass, [
         %{"data" => [site("loc-1")], "page" => 1, "pageSize" => 1, "total" => 2},
