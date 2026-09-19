@@ -511,6 +511,16 @@ because RFC 7662 does not require `aud` in the response, a provider that omits
 it reduces that check to "any live token from this realm carrying a role we
 recognise"; the absence is logged. See `Scheduling.Auth.Introspection`.
 
+Introspection authenticates as the **machine** client (`CORE_CLIENT_ID`) where
+one is configured, falling back to the browser client otherwise. It used to use
+the browser client unconditionally, which was wrong on both counts: this is a
+resource-server operation rather than anything to do with the web app, and
+ac-core refuses that client the `client_credentials` grant — so it worked only
+because ac-core's `/oauth/introspect` does not currently enforce client
+authentication. Depending on that would have meant every `/api/v1` token
+failing the moment the endpoint was tightened, with browser SSO unaffected and
+nothing on screen to say why.
+
 ## What is not covered
 
 - **Revocation is checked for opaque tokens only.** A token that validates as
