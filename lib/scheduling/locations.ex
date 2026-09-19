@@ -26,6 +26,22 @@ defmodule Scheduling.Locations do
   deliberate: a half-updated cache of a read-only projection is strictly better
   than an abandoned one, and the next run converges. The return value reports
   what happened rather than pretending it was atomic.
+
+  ## An empty response deactivates nothing
+
+  `sync_from_core/1` cannot tell "ac-core no longer has this site" from
+  "ac-core no longer *shows* us this site". The first is a closure; the second
+  is a scope change, and the sites are still there.
+
+  The second is far more likely. This deployment received an empty list on
+  every hourly sync from 2026-09-05 to 2026-09-19 because its ac-core client
+  was bound to no practices, and escaped a total wipe only because no locations
+  had been projected yet.
+
+  So an empty response is read as a scope change and deactivates nothing;
+  `withheld` in the result says how many were spared. A *non-empty* response is
+  taken at face value even when it matches nothing we hold — at that point
+  ac-core has told us something specific.
   """
   import Ecto.Query, warn: false
 
@@ -35,10 +51,17 @@ defmodule Scheduling.Locations do
   alias Scheduling.Locations.Location
   alias Scheduling.Repo
 
-  @typedoc "What a sync did. `deactivated` counts sites ac-core no longer returns."
+  @typedoc """
+  What a sync did.
+
+  `deactivated` counts sites ac-core no longer returns. `withheld` counts sites
+  it would have deactivated but did not, because doing so would have switched
+  off every active location at once — see `deactivate_unseen/1`.
+  """
   @type sync_result :: %{
           upserted: non_neg_integer(),
           deactivated: non_neg_integer(),
+          withheld: non_neg_integer(),
           pages: non_neg_integer()
         }
 
@@ -78,11 +101,13 @@ defmodule Scheduling.Locations do
       {:ok, locations, pages} ->
         upserted = Enum.map(locations, &upsert!/1)
         seen = MapSet.new(upserted, & &1.core_location_id)
+        {deactivated, withheld} = deactivate_unseen(seen)
 
         {:ok,
          %{
            upserted: length(upserted),
-           deactivated: deactivate_unseen(seen),
+           deactivated: deactivated,
+           withheld: withheld,
            pages: pages
          }}
 
@@ -165,13 +190,51 @@ defmodule Scheduling.Locations do
     |> Repo.insert_or_update!()
   end
 
+  # Switches off the sites ac-core stopped returning — unless that would be all
+  # of them, in which case it switches off nothing and says so.
+  #
+  # The guard exists because this function cannot tell two very different events
+  # apart. "ac-core no longer has this site" is a closure. "ac-core no longer
+  # SHOWS us this site" is a scope or permissions change, and the sites are
+  # still there. The second is far more likely — this deployment spent
+  # 2026-09-05 to 2026-09-19 receiving an empty list on every sync because its
+  # ac-core client was bound to no practices, and only escaped a total wipe
+  # because no locations had been projected yet.
+  #
+  # A total collapse is therefore read as a scope change, not as every clinic
+  # closing on the same afternoon. The cost of being wrong that way is a stale
+  # `active` flag; the cost of being wrong the other way, once
+  # `Scheduling.Offices` honours the flag, is every office becoming unroutable
+  # with nothing on screen to explain it.
+  #
+  # The rule is deliberately narrow: **an empty response deactivates nothing.**
+  # Not "more than half", not "every id changed" — those are also suspicious,
+  # but a practice legitimately leaving our binding would trip the first and a
+  # re-provision would trip the second, and a threshold nobody can predict is
+  # worse than a rule anyone can state. A non-empty response is taken at face
+  # value even when it disagrees with everything we hold, because at that point
+  # ac-core has told us something specific.
   defp deactivate_unseen(seen) do
-    {count, _} =
+    candidates =
       Location
       |> where([l], l.active == true and l.core_location_id not in ^MapSet.to_list(seen))
-      |> Repo.update_all(set: [active: false])
 
-    count
+    would_deactivate = Repo.aggregate(candidates, :count)
+
+    if MapSet.size(seen) == 0 and would_deactivate > 0 do
+      Logger.error(
+        "Location sync withheld #{would_deactivate} deactivation(s): ac-core returned an " <>
+          "empty site list, which would have deactivated every active location. Treating " <>
+          "it as a scope change rather than as every site closing at once — check the " <>
+          "client's practice binding (GET /v1/self/practices)."
+      )
+
+      {0, would_deactivate}
+    else
+      {count, _} = Repo.update_all(candidates, set: [active: false])
+      if count > 0, do: Logger.warning("Location sync deactivated #{count} site(s)")
+      {count, 0}
+    end
   end
 
   defp maybe_only_active(query, true), do: where(query, [l], l.active == true)

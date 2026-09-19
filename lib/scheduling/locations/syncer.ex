@@ -130,7 +130,8 @@ defmodule Scheduling.Locations.Syncer do
         # states an operator most needs to tell apart, and silence cannot.
         Logger.info(
           "Location sync: #{result.upserted} upserted, " <>
-            "#{result.deactivated} deactivated, #{result.pages} page(s)"
+            "#{result.deactivated} deactivated, #{withheld_note(result)}" <>
+            "#{result.pages} page(s)"
         )
 
         :ok
@@ -145,6 +146,12 @@ defmodule Scheduling.Locations.Syncer do
       Logger.error("Location sync crashed: #{Exception.message(error)}")
       :error
   end
+
+  # Surfaced in the ordinary sync line rather than only in the error
+  # `Locations.deactivate_unseen/1` already logs, so the routine "everything is
+  # fine" report does not quietly omit the one number that says it is not.
+  defp withheld_note(%{withheld: 0}), do: ""
+  defp withheld_note(%{withheld: n}), do: "#{n} deactivation(s) WITHHELD, "
 
   # Cancels any pending timer first: nudge/0 while one is outstanding would
   # otherwise leave both running, and every nudge would add another for the
