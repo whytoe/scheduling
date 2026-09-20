@@ -53,17 +53,25 @@ config :scheduling, SchedulingWeb.Endpoint,
 # different ports.
 
 # Reload browser tabs when matching files change.
+#
+# No `E` on these sigils. `phx.new` appends it only when the Elixir running the
+# generator is 1.19.3 or newer, and the Dockerfile pins 1.18.5 — which has no
+# such modifier, so `~r"..."E` makes every dev-environment mix task fail while
+# reading its own configuration. `E` is `:export`, which matters for a pattern
+# crossing a node boundary or baked into a release's sys.config; these are read
+# by Config.Reader in the same VM that runs the reloader, and dev config never
+# reaches a release. `test/config_files_test.exs` keeps it out.
 config :scheduling, SchedulingWeb.Endpoint,
   live_reload: [
     web_console_logger: true,
     patterns: [
       # Static assets, except user uploads
-      ~r"priv/static/(?!uploads/).*\.(js|css|png|jpeg|jpg|gif|svg)$"E,
+      ~r"priv/static/(?!uploads/).*\.(js|css|png|jpeg|jpg|gif|svg)$",
       # Gettext translations
-      ~r"priv/gettext/.*\.po$"E,
+      ~r"priv/gettext/.*\.po$",
       # Router, Controllers, LiveViews and LiveComponents
-      ~r"lib/scheduling_web/router\.ex$"E,
-      ~r"lib/scheduling_web/(controllers|live|components)/.*\.(ex|heex)$"E
+      ~r"lib/scheduling_web/router\.ex$",
+      ~r"lib/scheduling_web/(controllers|live|components)/.*\.(ex|heex)$"
     ]
   ]
 
