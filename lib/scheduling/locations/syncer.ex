@@ -34,6 +34,16 @@ defmodule Scheduling.Locations.Syncer do
   board — down over. The previous cache stays readable throughout, which is
   the whole point of projecting the registry locally.
 
+  ## Making it run now
+
+  `nudge/0` below asks for a pass immediately — but only from inside the
+  running node, and the release has no distribution, so nothing external can
+  call it. To force a pass from outside, use the release task:
+
+      bin/scheduling eval "Scheduling.Release.sync_locations()"
+
+  It runs the same two passes in a separate BEAM without starting the endpoint.
+
   Disable with `LOCATION_SYNC_ENABLED=false`. Absent core credentials it does
   not start at all, which is the local-dev and test default.
   """
@@ -46,7 +56,7 @@ defmodule Scheduling.Locations.Syncer do
   alias Scheduling.Locations
   alias Scheduling.Practices
 
-  @default_interval_ms :timer.hours(1)
+  @default_interval_ms :timer.minutes(15)
   @initial_delay_ms :timer.seconds(5)
   @min_retry_ms :timer.seconds(30)
 
