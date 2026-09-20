@@ -11,6 +11,28 @@ defmodule Scheduling.MixProject do
       aliases: aliases(),
       deps: deps(),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
+      hex: [
+        # Acknowledged, not silenced. Both are in cowlib, which reaches this
+        # project only through `bypass` — a test-only HTTP stub we feed
+        # ourselves. Verified rather than assumed: `mix deps.tree` shows the
+        # single path bypass -> plug_cowboy -> cowboy -> cowlib, and cowlib
+        # does not appear in `deps.tree --only prod` at all.
+        #
+        # There is also no fix to take: cowboy constrains cowlib to
+        # `>= 2.20.0 and < 3.0.0`, and 2.20.0 is the ceiling. Leaving these
+        # unacknowledged would mean a permanently red audit — and a check
+        # that is always red is a check nobody reads, which is how
+        # `mix hex.audit` came to be passing silently in the first place.
+        #
+        # RE-CHECK IF cowlib ever enters the production tree. That is the
+        # condition under which this stops being true; nothing else about
+        # these advisories changes it.
+        ignore_advisories: [
+          # Link header directive smuggling in cow_link:link/1
+          "EEF-CVE-2026-43966",
+          "EEF-CVE-2026-43969"
+        ]
+      ],
       listeners: [Phoenix.CodeReloader]
     ]
   end
