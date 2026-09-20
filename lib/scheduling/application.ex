@@ -37,6 +37,10 @@ defmodule Scheduling.Application do
         Scheduling.Idempotency.Sweeper.child_spec_if_enabled(),
         # Keeps the rolling slot horizon topped up. nil when there are no
         # availability rules — nothing to generate from.
+        # Moves scheduled entries into the waiting queue when their time
+        # arrives. Without it those patients are never called — see the
+        # moduledoc, which states that failure mode deliberately.
+        Scheduling.Queue.Promoter.child_spec_if_enabled(),
         Scheduling.Booking.HorizonKeeper.child_spec_if_enabled(),
         # Start to serve requests, typically the last entry
         SchedulingWeb.Endpoint
