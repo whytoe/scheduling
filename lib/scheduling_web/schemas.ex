@@ -499,7 +499,16 @@ defmodule SchedulingWeb.Schemas do
         id: %Schema{type: :integer},
         status: %Schema{
           type: :string,
-          enum: ["waiting", "assigned", "in_service", "completed"],
+          enum: [
+            "scheduled",
+            "waiting",
+            "assigned",
+            "in_service",
+            "completed",
+            "discharged_with_followup",
+            "cancelled",
+            "no_show"
+          ],
           description:
             "Lifecycle status; entries in `assigned` and `in_service` consume office capacity"
         },
@@ -610,6 +619,27 @@ defmodule SchedulingWeb.Schemas do
           type: :string,
           nullable: true,
           description: "User attribution recorded in the routing decision audit log"
+        }
+      }
+    })
+  end
+
+  defmodule QueueEntryEndRequest do
+    @moduledoc "Optional body for cancel and no_show."
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "QueueEntryEndRequest",
+      type: :object,
+      properties: %{
+        reason: %Schema{
+          type: :string,
+          description:
+            "Why the entry ended, recorded on the audit row. Operational only — " <>
+              "this reaches an append-only log and every webhook subscriber, so it " <>
+              "must not carry clinical content. \"Patient called ahead\", not a " <>
+              "diagnosis or a form name."
         }
       }
     })

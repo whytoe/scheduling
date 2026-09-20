@@ -18,6 +18,8 @@ defmodule Scheduling.Queue.QueueEntry do
   scheduling passes it through and never learns the form types.
   """
   use Ecto.Schema
+
+  alias Scheduling.Queue.Lifecycle
   import Ecto.Changeset
 
   alias Scheduling.Catalog.Capability
@@ -25,7 +27,9 @@ defmodule Scheduling.Queue.QueueEntry do
   alias Scheduling.Patients.Patient
   alias Scheduling.Visits.Visit
 
-  @statuses [:waiting, :assigned, :in_service, :completed]
+  # The list lives in Scheduling.Queue.Lifecycle, which also owns which may
+  # follow which. Duplicating it here is how the two drift.
+  @statuses Scheduling.Queue.Lifecycle.statuses()
   @active_statuses [:assigned, :in_service]
 
   schema "queue_entries" do
@@ -97,6 +101,29 @@ defmodule Scheduling.Queue.QueueEntry do
     case changeset.data.status do
       :waiting -> changeset
       other -> add_error(changeset, :status, "must be waiting to assign, was #{other}")
+    end
+  end
+
+  @doc """
+  Moves an entry to `to`, refusing anything the lifecycle table forbids.
+
+  The general form. `assignment_changeset/2` and the rest stay because they
+  carry extra work — recording the office, clearing it, swapping capabilities —
+  but every one of them now asks the same table rather than asserting its own
+  rule inline.
+
+  The error message comes from `Lifecycle.explain/2`, so it names what the
+  entry *can* become. A caller told only "invalid" has to go and read code.
+  """
+  def transition_changeset(%__MODULE__{} = queue_entry, to) do
+    changeset = change(queue_entry, status: to)
+
+    case Lifecycle.check(queue_entry.status, to) do
+      :ok ->
+        changeset
+
+      {:error, _reason} ->
+        add_error(changeset, :status, Lifecycle.explain(queue_entry.status, to))
     end
   end
 

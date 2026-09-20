@@ -206,6 +206,8 @@ defmodule SchedulingWeb.Router do
     post "/queue_entries", QueueEntryController, :create
     post "/queue_entries/:id/accept", QueueEntryController, :accept
     post "/queue_entries/:id/complete", QueueEntryController, :complete
+    post "/queue_entries/:id/cancel", QueueEntryController, :cancel
+    post "/queue_entries/:id/no_show", QueueEntryController, :no_show
     post "/queue_entries/:id/requeue", QueueEntryController, :requeue
 
     post "/handoffs/:id/acknowledge", HandoffController, :acknowledge
