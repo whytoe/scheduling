@@ -166,7 +166,13 @@ defmodule SchedulingWeb.Plugs.BrowserAuthTest do
     end
 
     test "refuses a backslash-smuggled return_to", %{conn: conn} do
-      conn = get(conn, ~p"/auth/login?return_to=/\\evil.example")
+      # A plain string, not ~p. Phoenix 1.8.14 refuses to *construct* this path
+      # at the sigil, which is a good change and an unhelpful one here: it
+      # would mean the request never reaches BrowserAuth and this test would
+      # assert Phoenix's protection instead of ours. A real attacker sends
+      # bytes on a socket, not an Elixir sigil, so the request has to actually
+      # arrive for the assertion to mean anything.
+      conn = get(conn, "/auth/login?return_to=/\\evil.example")
 
       assert Plug.Conn.get_session(conn, :auth_return_to) == nil
     end
