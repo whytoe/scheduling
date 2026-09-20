@@ -172,6 +172,12 @@ With an empty `locations` table every office is unlinked, unlinked offices are
 visible to everyone by design, and the deployment behaves exactly like one with
 no scoping configured. Nothing is broken and nothing is enforced.
 
+A site ac-core has **deactivated** keeps its rooms on the board and declines
+patients: `Scheduling.Offices.list_assignable_offices/1` is what every
+assignment path reads, and `list_offices/1` what every display path reads.
+Hiding the rooms instead would make them vanish with nothing on screen to
+explain it.
+
 `Scheduling.Locations.Syncer` runs the pass hourly under the supervisor, from
 boot, whenever core credentials are present. Deliberately a supervised process
 rather than an admin button: a control that only works if someone remembers to

@@ -38,6 +38,39 @@ defmodule Scheduling.Offices do
     |> Repo.preload([:capabilities, :location])
   end
 
+  @doc """
+  Offices a patient may actually be placed in.
+
+  `list_offices/1` minus the rooms at a site ac-core has deactivated. Every
+  assignment path reads this; every display path reads `list_offices/1`.
+
+  That split is the whole point, and it is why this is a separate function
+  rather than an option. A deactivated site's rooms **stay on the board** —
+  hiding them would make rooms disappear with nothing on screen to explain it,
+  which is the failure this codebase has been bitten by more than any other.
+  They are shown and they decline assignment.
+
+  An office with no location is assignable, for the same reason it is visible:
+  a room not yet attached to a site cannot be attributed to one, and refusing
+  to place patients in it would break a working deployment the moment anyone
+  added a room without linking it.
+
+  ## Why a named function and not `list_offices(assignable: true)`
+
+  A new assignment path would get an option wrong silently. It cannot get the
+  wrong function name silently — `list_offices/1` in a routing decision reads
+  as an obvious mistake to anybody reviewing it.
+  """
+  @spec list_assignable_offices(keyword()) :: [Office.t()]
+  def list_assignable_offices(opts \\ []) do
+    opts
+    |> list_offices()
+    |> Enum.reject(&at_inactive_location?/1)
+  end
+
+  defp at_inactive_location?(%Office{location: %{active: false}}), do: true
+  defp at_inactive_location?(_office), do: false
+
   defp scope_to_locations(query, nil), do: query
 
   defp scope_to_locations(query, location_ids) do

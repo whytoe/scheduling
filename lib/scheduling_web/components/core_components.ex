@@ -624,15 +624,24 @@ defmodule SchedulingWeb.CoreComponents do
   attr :caps, :list, default: []
   attr :compact, :boolean, default: false
 
+  # The room's site has been deactivated in ac-core, so it will not be assigned.
+  # Shown rather than hidden on purpose: a room disappearing from the board with
+  # nothing on screen to explain it is the harder failure to diagnose. See
+  # `Scheduling.Offices.list_assignable_offices/1`.
+  attr :site_closed, :boolean, default: false
+
   def office_card(assigns) do
     free = max(assigns.capacity - assigns.load, 0)
     assigns = assign(assigns, :free, free)
 
     ~H"""
-    <div class="ocard">
+    <div class={["ocard", @site_closed && "ocard--closed"]}>
       <div class="ocard__top">
         <div>
           <div class="ocard__name">{@name}</div>
+          <div :if={@site_closed} class="chiprow" style="margin-top:6px">
+            <.chip>Site closed — not accepting patients</.chip>
+          </div>
           <div :if={not @compact and @caps != []} class="chiprow" style="margin-top:6px">
             <.chip :for={cap <- @caps}>{cap}</.chip>
           </div>

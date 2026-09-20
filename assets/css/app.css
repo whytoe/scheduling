@@ -433,6 +433,11 @@ html:not([data-theme])   .themetoggle [data-phx-theme="system"] {
   border-radius: var(--radius-box);
   display: flex; flex-direction: column; gap: var(--s-3);
 }
+/* A room whose site ac-core has deactivated. Dimmed, not hidden: it is still
+   a real room and an operator needs to see why it is unavailable rather than
+   watch it vanish. Border colour carries the state as well as opacity, so it
+   does not rely on a contrast difference alone. */
+.ocard--closed { opacity: 0.6; border-style: dashed; }
 .ocard__top { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s-3); }
 .ocard__name { font-weight: 600; font-size: var(--t-body-lg); }
 .ocard__cap { text-align: right; flex: none; }
