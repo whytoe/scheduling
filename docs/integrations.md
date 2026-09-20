@@ -263,12 +263,67 @@ booking screen is gated the same as one from the bridge.
 1. **Compliance gate** runs first, when all of: `INTAKE_API_KEY` is set, the
    entry has at least one `required_compliance_refs` value, and the patient has
    an `intake_patient_id`. Any of those missing → the gate is skipped.
-2. For each required reference,
+2. **Self-check** (see below) — before any verdict is reached, scheduling
+   establishes that intake is really filtering by `compliance_ref`. If it
+   cannot, the gate refuses to run and the accept is `503
+   compliance_unavailable`.
+3. For each required reference,
    `GET {INTAKE_API_URL}/responses?patient_id=<uuid>&compliance_ref=<ref>&status=completed&limit=1`
-3. One or more rows → that requirement is satisfied; zero rows → it is unmet.
+4. One or more rows → that requirement is satisfied; zero rows → it is unmet.
    Scheduling collects every unmet reference rather than stopping at the first,
    so the whole outstanding set can be reported at once.
-4. **Matcher** runs next (unchanged — best-fit office with free capacity).
+5. **Matcher** runs next (unchanged — best-fit office with free capacity).
+
+### Proving the filter is a filter
+
+Step 3 reads only the **row count** of intake's answer. Nothing in that answer
+says which of the four query parameters intake honoured — so an intake that
+accepts `compliance_ref` and ignores it silently turns the query into *"has
+this patient completed any form at all"*, and a patient who filled in something
+unrelated satisfies every requirement on the entry. If `patient_id` were the
+ignored one instead, any patient in the organisation completing that form would
+satisfy it for everyone.
+
+Both directions fail **open**, on the one path the gate exists to close, and
+neither errors nor logs. The reassuring answer and the broken answer are the
+same bytes.
+
+So before the gate reaches a verdict, scheduling asks a question whose only
+honest answer is "nothing":
+
+```
+GET {INTAKE_API_URL}/responses?compliance_ref=cref_<never+minted>&status=completed&limit=1
+```
+
+| Intake's answer        | Read as                                                     |
+|------------------------|-------------------------------------------------------------|
+| `400`                  | The reference reached a lookup and was rejected — the settled behaviour for an unknown reference. The same query is then repeated **without** `compliance_ref`; only if that one succeeds was the `400` about the reference and not about the query being malformed. |
+| `200`, no rows         | Consistent with the filter being applied. Weaker: an intake holding no completed responses at all answers identically. |
+| `200`, one or more rows | `compliance_ref` is not being applied. **The gate refuses to run.** |
+| anything else          | Nothing established. The gate refuses to run.               |
+
+A refusal is `503 compliance_unavailable` with an `Compliance gate REFUSING TO
+RUN` line in the log, and the entry stays waiting — the same fail-closed path an
+unreachable intake takes. It is never `422 compliance_failed`: the patient is
+not the problem.
+
+Refusing is the point. A gate that cannot be shown to be gating anything is
+worse than no gate, because it appears on the deployment checklist as a control
+while passing everyone.
+
+**No `patient_id` on the probe**, deliberately, though every real query carries
+one. A second narrowing parameter would let an intake that ignores the
+reference still answer with an empty list.
+
+**Once per fifteen minutes, not per request.** The answer is established on the
+first accept that would actually consult intake, then held. Per request would
+double our traffic to intake to re-establish a fact that does not move between
+two accepts; at boot would make intake's availability a startup dependency of
+scheduling for no gain, since nothing is being decided until the first accept
+arrives. Failures are never cached, so an intake that ships the filter starts
+working without a restart here. The expiry is not decoration: it bounds how
+long a pass granted under the weaker `200`-with-no-rows condition survives
+after intake records its first response.
 
 Outcomes (all written to the `routing_decisions` audit log with a
 human-readable rationale):
@@ -295,7 +350,10 @@ the front desk must not be told a patient owes paperwork they do not owe.
 > request to the intake team, analogous to the `?patient_id=` filter they added
 > for `sc-c9j`, and they have agreed to it in principle — see
 > `docs/intake-compliance-reply.md`. Until it ships, leave `INTAKE_API_KEY`
-> unset, which skips the gate.
+> unset, which skips the gate. Setting it against an intake that predates the
+> filter no longer passes everyone silently — the self-check above refuses and
+> says so — but it does mean every accept that requires compliance fails
+> closed.
 
 ### The data boundary (why the gate looks like this)
 
@@ -366,6 +424,13 @@ never stored.
   to `compliance_unavailable`, not `compliance_failed`. A stale `cref_` left
   after a form type is retired is our configuration being wrong, and the front
   desk must not be told a patient owes paperwork they do not owe.
+- The self-check's weaker pass condition is **`200` with no rows**, which an
+  intake holding no completed responses at all also produces. It is not a hole
+  that passes anyone: in that state every real query returns nothing too and
+  the gate blocks. But it is why the answer expires rather than being kept, and
+  it is why a `400` for an unknown reference (ask 1 in
+  `docs/intakeform-asks.md`) is worth more than it looks — it is the only
+  answer that is positive proof rather than an absence.
 
 ## What's pending: Check-in / queueing app
 

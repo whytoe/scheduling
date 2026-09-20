@@ -13,6 +13,10 @@ defmodule Scheduling.Application do
         Scheduling.Repo,
         {DNSCluster, query: Application.get_env(:scheduling, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: Scheduling.PubSub},
+        # Holds the standing answer to "is intake actually filtering by
+        # compliance_ref". Started unconditionally: it does nothing until the
+        # gate asks, and the gate must never be able to run without it.
+        Scheduling.Compliance.FilterCheck,
         # OIDC discovery + JWKS for SSO and API tokens. nil when auth is
         # unconfigured, which is the local-dev default. Started before the
         # endpoint so the first request already has keys to validate against.
