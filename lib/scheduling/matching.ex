@@ -93,7 +93,7 @@ defmodule Scheduling.Matching do
     # the operator cannot see, producing an assignment they can neither find
     # nor undo — and placing a patient's record in front of staff at a site
     # that has no business with them.
-    offices = Offices.list_offices(location_ids: Keyword.get(opts, :location_ids))
+    offices = Offices.list_assignable_offices(location_ids: Keyword.get(opts, :location_ids))
 
     match(entry.required_capabilities, offices, loads)
   end

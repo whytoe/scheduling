@@ -150,7 +150,10 @@ defmodule SchedulingWeb.BoardLive.Index do
           intake_capacity: office.intake_capacity,
           caps: capability_list(office.capabilities),
           load: load,
-          incoming: length(Map.get(incoming_by_office, office.id, []))
+          incoming: length(Map.get(incoming_by_office, office.id, [])),
+          # Shown on the board but excluded from routing — see
+          # Offices.list_assignable_offices/1.
+          site_closed: match?(%{location: %{active: false}}, office)
         }
       end)
 
@@ -436,6 +439,7 @@ defmodule SchedulingWeb.BoardLive.Index do
               capacity={o.intake_capacity}
               load={o.load}
               incoming={o.incoming}
+              site_closed={o.site_closed}
               compact
             />
           </div>

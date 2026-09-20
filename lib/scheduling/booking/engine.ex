@@ -282,7 +282,7 @@ defmodule Scheduling.Booking.Engine do
 
   # No loads: see the moduledoc. A future booking's capacity is the slot.
   defp resolve_binding(capabilities) do
-    case Matching.eligible_offices(capabilities, Offices.list_offices()) do
+    case Matching.eligible_offices(capabilities, Offices.list_assignable_offices()) do
       [] -> {:error, :no_eligible_office}
       [_only] = offices -> {:ok, offices, :committed}
       offices -> {:ok, offices, :provisional}
