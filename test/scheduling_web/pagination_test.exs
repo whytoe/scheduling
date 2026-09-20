@@ -33,7 +33,7 @@ defmodule SchedulingWeb.PaginationTest do
 
   describe "slice/2" do
     test "returns the page and a next cursor when there's overflow" do
-      rows = for i <- 5..1//-1, do: %{id: i}
+      rows = for i <- 5..1, do: %{id: i}
 
       # asking for 3, we got 4 (5 4 3 2 1 -> first 5 rows == over-fetched, but
       # this fixture is 5 rows, limit 3 => page = [5,4,3], rest = [2,1])
