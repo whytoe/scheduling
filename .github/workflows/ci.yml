@@ -4,13 +4,25 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The weekly run is the loose-pin channel — see the note on `runs-on` below.
+  schedule:
+    - cron: "17 6 * * 1"
 
 env:
   MIX_ENV: test
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Pinned for pull requests, loose once a week.
+    #
+    # A PR run pins the runner image and the toolchain to exactly what the
+    # Dockerfile builds, so a green check is evidence about the artifact that
+    # actually ships. The Monday run takes the floating labels instead, which is
+    # where upstream breakage shows up: a new Elixir or Erlang patch, and the
+    # ubuntu-latest move to Ubuntu 26 on 2026-10-19. That failure then arrives on
+    # its own schedule with an empty diff to blame, rather than inside somebody's
+    # unrelated pull request where it reads as their change having broken us.
+    runs-on: ${{ github.event_name == 'schedule' && 'ubuntu-latest' || 'ubuntu-24.04' }}
 
     services:
       postgres:
@@ -28,22 +40,51 @@ jobs:
           --health-retries 5
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+
+      # The Dockerfile is the single source of truth for the toolchain. Reading
+      # it here rather than repeating the versions means the two cannot drift:
+      # bumping ELIXIR_VERSION or OTP_VERSION moves CI in the same commit.
+      - name: Resolve toolchain
+        id: toolchain
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          elixir=$(sed -n 's/^ARG ELIXIR_VERSION=//p' Dockerfile)
+          otp=$(sed -n 's/^ARG OTP_VERSION=//p' Dockerfile)
+          if [ -z "$elixir" ] || [ -z "$otp" ]; then
+            echo "::error::Could not read ELIXIR_VERSION/OTP_VERSION from Dockerfile"
+            exit 1
+          fi
+          if [ "$EVENT" = schedule ]; then
+            # Newest patch of the series we ship, rather than the patch we ship.
+            elixir=${elixir%.*}
+            otp=${otp%%.*}
+          fi
+          echo "elixir=$elixir" >> "$GITHUB_OUTPUT"
+          echo "otp=$otp" >> "$GITHUB_OUTPUT"
+          echo "Elixir $elixir / OTP $otp (event: $EVENT)"
 
       - name: Set up Elixir
+        id: beam
         uses: erlef/setup-beam@v1
         with:
-          elixir-version: "1.18"
-          otp-version: "27"
+          elixir-version: ${{ steps.toolchain.outputs.elixir }}
+          otp-version: ${{ steps.toolchain.outputs.otp }}
 
+      # The toolchain is part of the key because `_build` holds artifacts that a
+      # different Elixir or Erlang cannot reuse. Without it the weekly loose-pin
+      # run and the pinned runs would share one cache entry and take turns
+      # invalidating each other.
       - name: Restore dependency cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
-          restore-keys: ${{ runner.os }}-mix-
+          key: ${{ runner.os }}-otp-${{ steps.beam.outputs.otp-version }}-elixir-${{ steps.beam.outputs.elixir-version }}-mix-${{ hashFiles('**/mix.lock') }}
+          restore-keys: ${{ runner.os }}-otp-${{ steps.beam.outputs.otp-version }}-elixir-${{ steps.beam.outputs.elixir-version }}-mix-
 
       - name: Install dependencies
         run: mix deps.get
