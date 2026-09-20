@@ -3,6 +3,11 @@
 Written 2026-09-09. Everything below is evidence from the live deployment, not
 inference.
 
+Where a claim about *our* behaviour has since stopped being true, it is
+corrected in place and dated rather than quietly edited — an ask document that
+silently rewrites its own history is worth less to the people reading it than
+one that shows what changed.
+
 Scheduling authenticates users and services against ac-core and treats it as
 the system of record for patients, practices and locations. Three things it
 issues today stop short of what a resource server needs, and each blocks
@@ -133,11 +138,35 @@ token and we did not think it appropriate to try. Answering a flat
 **Ask:** confirm which it is. If real tokens are described to unauthenticated
 callers, that is worth fixing regardless of anything above.
 
-Noting one consequence for us either way: scheduling's introspection currently
-authenticates with the **browser** client, which ac-core refuses the
-`client_credentials` grant. If the endpoint starts enforcing client
-authentication, our calls may break — we would switch to the machine client's
-credentials, but would rather know before it happens than after.
+### A second ask, if you do start enforcing
+
+**Is `cmtnp9g4w002n01ixe5brn68r` — the machine client at the top of this
+document — permitted to introspect?**
+
+Scheduling introspects as that client. Every `/api/v1` bearer token depends on
+it: ac-core issues opaque access tokens, so introspection is the only
+validation path we have, and a client that is refused the endpoint takes the
+whole integration surface down with it.
+
+It would take it down *quietly*. Browser SSO does not introspect — it needs
+only the ID token — so every screen would keep working and the deployment would
+keep looking healthy while the check-in bridge and the intake bridge got 503s.
+We would rather have the answer in advance than diagnose that shape of failure
+live.
+
+> **Corrected 2026-09-20.** This section previously said scheduling introspects
+> with the **browser** client, which you refuse the `client_credentials` grant,
+> and that we would switch to the machine client if you tightened the endpoint.
+> That was true when this document was written on 2026-09-09 and stopped being
+> true on 2026-09-18, when we made the switch (`Scheduling.Auth.Introspection`,
+> PR #15) rather than waiting to be forced into it. The ask above is what we
+> should have been asking for; apologies for the moving target.
+>
+> One leftover worth stating plainly: a scheduling deployment configured with
+> `OIDC_*` but no `CORE_*` credentials still falls back to the browser client,
+> because there is nothing else for it to present. That is the local-development
+> shape and not how the deployment above is configured, but it is why the
+> browser client is not entirely out of the picture.
 
 ---
 
