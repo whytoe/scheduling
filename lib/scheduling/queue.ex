@@ -389,7 +389,7 @@ defmodule Scheduling.Queue do
   end
 
   defp record_compliance_unavailable(entry, reason, opts) do
-    rationale = "Compliance check unavailable: " <> inspect(reason)
+    rationale = "Compliance check unavailable: " <> compliance_reason(reason)
 
     result = %Result{
       required: entry.required_capabilities,
@@ -486,6 +486,39 @@ defmodule Scheduling.Queue do
         {:error, changeset}
     end
   end
+
+  # A routing_decision rationale is append-only, rendered at /decisions, and
+  # returned by GET /api/v1/routing_decisions to any read role. So the reason
+  # is enumerated here rather than `inspect`ed.
+  #
+  # `inspect/1` on an arbitrary term is the bug this replaces: the compliance
+  # client used to carry intake's response body in its error reason, and
+  # inspecting it wrote a patient's form-response rows into an audit row that
+  # cannot be edited or deleted. The client no longer does that — but the sink
+  # should not depend on every future error term being careful, because the one
+  # that is not will be written before anyone notices.
+  #
+  # Anything unrecognised is described by its shape and nothing else. A reason
+  # that cannot be named is exactly the case where its contents are unknown.
+  defp compliance_reason(:not_configured), do: "the gate is not configured"
+  defp compliance_reason({:unknown_reference, ref}), do: "unknown reference #{ref}"
+  defp compliance_reason({:http_status, status}), do: "intake answered #{status}"
+  defp compliance_reason({:unexpected_body, shape}), do: "unrecognised response #{inspect(shape)}"
+
+  defp compliance_reason({:ref_filter_unverified, reason}),
+    do: "could not confirm intake filters by reference (" <> compliance_reason(reason) <> ")"
+
+  defp compliance_reason({:ref_filter_not_applied, _}), do: "intake is not filtering by reference"
+  defp compliance_reason(:ref_filter_not_applied), do: "intake is not filtering by reference"
+  defp compliance_reason(%{__exception__: true} = error), do: Exception.message(error)
+  defp compliance_reason(reason) when is_atom(reason), do: to_string(reason)
+  defp compliance_reason(reason), do: "unnamed reason (#{type_of(reason)})"
+
+  defp type_of(term) when is_binary(term), do: "string"
+  defp type_of(term) when is_list(term), do: "list"
+  defp type_of(term) when is_map(term), do: "map"
+  defp type_of(term) when is_tuple(term), do: "tuple/#{tuple_size(term)}"
+  defp type_of(_term), do: "term"
 
   @doc """
   Marks an entry `:cancelled` — the patient withdrew before being seen.
