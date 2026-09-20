@@ -36,6 +36,35 @@ defmodule Scheduling.Core.Client do
   a projection cannot be produced by merging a decoded response: the keys have
   to be written out.
 
+  ## Error reasons describe a body, they never carry one
+
+  The projection above is only half the boundary. A failed request used to put
+  ac-core's response body straight into its error reason, and the body of a
+  failing `/v1/patients` call is a patient record — `firstName`, `lastName`,
+  and whatever else ac-core has started returning, since the spec declares
+  every object `additionalProperties: true`. So the reason re-admitted exactly
+  what the projection exists to keep out, on the one path where nobody was
+  looking at it.
+
+  That is **not** currently a boundary breach. Every sink for these reasons is
+  a log or an operator's terminal — `Locations.sync_from_core/1` and
+  `Practices.sync_from_core/1` log `inspect(reason)`, `Scheduling.Release`
+  prints it — and `docs/data-boundary.md` allows patient names in logs. The
+  problem is that the client offers a hazard the next caller inherits: nothing
+  about `{:error, {:http_status, 500, body}}` says "do not write this down",
+  and the caller that writes it into an append-only row will not be the one
+  that reads this moduledoc. `sc-87w` is what that looks like when it happens.
+
+  So `shape/1` returns the type and size of a body and nothing else. Shape is
+  what a diagnosis needs — "ac-core answered 500 with a map" is the useful
+  fact and the whole useful fact. Keys are deliberately excluded as well,
+  because an envelope keyed by identifier would make them data.
+
+  The `{:http_status, status, shape}` arity is kept rather than shortened to a
+  pair: `Scheduling.Patients.classify/1` matches the three-element form to tell
+  a 404 from anything else, `get_patient/1` documents it, and a shape in that
+  slot costs nothing while carrying nothing.
+
   ## Pagination
 
   The list functions return the page envelope as
@@ -229,18 +258,30 @@ defmodule Scheduling.Core.Client do
   end
 
   defp handle_response({:ok, %{status: status, body: body}}) when status in 200..299 do
-    if is_map(body), do: {:ok, body}, else: {:error, {:unexpected_body, body}}
+    if is_map(body), do: {:ok, body}, else: {:error, {:unexpected_body, shape(body)}}
   end
 
   defp handle_response({:ok, %{status: 401, body: body}}) do
     # Our token was rejected. Drop it so the next call re-fetches rather than
     # replaying a credential ac-core has stopped honouring.
     ServiceToken.invalidate()
-    {:error, {:http_status, 401, body}}
+    {:error, {:http_status, 401, shape(body)}}
   end
 
   defp handle_response({:ok, %{status: status, body: body}}),
-    do: {:error, {:http_status, status, body}}
+    do: {:error, {:http_status, status, shape(body)}}
 
   defp handle_response({:error, exception}), do: {:error, exception}
+
+  # Describes a body without carrying any of it. See the moduledoc.
+  #
+  # Unlike `Scheduling.Compliance.Client.shape/1`, which this mirrors, there is
+  # a list clause. That client reads its rows through `rows/1`, so a bare list
+  # never reaches its shape function; here a top-level array is a body ac-core
+  # could plausibly answer with, and `{:list, 25}` is the fact worth having.
+  defp shape(body) when is_map(body), do: {:map, map_size(body)}
+  defp shape(body) when is_list(body), do: {:list, length(body)}
+  defp shape(body) when is_binary(body), do: {:string, byte_size(body)}
+  defp shape(nil), do: :nil_body
+  defp shape(_other), do: :unrecognised
 end

@@ -750,7 +750,10 @@ defmodule SchedulingWeb.Schemas do
               properties: %{
                 reason: %Schema{
                   type: :string,
-                  description: "Inspect of the underlying transport error"
+                  description:
+                    "Inspect of the underlying transport error. Names a status, " <>
+                      "a transport failure or a body's shape — never a response body; " <>
+                      "see Scheduling.Compliance.Client."
                 }
               },
               required: [:reason]
@@ -765,7 +768,7 @@ defmodule SchedulingWeb.Schemas do
           "code" => "compliance_unavailable",
           "message" =>
             "The intake-form system is unreachable; booking is blocked until it recovers",
-          "details" => %{"reason" => "{:http_status, 401, %{...}}"}
+          "details" => %{"reason" => "{:http_status, 401}"}
         }
       }
     })
