@@ -72,6 +72,56 @@ covered by a test in `test/scheduling/phi_boundary_test.exs`:
 
 Adding a field to any of these is the moment to re-read this document.
 
+## Logs are a fourth path, held to a different rule
+
+Decided 2026-09-20, after `sc-87w` — an intake response body was reaching
+`routing_decisions.rationale` through `inspect(reason)`, and the same question
+turned out to be unanswered for logs.
+
+**No clinical content in logs, ever. Patient identifiers and names are
+acceptable.**
+
+The asymmetry is deliberate rather than a compromise. A log here is
+operational and short-lived — retention measured at roughly seventeen minutes
+— and reading one needs org access to the platform. An audit row is
+append-only and served by `GET /api/v1/routing_decisions` to any token with a
+read role. Those are not the same exposure, and pretending they are would cost
+real diagnostic ability for no gain: a patient's name in a log line while
+somebody debugs a failing sync is ordinary practice.
+
+Clinical content is different because there is no version of it we need. We do
+not hold it, we do not display it, and nothing about diagnosing a failure
+requires it — so "never" is both cheaper to state and cheaper to keep than a
+rule with an exception in it.
+
+### What this means in practice
+
+There are eleven places that `inspect` an error reason into a log. Several sit
+downstream of a client that carries an upstream response body:
+
+| Source | A body contains | Verdict |
+|---|---|---|
+| `Core.Client` | ac-core patient records — `firstName`, `lastName` | PII, acceptable |
+| `Oidcc` introspection | claims — `sub`, `email`, `name` | PII, acceptable |
+| `Compliance.Client` | intake form-response rows | **clinical — must not** |
+
+`Compliance.Client` is already the only one that could carry clinical content,
+and since `sc-87w` it carries a shape instead of a body. `probe_ref_filter/0`
+was written body-free from the start, so its refusal log is safe by
+construction.
+
+### The condition that would change this
+
+ac-core exposes `GET /emr/{practiceSlug}/fhir/{resourceType}` behind a
+`core:emr:read` scope. We do not hold that scope — ours are
+`core:patients:read`, `core:organizations:read` and `core:practices:self` — and
+`Scheduling.Core.Client` calls no EMR endpoint.
+
+**If that ever changes, an ac-core response body becomes clinical content**,
+and every log line downstream of `Core.Client` becomes a breach of the rule
+above. Granting `core:emr:read` is therefore not a scope change; it is a change
+to this document.
+
 ## The compliance gate
 
 The gate used to read `required_form_types` off the entry's diagnosis and send
