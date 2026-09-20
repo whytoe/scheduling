@@ -16,6 +16,7 @@ defmodule Scheduling.Handoffs do
 
   alias Scheduling.Audit
   alias Scheduling.Handoffs.Handoff
+  alias Scheduling.Queue.QueueEntry
   alias Scheduling.Offices.Office
   alias Scheduling.Queue.QueueEntry
   alias Scheduling.Repo
@@ -107,9 +108,49 @@ defmodule Scheduling.Handoffs do
         }
       })
     end)
+    |> Ecto.Multi.run(:queue_entry, fn _repo, _changes ->
+      start_service(handoff.queue_entry, opts)
+    end)
     |> Repo.transaction()
     |> case do
       {:ok, %{handoff: acked}} -> {:ok, broadcast(acked, :handoff_acknowledged)}
+      {:error, _, changeset, _} -> {:error, changeset}
+    end
+  end
+
+  # Acknowledging a handoff is a clinician taking the patient, so the entry is
+  # now in service. Nothing used to say so: `:in_service` was declared on the
+  # schema, enumerated in the OpenAPI response, given its own badge and made
+  # filterable, and no code path ever wrote it. `?status=in_service` returned an
+  # empty list forever and `?status=active` quietly meant `assigned` alone.
+  #
+  # The board looked right the whole time because two LiveViews infer "in
+  # service" from this very event rather than from the status. That inference is
+  # left in place — it now agrees with the column instead of standing in for it.
+  #
+  # Failing here fails the acknowledgement. That is the point: a handoff that is
+  # acknowledged while the entry stays `assigned` is the state this bug
+  # consisted of, and leaving it reachable as a partial success would preserve
+  # the thing being fixed.
+  defp start_service(nil, _opts), do: {:ok, nil}
+
+  defp start_service(%QueueEntry{} = entry, opts) do
+    Ecto.Multi.new()
+    |> Ecto.Multi.update(:entry, QueueEntry.transition_changeset(entry, :in_service))
+    |> Ecto.Multi.run(:event, fn _repo, %{entry: started} ->
+      Audit.record_event(%{
+        type: "queue_entry.in_service",
+        visit_id: started.visit_id,
+        queue_entry_id: started.id,
+        patient_id: started.patient_id,
+        actor_type: Keyword.get(opts, :actor_type, actor_type_default(opts)),
+        actor_id: Keyword.get(opts, :actor_id, Keyword.get(opts, :acknowledged_by)),
+        payload: %{assigned_office_id: started.assigned_office_id}
+      })
+    end)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{entry: started}} -> {:ok, started}
       {:error, _, changeset, _} -> {:error, changeset}
     end
   end
