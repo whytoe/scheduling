@@ -7,6 +7,7 @@ defmodule SchedulingWeb.OfficeLive.Index do
   use SchedulingWeb, :live_view
 
   alias Scheduling.Catalog
+  alias Scheduling.Locations
   alias Scheduling.Offices
   alias Scheduling.Offices.Office
 
@@ -15,6 +16,10 @@ defmodule SchedulingWeb.OfficeLive.Index do
     {:ok,
      socket
      |> assign(:capabilities, Catalog.list_capabilities())
+     # Labelled, not named: three of the five synced sites are called
+     # "Main Office" and two of those have no address, so a picker built on
+     # `name` offers identical options. See Scheduling.Locations.label/1.
+     |> assign(:locations, Locations.list_locations(active: true))
      |> assign(:confirm, nil)
      |> stream(:offices, Offices.list_offices())}
   end
@@ -82,29 +87,46 @@ defmodule SchedulingWeb.OfficeLive.Index do
 
   defp save_office(socket, :new, office_params) do
     case Offices.create_office(office_params) do
-      {:ok, office} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Office created")
-         |> stream_insert(:offices, with_capabilities(office))
-         |> push_patch(to: ~p"/offices")}
-
-      {:error, %Ecto.Changeset{} = changeset} ->
-        {:noreply, assign_form(socket, changeset)}
+      {:ok, office} -> saved(socket, office, "Office created")
+      {:error, %Ecto.Changeset{} = changeset} -> {:noreply, assign_form(socket, changeset)}
     end
   end
 
   defp save_office(socket, :edit, office_params) do
     case Offices.update_office(socket.assigns.office, office_params) do
-      {:ok, office} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Office updated")
-         |> stream_insert(:offices, with_capabilities(office))
-         |> push_patch(to: ~p"/offices")}
+      {:ok, office} -> saved(socket, office, "Office updated")
+      {:error, %Ecto.Changeset{} = changeset} -> {:noreply, assign_form(socket, changeset)}
+    end
+  end
 
-      {:error, %Ecto.Changeset{} = changeset} ->
-        {:noreply, assign_form(socket, changeset)}
+  defp saved(socket, office, message) do
+    {office, message} = adopt_site_timezone(office, message)
+
+    {:noreply,
+     socket
+     |> put_flash(:info, message)
+     |> stream_insert(:offices, with_capabilities(office))
+     |> push_patch(to: ~p"/offices")}
+  end
+
+  # A room is in the place it is in, and making someone set that twice invites a
+  # mismatch that only shows up as a calendar an hour out — so an office still
+  # on the default Etc/UTC takes its site's timezone.
+  #
+  # Said out loud rather than done quietly. Slot generation reads
+  # Office.timezone, so a silent change moves a room's whole calendar; an admin
+  # who sees the field say Etc/UTC and finds it saying something else needs to
+  # know why. An explicitly-set timezone is left alone — see
+  # Scheduling.Locations.link_office/2, which owns the rule.
+  defp adopt_site_timezone(office, message) do
+    office = Scheduling.Repo.preload(office, :location)
+
+    with %{location: %{timezone: zone} = location} when is_binary(zone) <- office,
+         true <- office.timezone in [nil, "Etc/UTC"],
+         {:ok, linked} <- Locations.link_office(office, location) do
+      {linked, message <> " — adopted #{zone} from #{Locations.label(location)}."}
+    else
+      _unchanged -> {office, message}
     end
   end
 
@@ -146,6 +168,7 @@ defmodule SchedulingWeb.OfficeLive.Index do
         page_title={@page_title}
         capabilities={@capabilities}
         selected_capability_ids={@selected_capability_ids}
+        locations={@locations}
       />
 
       <div class="card overflow-hidden" style="padding:0">
@@ -209,6 +232,7 @@ defmodule SchedulingWeb.OfficeLive.Index do
   attr :page_title, :string, required: true
   attr :capabilities, :list, required: true
   attr :selected_capability_ids, :list, required: true
+  attr :locations, :list, required: true
 
   defp office_form(assigns) do
     ~H"""
@@ -244,6 +268,27 @@ defmodule SchedulingWeb.OfficeLive.Index do
             <div class="field__hint">How many patients this office can serve at once.</div>
             <.field_errors field={@form[:intake_capacity]} />
           </div>
+        </div>
+
+        <div class="field">
+          <label class="field__label" for="office_location_id">Site</label>
+          <select id="office_location_id" name="office[location_id]" class="input">
+            <option value="">Not linked to a site</option>
+            <option
+              :for={location <- @locations}
+              value={location.id}
+              selected={to_string(@form[:location_id].value) == to_string(location.id)}
+            >
+              {Scheduling.Locations.label(location)}
+            </option>
+          </select>
+          <div class="field__hint">
+            Which of ac-core's sites this room is in. An operator scoped to particular
+            sites only sees and routes to rooms at those sites; a room left unlinked is
+            visible to everyone. Leaving the timezone on Etc/UTC adopts the site's, and
+            you will be told if that happens.
+          </div>
+          <.field_errors field={@form[:location_id]} />
         </div>
 
         <div class="field">
