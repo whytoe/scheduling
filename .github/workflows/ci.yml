@@ -61,10 +61,21 @@ jobs:
             # Newest patch of the series we ship, rather than the patch we ship.
             elixir=${elixir%.*}
             otp=${otp%%.*}
+            version_type=loose
+          else
+            # setup-beam prefix-matches by default, so otp-version "27.3" gets
+            # the newest 27.3.x — which is not the erlang-27.3 the Dockerfile
+            # builds on. strict takes both verbatim; Elixir's strict build names
+            # carry the OTP major they were compiled for.
+            elixir="$elixir-otp-${otp%%.*}"
+            version_type=strict
           fi
-          echo "elixir=$elixir" >> "$GITHUB_OUTPUT"
-          echo "otp=$otp" >> "$GITHUB_OUTPUT"
-          echo "Elixir $elixir / OTP $otp (event: $EVENT)"
+          {
+            echo "elixir=$elixir"
+            echo "otp=$otp"
+            echo "version-type=$version_type"
+          } >> "$GITHUB_OUTPUT"
+          echo "Elixir $elixir / OTP $otp ($version_type, event: $EVENT)"
 
       - name: Set up Elixir
         id: beam
@@ -72,6 +83,7 @@ jobs:
         with:
           elixir-version: ${{ steps.toolchain.outputs.elixir }}
           otp-version: ${{ steps.toolchain.outputs.otp }}
+          version-type: ${{ steps.toolchain.outputs.version-type }}
 
       # The toolchain is part of the key because `_build` holds artifacts that a
       # different Elixir or Erlang cannot reuse. Without it the weekly loose-pin
