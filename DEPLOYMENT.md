@@ -122,6 +122,36 @@ unfixed.
 The Debian snapshot moved for the same reason, and picks up that snapshot's
 package updates for both the builder and the runner.
 
+### Dependency advisories
+
+The reasoning above covers the runtime. The dependencies have the same problem
+and had no answer at all until `sc-soe`: `mix deps.get` mentions advisories in
+one line that scrolls past fifty package fetches, and nothing else looked.
+
+The `audit` job in `.github/workflows/ci.yml` runs `mix hex.audit` on the
+**weekly schedule**, not on pull requests, and can be started by hand with
+`workflow_dispatch`. Not on pull requests because an advisory is published
+against a dependency nobody here has touched: gating a pull request on it turns
+somebody's unrelated diff red for a reason that diff cannot explain, which is
+how a check like this ends up switched off. Same argument, same schedule, as
+the loose toolchain pin.
+
+Two things about `mix hex.audit` are worth knowing before trusting it:
+
+- **It needs Hex 2.5.0 or newer.** Before that it reported *retired* packages
+  only — on an older Hex it prints "No retired packages found" and exits 0 no
+  matter how many advisories stand. The job asserts the version first, because
+  the failure mode is a green check that examined nothing.
+- **It reads `mix.lock`,** so `MIX_ENV` does not narrow it and test-only
+  dependencies are audited too. That is intended: they run on CI machines and
+  on laptops.
+
+An advisory that genuinely does not apply is acknowledged rather than ignored
+— list its id under `ignore_advisories` in the `:hex` block of `mix.exs`, with
+a comment saying why it does not reach this application. Deleting the step is
+not the alternative to that; it is the thing `ignore_advisories` exists to
+prevent.
+
 ---
 
 ## 3. Required environment variables
