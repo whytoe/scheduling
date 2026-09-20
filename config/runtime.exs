@@ -133,12 +133,24 @@ config :scheduling, Scheduling.Core,
 # office is unlinked, and unlinked offices are visible to everyone. See
 # `Scheduling.Locations.Syncer`.
 #
-# Hourly because sites change rarely but a new one should not wait a day to
-# become assignable, and one paginated GET an hour costs nothing. The syncer
-# does not start at all without core credentials.
+# Every 15 minutes. Not because the data changes often — sites are physical
+# clinic locations, edited on a timescale of months, and the scheduling data
+# that does move constantly (availability, slots, appointments, queue entries)
+# never passes through this sync. The argument is asymmetry: a location edit is
+# rare and acting on a stale one is expensive in a clinic, while the poll is
+# two paginated GETs against a handful of rows.
+#
+# It only became worth tightening once something read the result — while
+# nothing honoured `locations.active`, syncing faster would have recorded a
+# closure promptly and still routed patients to the closed site.
+#
+# For a real closure, do not wait for the timer:
+#   bin/scheduling eval "Scheduling.Release.sync_locations()"
+#
+# The syncer does not start at all without core credentials.
 config :scheduling, Scheduling.Locations,
   sync_enabled: System.get_env("LOCATION_SYNC_ENABLED", "true") != "false",
-  sync_interval_ms: String.to_integer(System.get_env("LOCATION_SYNC_INTERVAL_MS", "3600000"))
+  sync_interval_ms: String.to_integer(System.get_env("LOCATION_SYNC_INTERVAL_MS", "900000"))
 
 # Booking's rolling slot horizon. Sixty days is far enough to book a couple of
 # months out and short enough that a schedule change does not strand a year of
