@@ -1,6 +1,6 @@
 # Deployment
 
-`scheduling` is a Phoenix 1.8 LiveView app (Elixir 1.18 / OTP 27) backed by
+`scheduling` is a Phoenix 1.8 LiveView app (Elixir 1.18.5 / OTP 27.3.4.17) backed by
 PostgreSQL via Ecto. It ships as a self-contained OTP release inside a Docker
 image. Anywhere that can run a container and reach a Postgres database can run
 this app.
@@ -59,6 +59,68 @@ mix phx.server
 
 The health endpoint pings the database with `SELECT 1`, so platforms can use
 it as both a liveness and a readiness probe.
+
+### Toolchain
+
+| | |
+|---|---|
+| Elixir | `1.18.5` |
+| Erlang/OTP | `27.3.4.17` |
+| Debian snapshot | `bookworm-20260918-slim` |
+
+All three live as `ARG`s at the top of the `Dockerfile` and nowhere else. CI
+reads them out of that file, so a bump moves the pull-request checks in the same
+commit and a green check is evidence about the artifact that ships.
+
+**They are not independently choosable.** hexpm publishes one image per
+`(elixir, erlang, debian-snapshot)` triple, and only for combinations it
+happened to build — so moving the OTP patch level can force the Elixir patch and
+the Debian snapshot along with it. Check
+[hub.docker.com/r/hexpm/elixir/tags](https://hub.docker.com/r/hexpm/elixir/tags)
+before editing any of the three. `DEBIAN_VERSION` additionally has to exist as a
+`debian:` tag, because the same `ARG` names the runner base.
+
+**Name the patch, not the series.** `OTP_VERSION=27.3` reads like a pin and is
+not one: the 27.3 series has 21 patch releases behind it. A four-component
+version is a version somebody chose.
+
+#### Why this one (evaluated 2026-09-20, `sc-c3g`)
+
+OTP patch releases inside a series carry security fixes. Between `OTP-27.3` and
+`OTP-27.3.4.17` there are **56 CVEs**, two of them critical, counted from
+[erlang/otp's advisory database](https://github.com/erlang/otp/security/advisories).
+The ones that are actually reachable from this release are the reason for the
+bump rather than the headline count:
+
+- **Reachable.** Everything in `ssl` / `public_key`, because every outbound call
+  this app makes is HTTPS — ac-core for OIDC and the core API, intakeform for
+  the compliance gate. That includes `CVE-2026-55953` (critical, (D)TLS-1.2
+  server certificate verification bypass), `CVE-2026-42790` (hostname
+  verification falling back to subject CN), `CVE-2026-42789` (a non-CA
+  certificate accepted as an intermediate issuer) and `CVE-2026-32144` (OCSP
+  designated-responder authorization bypass).
+- **Reachable.** `httpc`, which is not an implementation detail here: `oidcc`
+  declares `extra_applications: [:inets, :ssl]` and issues every OIDC request
+  through `httpc:request/5`. So discovery, JWKS, the token exchange and
+  introspection all run through it — and `CVE-2026-48856` is *"httpc leaks
+  Authorization header to cross-origin redirect targets"*, on calls that carry
+  this deployment's client credentials.
+- **Not reachable.** `CVE-2025-32433`, the CVSS 10.0 unauthenticated SSH RCE, is
+  in the `ssh` application's daemon. `ssh` is not in the release at all — check
+  with `ls _build/prod/rel/scheduling/lib`. Worth stating plainly rather than
+  quoting the 10.0 and letting it do the arguing.
+- **Not reachable.** The `inets httpd` cluster — request smuggling,
+  `mod_auth` bypasses, slowloris. `inets` ships because `oidcc` wants `httpc`,
+  but nothing starts `httpd`; Phoenix serves through Bandit.
+
+Elixir moved `1.18.4` → `1.18.5` because it had to: no `1.18.4` image exists for
+any OTP newer than `27.3.4.16`. It is not a cost — `1.18.5` is a
+[security-only release](https://github.com/elixir-lang/elixir/releases/tag/v1.18.5)
+whose notes contain exactly one entry, `CVE-2026-75758`, which `1.18.4` carries
+unfixed.
+
+The Debian snapshot moved for the same reason, and picks up that snapshot's
+package updates for both the builder and the runner.
 
 ---
 
