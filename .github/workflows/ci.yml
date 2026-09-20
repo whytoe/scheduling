@@ -4,9 +4,13 @@ on:
   push:
     branches: [main]
   pull_request:
-  # The weekly run is the loose-pin channel — see the note on `runs-on` below.
+  # The weekly run is the loose-pin channel — see the note on `runs-on` below,
+  # and the `audit` job, which rides the same schedule for the same reason.
   schedule:
     - cron: "17 6 * * 1"
+  # So the audit can be re-run on demand after a dependency bump, instead of
+  # waiting until Monday to find out whether it worked.
+  workflow_dispatch:
 
 env:
   MIX_ENV: test
@@ -117,3 +121,85 @@ jobs:
 
       - name: Run tests
         run: mix test
+
+  # Dependency security advisories, weekly — deliberately not on pull requests.
+  #
+  # An advisory is published against a dependency nobody here has touched, so
+  # gating pull requests on it turns somebody's unrelated diff red for a reason
+  # that diff cannot explain. That is how a check like this gets switched off,
+  # and a switched-off check is worse than none because it reads as covered.
+  # Monday is the same answer the loose toolchain pin got in a99339a: the
+  # failure arrives on its own schedule with an empty diff to blame.
+  #
+  # A separate job rather than a step inside `test`, because the two must not
+  # be able to hide each other. An advisory needs reporting even when a new
+  # Elixir has broken the build, and a broken build needs reporting even while
+  # the audit is red.
+  audit:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # Read loosely, and not because this job is the loose-pin channel. The
+      # question `mix hex.audit` answers is "does anything in mix.lock carry an
+      # advisory", which is a fact about the lock file and the Hex registry;
+      # the compiler does not enter into it. Pinning here would imply the
+      # answer depends on the toolchain, and it does not. It still reads the
+      # series out of the Dockerfile rather than naming versions here, so there
+      # is one place to edit when the pin moves.
+      - name: Resolve toolchain
+        id: toolchain
+        run: |
+          set -euo pipefail
+          elixir=$(sed -n 's/^ARG ELIXIR_VERSION=//p' Dockerfile)
+          otp=$(sed -n 's/^ARG OTP_VERSION=//p' Dockerfile)
+          if [ -z "$elixir" ] || [ -z "$otp" ]; then
+            echo "::error::Could not read ELIXIR_VERSION/OTP_VERSION from Dockerfile"
+            exit 1
+          fi
+          {
+            echo "elixir=${elixir%.*}"
+            echo "otp=${otp%%.*}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ steps.toolchain.outputs.elixir }}
+          otp-version: ${{ steps.toolchain.outputs.otp }}
+          version-type: loose
+
+      # Without this the job is worse than absent. `mix hex.audit` reported
+      # only *retired* packages until Hex 2.5.0; on anything older it prints
+      # "No retired packages found", exits 0, and says nothing about the
+      # advisories it cannot see. setup-beam installs the newest Hex today and
+      # nothing here guarantees it will tomorrow — a mirror, a cache or a
+      # pinned installer would all produce a green job that checks nothing.
+      - name: Require a Hex that knows about advisories
+        run: |
+          set -euo pipefail
+          hex=$(mix hex.info | sed -n 's/^Hex: *//p')
+          echo "Hex $hex"
+          if [ "$(printf '%s\n2.5.0\n' "$hex" | sort -V | head -n1)" != "2.5.0" ]; then
+            echo "::error::Hex $hex reports retirements only (advisories need >= 2.5.0), so mix hex.audit would have passed without checking anything"
+            exit 1
+          fi
+
+      # `mix hex.audit` needs the dependencies present; it does not compile
+      # them. No cache: this runs once a week, and sharing one with `test`
+      # would mean two different toolchains taking turns invalidating it.
+      - name: Install dependencies
+        run: mix deps.get
+
+      # Reads mix.lock, so MIX_ENV does not narrow it — test-only dependencies
+      # are audited too, which is right: they run on our CI machines and on
+      # developer laptops.
+      #
+      # Exits non-zero on a retired package or an advisory. An advisory that
+      # genuinely does not apply is acknowledged with `ignore_advisories` in
+      # the `:hex` block of mix.exs, by id, with a comment saying why — never
+      # by deleting this step.
+      - name: Audit dependencies for retirements and advisories
+        run: mix hex.audit
