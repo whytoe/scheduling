@@ -137,8 +137,12 @@ defmodule Scheduling.Compliance.Client do
   Every error returned here names a status or a transport failure and nothing
   else. The control query above is unscoped by patient, so its body may hold
   other people's response rows — and this reason travels into a
-  `routing_decisions` rationale, which is append-only and fans out to every
-  webhook subscriber.
+  `routing_decisions` rationale, which is append-only and is returned by
+  `GET /api/v1/routing_decisions` to any token with a read role.
+
+  Not webhooks, despite the obvious assumption: `Webhooks.dispatch/1` is called
+  from `Audit.record_event/1` and never from `record_decision/3`. The row is
+  still readable by every integrator, which is enough.
   """
   @spec probe_ref_filter() :: :ok | {:error, term()}
   def probe_ref_filter do
@@ -233,16 +237,38 @@ defmodule Scheduling.Compliance.Client do
 
   defp handle_response({:ok, %{status: 200, body: body}}, _ref) do
     case rows(body) do
-      nil -> {:error, {:unexpected_body, body}}
+      nil -> {:error, {:unexpected_body, shape(body)}}
       [] -> {:ok, false}
       [_ | _] -> {:ok, true}
     end
   end
 
-  defp handle_response({:ok, %{status: status, body: body}}, _ref),
-    do: {:error, {:http_status, status, body}}
+  defp handle_response({:ok, %{status: status}}, _ref),
+    do: {:error, {:http_status, status}}
 
   defp handle_response({:error, exception}, _ref), do: {:error, exception}
+
+  # Describes a body without carrying any of it.
+  #
+  # These reasons are not private. `Scheduling.Queue` puts the reason into
+  # `routing_decisions.rationale`, which is append-only, rendered at
+  # `/decisions`, and returned by `GET /api/v1/routing_decisions` to any token
+  # with a read role — `viewer` and `service` included. A body from intake's
+  # `/responses` is a patient's form-response rows, so carrying it there put
+  # health data into an audit row that cannot be edited or deleted.
+  #
+  # Shape is what a diagnosis actually needs: "intake answered with a map we
+  # did not recognise" is the useful fact, and it is the whole useful fact. The
+  # content is never required to tell that the envelope changed.
+  #
+  # Keys are deliberately NOT included, even though they would be handy. An
+  # envelope keyed by identifier would make them data.
+  # No list clause: `rows/1` returns a bare list as-is, so a list body never
+  # reaches here.
+  defp shape(body) when is_map(body), do: {:map, map_size(body)}
+  defp shape(body) when is_binary(body), do: {:string, byte_size(body)}
+  defp shape(nil), do: :nil_body
+  defp shape(_other), do: :unrecognised
 
   # The list may arrive bare or wrapped; accept both rather than guess, since
   # the envelope is not fixed until intake ships this.

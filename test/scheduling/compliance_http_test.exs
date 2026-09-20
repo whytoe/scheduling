@@ -160,7 +160,10 @@ defmodule Scheduling.ComplianceHttpTest do
     test "a server error is an error", %{bypass: bypass} do
       stub_responses(bypass, &respond(&1, 500, %{"error" => "boom"}))
 
-      assert {:error, {:http_status, 500, _}} = Compliance.verify(entry(patient_fixture()))
+      # The body is deliberately absent — see sc-87w. It used to ride in this
+      # tuple and be inspected into routing_decisions.rationale, which is
+      # append-only and readable by any token with a read role.
+      assert {:error, {:http_status, 500}} = Compliance.verify(entry(patient_fixture()))
     end
 
     test "a body that is not a list of responses is an error", %{bypass: bypass} do
