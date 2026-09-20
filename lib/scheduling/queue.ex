@@ -17,6 +17,7 @@ defmodule Scheduling.Queue do
   alias Scheduling.Handoffs
   alias Scheduling.Matching
   alias Scheduling.Matching.Result
+  alias Scheduling.Queue.Promoter
   alias Scheduling.Queue.QueueEntry
   alias Scheduling.Repo
 
@@ -138,10 +139,11 @@ defmodule Scheduling.Queue do
   """
   @spec create_entry(map(), keyword()) :: {:ok, QueueEntry.t()} | {:error, Ecto.Changeset.t()}
   def create_entry(attrs, opts \\ []) do
+    attrs = stringify_keys(attrs)
+
     attrs =
       attrs
-      |> stringify_keys()
-      |> Map.put_new("status", "waiting")
+      |> Map.put_new("status", default_status(attrs))
       |> Map.put_new("priority", 0)
 
     changeset =
@@ -167,12 +169,47 @@ defmodule Scheduling.Queue do
     |> Repo.transaction()
     |> case do
       {:ok, %{entry: entry}} ->
+        # A booking made late, or a clock difference, can produce a scheduled
+        # entry that is already due. Ask for a pass now rather than letting the
+        # patient sit invisible until the next minute boundary.
+        if entry.status == :scheduled, do: Promoter.nudge()
+
         {:ok, Repo.preload(entry, [:patient, :required_capabilities, :assigned_office])}
 
       {:error, _, changeset, _} ->
         {:error, changeset}
     end
   end
+
+  # An entry booked for a time that has not arrived is created `:scheduled`, so
+  # the matcher — which selects on `status == :waiting` — cannot see it. That
+  # exclusion is therefore a property of the status rather than a condition
+  # somebody has to remember to add to each query.
+  #
+  # An explicit status in the attrs still wins: this is a default, and a caller
+  # restoring an entry or replaying an event means what they said.
+  defp default_status(attrs) do
+    case parse_scheduled_for(attrs["scheduled_for"]) do
+      {:ok, at} ->
+        if DateTime.compare(at, DateTime.utc_now()) == :gt, do: "scheduled", else: "waiting"
+
+      :error ->
+        "waiting"
+    end
+  end
+
+  defp parse_scheduled_for(%DateTime{} = at), do: {:ok, at}
+
+  defp parse_scheduled_for(at) when is_binary(at) do
+    case DateTime.from_iso8601(at) do
+      {:ok, parsed, _offset} -> {:ok, parsed}
+      # A malformed value is left for the changeset to reject, rather than
+      # being quietly treated as "now" and placed in the queue immediately.
+      {:error, _reason} -> :error
+    end
+  end
+
+  defp parse_scheduled_for(_absent), do: :error
 
   # Precedence: an explicit capability list, then a service code, then a
   # diagnosis id. Each of the latter two is expanded to the catalog entry's
@@ -395,6 +432,55 @@ defmodule Scheduling.Queue do
       {:ok, %{entry: completed}} ->
         broadcast_board_change({:completed, completed.id})
         {:ok, Repo.preload(completed, [:patient, :assigned_office])}
+
+      {:error, _, changeset, _} ->
+        {:error, changeset}
+    end
+  end
+
+  @doc """
+  Moves every `:scheduled` entry whose time has arrived to `:waiting`.
+
+  Driven by `Scheduling.Queue.Promoter`; see there for why this is a real
+  transition rather than a clause in the waiting-list query.
+
+  Returns `{:ok, count}`. Each promotion is transactional and audited on its
+  own, so one entry failing — a row someone cancelled between the query and the
+  update — does not stop the rest.
+  """
+  @spec promote_due_entries(DateTime.t()) :: {:ok, non_neg_integer()} | {:error, term()}
+  def promote_due_entries(now \\ DateTime.utc_now()) do
+    due =
+      QueueEntry
+      |> where([e], e.status == :scheduled and not is_nil(e.scheduled_for))
+      |> where([e], e.scheduled_for <= ^now)
+      |> Repo.all()
+
+    promoted = Enum.count(due, &match?({:ok, _}, promote(&1)))
+    {:ok, promoted}
+  rescue
+    error -> {:error, error}
+  end
+
+  defp promote(%QueueEntry{} = entry) do
+    Ecto.Multi.new()
+    |> Ecto.Multi.update(:entry, QueueEntry.transition_changeset(entry, :waiting))
+    |> Ecto.Multi.run(:event, fn _repo, %{entry: promoted} ->
+      Audit.record_event(%{
+        type: "queue_entry.promoted",
+        visit_id: promoted.visit_id,
+        queue_entry_id: promoted.id,
+        patient_id: promoted.patient_id,
+        payload: %{
+          scheduled_for: promoted.scheduled_for && DateTime.to_iso8601(promoted.scheduled_for)
+        }
+      })
+    end)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{entry: promoted}} ->
+        broadcast_board_change({:promoted, promoted.id})
+        {:ok, promoted}
 
       {:error, _, changeset, _} ->
         {:error, changeset}
