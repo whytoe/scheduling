@@ -152,7 +152,7 @@ defmodule Scheduling.Patients do
   # such patient" and "not visible to this token" — indistinguishable to us by
   # design, and in either case asking again will not help. Everything else is
   # our side of the wire failing and is worth a retry.
-  defp classify({:http_status, 404, _body}), do: :not_found
+  defp classify({:http_status, 404, _shape}), do: :not_found
   defp classify(reason), do: {:core_unavailable, reason}
 
   # ac-core holds given and family names separately; `patients.name` is one

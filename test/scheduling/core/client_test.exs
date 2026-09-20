@@ -140,7 +140,10 @@ defmodule Scheduling.Core.ClientTest do
     test "a missing patient is an error", %{bypass: bypass} do
       Bypass.expect(bypass, "GET", "/v1/patients/nope", &respond(&1, 404, %{"error" => "nf"}))
 
-      assert {:error, {:http_status, 404, _}} = Client.get_patient("nope")
+      # The third element is a shape, never the body — see
+      # `Scheduling.CoreClientBodyTest`. Asserted exactly so that a client
+      # which went back to carrying the body would fail here too.
+      assert {:error, {:http_status, 404, {:map, 1}}} = Client.get_patient("nope")
     end
   end
 
@@ -275,13 +278,13 @@ defmodule Scheduling.Core.ClientTest do
          %{bypass: bypass} do
       Bypass.expect(bypass, "GET", "/v1/practices", &respond(&1, 401, %{"error" => "expired"}))
 
-      assert {:error, {:http_status, 401, _}} = Client.list_practices()
+      assert {:error, {:http_status, 401, {:map, 1}}} = Client.list_practices()
     end
 
     test "a server error is surfaced", %{bypass: bypass} do
       Bypass.expect(bypass, "GET", "/v1/practices", &respond(&1, 500, %{"error" => "boom"}))
 
-      assert {:error, {:http_status, 500, _}} = Client.list_practices()
+      assert {:error, {:http_status, 500, {:map, 1}}} = Client.list_practices()
     end
 
     test "an unreachable host is surfaced, not raised", %{bypass: bypass} do
@@ -297,7 +300,7 @@ defmodule Scheduling.Core.ClientTest do
         |> Plug.Conn.resp(200, "not json")
       end)
 
-      assert {:error, {:unexpected_body, _}} = Client.list_practices()
+      assert {:error, {:unexpected_body, {:string, 8}}} = Client.list_practices()
     end
   end
 

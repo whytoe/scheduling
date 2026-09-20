@@ -110,6 +110,18 @@ and since `sc-87w` it carries a shape instead of a body. `probe_ref_filter/0`
 was written body-free from the start, so its refusal log is safe by
 construction.
 
+`Core.Client` followed in `sc-3a2` and describes a body rather than carrying
+one, even though the verdict above said it did not have to. That was hygiene,
+not a breach: every sink for its reasons is a log or an operator's terminal
+today, and the rule above permits a name there. What it removes is a hazard
+the *next* caller would have inherited — nothing about `{:http_status, 500,
+body}` says "do not write this down", and the caller that writes it into an
+append-only row will not be the one that read this page. `sc-87w` is what that
+looks like after it happens rather than before.
+
+The rule is unchanged by it. A name in a log is still acceptable; it simply is
+not arriving through this particular door any more.
+
 ### The condition that would change this
 
 ac-core exposes `GET /emr/{practiceSlug}/fhir/{resourceType}` behind a
@@ -121,6 +133,13 @@ ac-core exposes `GET /emr/{practiceSlug}/fhir/{resourceType}` behind a
 and every log line downstream of `Core.Client` becomes a breach of the rule
 above. Granting `core:emr:read` is therefore not a scope change; it is a change
 to this document.
+
+`sc-3a2` narrowed what that would cost without removing the tripwire. Error
+reasons no longer carry a body, so the failure path is closed either way — but
+the *success* path is a projection this client writes by hand, and an EMR
+projection would put clinical content into `patients` and into anything that
+logs what it built. The condition above still holds; it is now about what we
+project rather than about what we happened to fail on.
 
 ## The compliance gate
 
