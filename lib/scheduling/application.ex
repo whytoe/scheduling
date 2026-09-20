@@ -35,6 +35,10 @@ defmodule Scheduling.Application do
         # Drops idempotency keys past their retention window, and releases
         # claims left behind by a request that died mid-flight.
         Scheduling.Idempotency.Sweeper.child_spec_if_enabled(),
+        # Per-token request quota. Runs ahead of authentication, so it also
+        # covers the expensive path: an invalid token still costs an
+        # introspection round-trip, and refusals are never cached.
+        Scheduling.RateLimit.child_spec_if_enabled(),
         # Keeps the rolling slot horizon topped up. nil when there are no
         # availability rules — nothing to generate from.
         # Moves scheduled entries into the waiting queue when their time

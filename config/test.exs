@@ -38,6 +38,11 @@ config :scheduling, :arrival_highlight_ms, 60_000
 # directly, which is the part worth asserting on.
 config :scheduling, Scheduling.Queue, promoter_enabled: false
 
+# Rate limiting off by default in test. The counter is a global ETS table, so a
+# suite that shares it makes unrelated tests fail once one of them is chatty.
+# The rate-limit tests turn it on per-test.
+config :scheduling, Scheduling.Api, rate_limit_enabled: false
+
 # Disable swoosh api client as it is only required for production adapters
 config :swoosh, :api_client, false
 

@@ -121,6 +121,24 @@ config :scheduling, Scheduling.Auth,
 # No default base_url on purpose — a wrong host is worse than an unconfigured
 # one, because it would send a bearer token somewhere unintended.
 # ---------------------------------------------------------------------------
+# Per-caller request quota on /api/v1, keyed on the bearer token's digest.
+#
+# It runs BEFORE authentication on purpose. ac-core issues opaque tokens, so a
+# token that fails JWT validation costs an introspection round-trip measured at
+# 1.3-1.7s, and a refusal is deliberately never cached — so an invalid token is
+# the expensive request, and a limit applied after authentication would miss
+# exactly the traffic worth limiting.
+#
+# 120/minute is generous for a bridge and tight enough to stop a runaway retry
+# loop. Fixed windows, so the true short-term ceiling is twice this; see
+# Scheduling.RateLimit. Counters are per-node and this deployment runs one pod —
+# scaling to more replicas multiplies the effective limit.
+config :scheduling, Scheduling.Api,
+  rate_limit_enabled: System.get_env("API_RATE_LIMIT_ENABLED", "true") != "false",
+  rate_limit: String.to_integer(System.get_env("API_RATE_LIMIT", "120")),
+  rate_limit_window_seconds:
+    String.to_integer(System.get_env("API_RATE_LIMIT_WINDOW_SECONDS", "60"))
+
 config :scheduling, Scheduling.Core,
   base_url: System.get_env("CORE_API_URL"),
   client_id: System.get_env("CORE_CLIENT_ID"),
