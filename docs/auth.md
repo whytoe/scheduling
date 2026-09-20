@@ -579,6 +579,19 @@ nothing on screen to say why.
 
 ## What is not covered
 
+- **Revocation takes effect within 45 seconds, not immediately.** A live
+  introspection answer is cached for `OIDC_INTROSPECTION_CACHE_TTL` seconds,
+  capped by the token's own `exp`. That window exists because ac-core issues
+  opaque tokens, so every `/api/v1` request takes the introspection path, and
+  introspection against ac-core measures 1.3–1.7s per call — without a cache
+  the API is not slow, it is unusable.
+
+  The window is the price. It is short, bounded and stated here rather than
+  discovered: a token revoked at the provider keeps working for up to that long.
+  Only *live* answers are cached — a refusal is asked again every time, so an
+  outage is never extended by it. `OIDC_INTROSPECTION_CACHE=false` pays the
+  round-trip instead, and `Cache.clear/0` drops the window immediately.
+
 - **Revocation is checked for opaque tokens only.** A token that validates as
   a JWT stays valid until `exp` even if the provider's session has ended —
   nothing is asked, so nothing can have changed. A token that *fails* JWT
