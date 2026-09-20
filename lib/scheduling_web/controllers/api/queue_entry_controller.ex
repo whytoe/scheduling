@@ -252,6 +252,68 @@ defmodule SchedulingWeb.Api.QueueEntryController do
     end
   end
 
+  operation(:cancel,
+    summary: "Cancel an entry — the patient withdrew",
+    description:
+      "Ends the entry as `cancelled` and frees any office capacity it held.\n\n" <>
+        "Distinct from `no_show`: \"told us they were not coming\" and \"did not " <>
+        "turn up\" are different facts about a clinic's day, and capacity " <>
+        "reporting needs to tell them apart.\n\n" <>
+        "Refused once service has begun — cancelling would erase that a " <>
+        "clinician's time was spent. Pass `reason` to record why.",
+    parameters: [id: [in: :path, description: "Queue entry id", type: :integer]],
+    request_body:
+      {"Cancellation attrs (optional)", "application/json", Schemas.QueueEntryEndRequest,
+       required: false},
+    responses: [
+      ok: {"Cancelled", "application/json", Schemas.QueueEntry},
+      not_found: {"Not found", "application/json", Schemas.NotFoundError},
+      unprocessable_entity:
+        {"Not a valid transition", "application/json", Schemas.ValidationError}
+    ]
+  )
+
+  def cancel(conn, %{"id" => id} = body) do
+    with {:ok, entry} <- fetch(id),
+         {:ok, cancelled} <- Queue.cancel(entry, end_opts(conn, body)) do
+      json(conn, serialize(reload(cancelled)))
+    end
+  end
+
+  operation(:no_show,
+    summary: "Mark an entry as a no-show — the patient never arrived",
+    description:
+      "Ends the entry as `no_show` and frees any office capacity it held.\n\n" <>
+        "Valid from `assigned` as well as `waiting`: a patient given a room who " <>
+        "never appears is exactly what this counts, and the capacity held for " <>
+        "them was spent. Not valid from `in_service` — they are in the room.",
+    parameters: [id: [in: :path, description: "Queue entry id", type: :integer]],
+    request_body:
+      {"No-show attrs (optional)", "application/json", Schemas.QueueEntryEndRequest,
+       required: false},
+    responses: [
+      ok: {"Recorded", "application/json", Schemas.QueueEntry},
+      not_found: {"Not found", "application/json", Schemas.NotFoundError},
+      unprocessable_entity:
+        {"Not a valid transition", "application/json", Schemas.ValidationError}
+    ]
+  )
+
+  def no_show(conn, %{"id" => id} = body) do
+    with {:ok, entry} <- fetch(id),
+         {:ok, missed} <- Queue.no_show(entry, end_opts(conn, body)) do
+      json(conn, serialize(reload(missed)))
+    end
+  end
+
+  # `reason` is operator-supplied free text and lands in an append-only audit
+  # row that fans out to every webhook subscriber. It is carried because
+  # "cancelled, and here is why" is worth far more than "cancelled" — but see
+  # docs/data-boundary.md: it must not be used to record clinical content.
+  defp end_opts(conn, body) do
+    Keyword.put(Actor.opts(conn, body), :reason, body["reason"])
+  end
+
   operation(:requeue,
     summary: "Re-queue an active entry",
     description:

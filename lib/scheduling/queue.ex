@@ -402,6 +402,71 @@ defmodule Scheduling.Queue do
   end
 
   @doc """
+  Marks an entry `:cancelled` — the patient withdrew before being seen.
+
+  Distinct from `no_show/2` on purpose. Both free capacity and both end the
+  entry, but "told us they were not coming" and "did not turn up" are different
+  facts about a clinic's day, and capacity reporting needs to tell them apart.
+  Collapsing them would make a well-run list and a badly-run one look the same.
+
+  Refused once service has begun: see `Scheduling.Queue.Lifecycle`.
+  """
+  @spec cancel(QueueEntry.t(), keyword()) ::
+          {:ok, QueueEntry.t()} | {:error, Ecto.Changeset.t()}
+  def cancel(%QueueEntry{} = entry, opts \\ []) do
+    end_entry(entry, :cancelled, "queue_entry.cancelled", opts)
+  end
+
+  @doc """
+  Marks an entry `:no_show` — the patient never arrived.
+
+  Valid from `assigned` as well as `waiting`: a patient given a room who never
+  appears is exactly the case this counts, and the capacity held for them was
+  spent. Not valid from `in_service`, because they are in the room.
+  """
+  @spec no_show(QueueEntry.t(), keyword()) ::
+          {:ok, QueueEntry.t()} | {:error, Ecto.Changeset.t()}
+  def no_show(%QueueEntry{} = entry, opts \\ []) do
+    end_entry(entry, :no_show, "queue_entry.no_show", opts)
+  end
+
+  # Both endings are the same shape: move the entry, free the office, write the
+  # audit row, tell the board. Sharing it keeps them from drifting — the
+  # likeliest drift being that one of them forgets to broadcast and a cancelled
+  # patient stays on somebody's screen.
+  defp end_entry(%QueueEntry{} = entry, status, event_type, opts) do
+    Ecto.Multi.new()
+    |> Ecto.Multi.update(:entry, QueueEntry.transition_changeset(entry, status))
+    |> Ecto.Multi.run(:event, fn _repo, %{entry: ended} ->
+      Audit.record_event(%{
+        type: event_type,
+        visit_id: ended.visit_id,
+        queue_entry_id: ended.id,
+        patient_id: ended.patient_id,
+        actor_type: Keyword.get(opts, :actor_type),
+        actor_id: Keyword.get(opts, :actor_id),
+        payload: %{
+          from_status: to_string(entry.status),
+          assigned_office_id: ended.assigned_office_id,
+          reason: Keyword.get(opts, :reason)
+        }
+      })
+    end)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{entry: ended}} ->
+        # Broadcast even from `waiting`, where no capacity was held: the entry
+        # still disappears from the waiting list, and a board that keeps
+        # showing it is how somebody calls a patient who went home.
+        broadcast_board_change({status, ended.id})
+        {:ok, Repo.preload(ended, [:patient, :assigned_office])}
+
+      {:error, _, changeset, _} ->
+        {:error, changeset}
+    end
+  end
+
+  @doc """
   Re-queues an in-progress entry: returns the patient to the `:waiting` queue
   for an additional service instead of fully exiting. Clears the office
   assignment (freeing its capacity) and optionally replaces the required

@@ -64,7 +64,21 @@ defmodule Scheduling.QueueTest do
     end
 
     test "lists all valid statuses" do
-      assert QueueEntry.statuses() == [:waiting, :assigned, :in_service, :completed]
+      # Order follows Scheduling.Queue.Lifecycle's table, which is where the
+      # list is declared. Asserted as a set rather than a sequence: the
+      # order carries no meaning and pinning it makes adding a status a
+      # two-file change for no reason.
+      assert Enum.sort(QueueEntry.statuses()) ==
+               Enum.sort([
+                 :scheduled,
+                 :waiting,
+                 :assigned,
+                 :in_service,
+                 :completed,
+                 :discharged_with_followup,
+                 :cancelled,
+                 :no_show
+               ])
     end
   end
 
