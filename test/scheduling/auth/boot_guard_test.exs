@@ -47,6 +47,71 @@ defmodule Scheduling.Auth.BootGuardTest do
     end
   end
 
+  describe "env_diagnosis/0" do
+    test "names the one that is missing, and says the others are set" do
+      put_all()
+      System.delete_env("OIDC_CLIENT_SECRET")
+
+      diagnosis = Auth.env_diagnosis()
+
+      assert diagnosis =~ ~r/OIDC_ISSUER\s+set$/m
+      assert diagnosis =~ ~r/OIDC_CLIENT_ID\s+set$/m
+      assert diagnosis =~ ~r/OIDC_CLIENT_SECRET\s+MISSING$/m
+    end
+
+    test "a variable that arrived empty is not the same fault as one nobody set" do
+      # An empty value is a secret the platform failed to deliver, and sends the
+      # reader to the secret store rather than to the manifest.
+      put_all()
+      System.put_env("OIDC_CLIENT_SECRET", "")
+      System.delete_env("OIDC_ISSUER")
+
+      diagnosis = Auth.env_diagnosis()
+
+      assert diagnosis =~ ~r/OIDC_CLIENT_SECRET\s+SET BUT EMPTY$/m
+      assert diagnosis =~ ~r/OIDC_ISSUER\s+MISSING$/m
+    end
+
+    test "whitespace counts as empty, matching the guard" do
+      put_all()
+      System.put_env("OIDC_CLIENT_ID", "   ")
+
+      assert Auth.env_diagnosis() =~ ~r/OIDC_CLIENT_ID\s+SET BUT EMPTY$/m
+      refute Auth.configured_from_env?()
+    end
+
+    test "never prints a value — one of these is a client secret" do
+      # This text goes to the container log on every refused boot.
+      put_all("s3cr3t-do-not-log-me")
+
+      refute Auth.env_diagnosis() =~ "s3cr3t-do-not-log-me"
+    end
+
+    test "reports all three set when they are, so a refusal accuses its own guard" do
+      # The failure this diagnosis was written for: a guard that reported "not
+      # configured" however the release was deployed, sending a whole session
+      # after a suspected platform secret-delivery bug. A refusal printing three
+      # `set` lines contradicts itself on its face.
+      put_all()
+
+      diagnosis = Auth.env_diagnosis()
+
+      assert Auth.configured_from_env?()
+
+      for var <- ~w(OIDC_ISSUER OIDC_CLIENT_ID OIDC_CLIENT_SECRET) do
+        assert diagnosis =~ ~r/#{var}\s+set$/m
+      end
+
+      refute diagnosis =~ "MISSING"
+    end
+
+    test "covers every variable the guard requires, one line each" do
+      put_all()
+
+      assert Auth.env_diagnosis() |> String.split("\n") |> length() == 3
+    end
+  end
+
   describe "independence from the application environment" do
     # The bug this guards against: `config/runtime.exs` calls this while it is
     # still assembling `config :scheduling, Scheduling.Auth`, so the

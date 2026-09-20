@@ -195,14 +195,28 @@ if config_env() == :prod do
       """)
 
     true ->
+      # The refusal says which of the three is missing, and distinguishes a
+      # variable that is absent from one that arrived empty. A release that
+      # refuses while reporting all three `set` is accusing its own guard
+      # rather than the deployment — which is exactly what the previous guard
+      # should have been doing, and the reason it cost a session instead of a
+      # minute. Values are never printed; one of these is a client secret and
+      # this goes to the container log.
       raise """
       Authentication is not configured.
 
-      Set OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CLIENT_SECRET, e.g.
+      #{Scheduling.Auth.env_diagnosis()}
+
+      Set all three, e.g.
 
           OIDC_ISSUER=https://ac-core.45.59.71.47.nip.io
           OIDC_CLIENT_ID=scheduling
           OIDC_CLIENT_SECRET=...
+
+      SET BUT EMPTY means the variable reached the container carrying nothing.
+      That is a secret that did not get delivered, not a line missing from your
+      manifest — look at the platform's secret store rather than at the
+      manifest.
 
       To run without authentication on purpose, set AUTH_DISABLED=true.
       """

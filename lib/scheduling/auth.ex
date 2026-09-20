@@ -73,6 +73,10 @@ defmodule Scheduling.Auth do
 
   @provider_name Scheduling.Auth.Provider
 
+  # The three the `:prod` boot guard insists on. Not a general list of OIDC
+  # settings — everything else has a working default.
+  @required_env_vars ["OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET"]
+
   @doc """
   Name of the `Oidcc.ProviderConfiguration.Worker` process. Used as the
   registered name so plugs and controllers can look the provider up without
@@ -111,13 +115,53 @@ defmodule Scheduling.Auth do
   """
   @spec configured_from_env?() :: boolean()
   def configured_from_env? do
-    Enum.all?(["OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET"], fn var ->
-      case System.get_env(var) do
-        value when is_binary(value) -> String.trim(value) != ""
-        nil -> false
-      end
+    Enum.all?(@required_env_vars, &(env_state(&1) == :set))
+  end
+
+  @doc """
+  One line per required variable, saying whether the *environment* supplies it.
+  Printed by the `:prod` boot guard when it refuses.
+
+  ## Why the refusal says more than "not configured"
+
+  The guard used to name the three variables and stop there, which reads as
+  "you forgot something" and sends the reader to their deployment manifest.
+  That was the wrong place to send them once: an earlier guard consulted the
+  application environment instead of the OS environment and so reported "not
+  configured" on **every** `:prod` boot however the release was deployed, and
+  the session that followed went looking for a platform secret-delivery bug
+  because the message said the values were absent and they were not.
+
+  A refusal that lists three variables as `set` above the words "Authentication
+  is not configured" contradicts itself on its face, and points at the guard
+  rather than at the platform. That is the diagnosis this exists to produce.
+
+  `SET BUT EMPTY` is kept distinct from `MISSING` for the same reason. A
+  variable that arrives with no value is a secret that did not get delivered —
+  a different fault, in a different system, from a line nobody wrote.
+
+  **Values are never printed**, only whether there is one. One of these three
+  is a client secret, and this text goes to the container log.
+  """
+  @spec env_diagnosis() :: String.t()
+  def env_diagnosis do
+    width = @required_env_vars |> Enum.map(&String.length/1) |> Enum.max()
+
+    Enum.map_join(@required_env_vars, "\n", fn var ->
+      "    " <> String.pad_trailing(var, width + 2) <> describe(env_state(var))
     end)
   end
+
+  defp env_state(var) do
+    case System.get_env(var) do
+      nil -> :missing
+      value -> if String.trim(value) == "", do: :blank, else: :set
+    end
+  end
+
+  defp describe(:set), do: "set"
+  defp describe(:blank), do: "SET BUT EMPTY"
+  defp describe(:missing), do: "MISSING"
 
   @doc "Issuer URL, e.g. `https://sso.example.org/realms/clinic`."
   @spec issuer() :: String.t() | nil
