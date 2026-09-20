@@ -2,6 +2,9 @@
 # Multi-stage build for Phoenix 1.8 (Elixir 1.18 / OTP 27).
 # Local-first quickstart: `docker compose up --build`. See DEPLOYMENT.md.
 
+# CI reads these two ARGs out of this file (.github/workflows/ci.yml, "Resolve
+# toolchain") so that pull requests test the toolchain this image ships. Bumping
+# either one moves CI in the same commit; nothing else needs editing.
 ARG ELIXIR_VERSION=1.18.4
 ARG OTP_VERSION=27.3
 ARG DEBIAN_VERSION=bookworm-20260518-slim
