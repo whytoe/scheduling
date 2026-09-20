@@ -53,8 +53,25 @@ defmodule Scheduling.ComplianceHttpTest do
     }
   end
 
+  # A stand-in for an intake that behaves correctly on the self-check: it
+  # answers 400 for a `cref_` it has never minted, and answers the control
+  # query that follows. `fun` therefore sees only the queries the gate makes
+  # about a patient, so the tests below that count or inspect requests are not
+  # reading the self-check's.
+  #
+  # The tests that are *about* the self-check install their own handler.
   defp stub_responses(bypass, fun) do
-    Bypass.expect(bypass, "GET", "/api/v1/responses", fun)
+    Bypass.expect(bypass, "GET", "/api/v1/responses", fn conn ->
+      conn = Plug.Conn.fetch_query_params(conn)
+
+      case conn.query_params["compliance_ref"] do
+        ref when ref in [@ref_a, @ref_b] -> fun.(conn)
+        # The control query, which carries no reference at all.
+        nil -> respond(conn, 200, [])
+        # A reference intake never issued.
+        _unminted -> respond(conn, 400, %{"error" => "unknown_reference"})
+      end
+    end)
   end
 
   defp respond(conn, status, body) do
@@ -153,9 +170,151 @@ defmodule Scheduling.ComplianceHttpTest do
     end
 
     test "an unreachable intake is an error", %{bypass: bypass} do
+      # Now caught by the self-check rather than by the per-reference query:
+      # an intake that cannot answer "is this a real reference" cannot be shown
+      # to be filtering either, and the gate refuses before it asks about a
+      # patient. Either way the accept fails closed.
       Bypass.down(bypass)
 
-      assert {:error, _reason} = Compliance.verify(entry(patient_fixture()))
+      assert {:error, {:ref_filter_unverified, {:probe_transport, _}}} =
+               Compliance.verify(entry(patient_fixture()))
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # The self-check. `satisfied_refs/2` reads only the row count, so an intake
+  # that accepts `compliance_ref` and ignores it would answer every query with
+  # "yes, this patient has completed something" and pass everyone. These tests
+  # are what stand between that and production.
+  # ---------------------------------------------------------------------------
+  describe "proving intake filters by compliance_ref" do
+    # Answers every query with a completed response — the shape of an intake
+    # that ignores `compliance_ref` entirely.
+    defp stub_ignoring_intake(bypass, test_pid \\ nil) do
+      Bypass.expect(bypass, "GET", "/api/v1/responses", fn conn ->
+        conn = Plug.Conn.fetch_query_params(conn)
+        if test_pid, do: send(test_pid, {:asked, conn.query_params})
+        respond(conn, 200, a_completed_response())
+      end)
+    end
+
+    test "rows for a reference that cannot exist means the gate refuses to run",
+         %{bypass: bypass} do
+      # The whole point. Without the check this is `:ok` — the patient's
+      # unrelated completed form satisfies a requirement it has nothing to do
+      # with, and nothing anywhere says so.
+      stub_ignoring_intake(bypass)
+
+      assert Compliance.verify(entry(patient_fixture())) ==
+               {:error, {:ref_filter_unverified, :ref_filter_not_applied}}
+    end
+
+    test "a refusal is an error, never a verdict about the patient", %{bypass: bypass} do
+      # It must not surface as {:blocked, _}: the patient is not the problem,
+      # and the accept flow renders the two differently (503 vs 422).
+      stub_ignoring_intake(bypass)
+
+      assert {:error, _} = Compliance.verify(entry(patient_fixture()))
+    end
+
+    test "400 for the unminted reference, answered control, and the gate runs",
+         %{bypass: bypass} do
+      # The behaviour settled in the sc-s9x exchange: intake refuses to resolve
+      # a reference it never issued. That is proof the parameter reached a
+      # lookup, so the gate proceeds and reaches a real verdict.
+      stub_responses(bypass, &respond(&1, 200, []))
+
+      assert Compliance.verify(entry(patient_fixture())) == {:blocked, [@ref_a]}
+    end
+
+    test "an empty answer to the unminted reference is accepted as consistent",
+         %{bypass: bypass} do
+      # Weaker evidence than the 400 — an intake holding no completed responses
+      # at all answers identically — but not evidence of failure, and the
+      # failure it could mask blocks rather than passes.
+      Bypass.expect(bypass, "GET", "/api/v1/responses", fn conn ->
+        conn = Plug.Conn.fetch_query_params(conn)
+
+        case conn.query_params["compliance_ref"] do
+          @ref_a -> respond(conn, 200, a_completed_response())
+          _ -> respond(conn, 200, [])
+        end
+      end)
+
+      assert Compliance.verify(entry(patient_fixture())) == :ok
+    end
+
+    test "a 400 that is not about the reference proves nothing, so the gate refuses",
+         %{bypass: bypass} do
+      # An intake that rejects the query for some other reason — it demands a
+      # patient_id, say — would 400 the probe too. Reading that as "the filter
+      # is live" would be exactly the kind of reassuring-but-empty signal this
+      # check exists to stop, so the same query is repeated without the
+      # reference and a second 400 settles it.
+      Bypass.expect(bypass, "GET", "/api/v1/responses", fn conn ->
+        respond(conn, 400, %{"error" => "patient_id is required"})
+      end)
+
+      assert Compliance.verify(entry(patient_fixture())) ==
+               {:error, {:ref_filter_unverified, :probe_inconclusive}}
+    end
+
+    test "the probe sends no patient id — a second filter would mask the first",
+         %{bypass: bypass} do
+      test_pid = self()
+      stub_ignoring_intake(bypass, test_pid)
+
+      Compliance.verify(entry(patient_fixture()))
+
+      assert_receive {:asked, params}
+      refute Map.has_key?(params, "patient_id")
+      assert params["compliance_ref"] =~ ~r/^cref_[a-f0-9]{12}$/
+      assert params["status"] == "completed"
+    end
+
+    test "a refusal is not cached — the next accept asks again", %{bypass: bypass} do
+      # An intake that ships the filter must start working without a restart
+      # here. Two verifies, two probes.
+      test_pid = self()
+      stub_ignoring_intake(bypass, test_pid)
+
+      patient = patient_fixture()
+      assert {:error, _} = Compliance.verify(entry(patient))
+      assert {:error, _} = Compliance.verify(entry(patient))
+
+      assert_receive {:asked, _}
+      assert_receive {:asked, _}
+    end
+
+    test "a verified answer is reused rather than re-established per accept",
+         %{bypass: bypass} do
+      # Per-request was the alternative, and it doubles our traffic to intake to
+      # re-establish a fact that does not move between two accepts.
+      test_pid = self()
+
+      Bypass.expect(bypass, "GET", "/api/v1/responses", fn conn ->
+        conn = Plug.Conn.fetch_query_params(conn)
+
+        case conn.query_params["compliance_ref"] do
+          @ref_a ->
+            respond(conn, 200, a_completed_response())
+
+          nil ->
+            respond(conn, 200, [])
+
+          _unminted ->
+            send(test_pid, :probed)
+            respond(conn, 400, %{"error" => "unknown_reference"})
+        end
+      end)
+
+      patient = patient_fixture()
+      assert Compliance.verify(entry(patient)) == :ok
+      assert Compliance.verify(entry(patient)) == :ok
+      assert Compliance.verify(entry(patient)) == :ok
+
+      assert_receive :probed
+      refute_receive :probed, 200
     end
   end
 

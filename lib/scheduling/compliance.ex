@@ -21,6 +21,19 @@ defmodule Scheduling.Compliance do
   should be too. It also keeps the failure explainable — we know which
   requirement is outstanding, which a bare pass/fail could not tell anyone.
 
+  ## When the gate refuses to run
+
+  Intake answers a filtered question, and `Client.satisfied_refs/2` reads only
+  the row count of the answer — so an intake that accepts `compliance_ref` and
+  ignores it would degrade every query to *"has this patient completed any form
+  at all"* and pass everyone, silently, on the one path the gate exists to
+  close.
+
+  `Scheduling.Compliance.FilterCheck` settles that before any verdict is
+  reached. When it cannot, `verify/1` returns `{:error, {:ref_filter_unverified,
+  reason}}` and the accept flow fails closed. A gate that cannot be shown to be
+  filtering does not get to say a patient is compliant.
+
   ## When the gate is skipped
 
   `verify/1` returns `:not_configured` — which the accept flow treats as
@@ -43,13 +56,15 @@ defmodule Scheduling.Compliance do
   """
 
   alias Scheduling.Compliance.Client
+  alias Scheduling.Compliance.FilterCheck
   alias Scheduling.Queue.QueueEntry
 
   @typedoc """
   `:ok` when every required reference has a completed response, `{:blocked,
   unmet}` naming the references that do not, `:not_configured` when there is
   nothing to check (see the module doc), and `{:error, reason}` when intake
-  could not be reached — which the accept flow treats as fail-closed.
+  could not be reached *or could not be shown to be filtering* — both of which
+  the accept flow treats as fail-closed.
 
   `{:blocked, unmet}` carries the references rather than a bare `:blocked` so
   the front desk can be told *which* requirement is outstanding. They stay
@@ -74,7 +89,13 @@ defmodule Scheduling.Compliance do
     with true <- configured?(),
          [_ | _] = refs <- required_refs(entry),
          intake_patient_id when is_binary(intake_patient_id) <- intake_patient_id(entry) do
-      check(refs, intake_patient_id)
+      # Only once there is something to actually ask. Establishing that the
+      # question is being answered costs a request, and an entry that requires
+      # nothing never asks one.
+      case FilterCheck.verify() do
+        :ok -> check(refs, intake_patient_id)
+        {:error, reason} -> {:error, {:ref_filter_unverified, reason}}
+      end
     else
       # Not configured, nothing required, or no patient to correlate against —
       # nothing to ask intake. See the module doc.
