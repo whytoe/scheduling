@@ -43,6 +43,7 @@ defmodule SchedulingWeb.Router do
 
   # Reads: any recognised role.
   pipeline :api_read do
+    plug SchedulingWeb.Plugs.RateLimit
     plug ApiAuth, :require_read
   end
 
@@ -53,12 +54,14 @@ defmodule SchedulingWeb.Router do
   # caller the token names — an unauthenticated request has nobody to scope to,
   # and letting it claim a key would let one caller block another's.
   pipeline :api_write do
+    plug SchedulingWeb.Plugs.RateLimit
     plug ApiAuth, :require_write
     plug SchedulingWeb.Plugs.Idempotency
   end
 
   # Catalog and subscription management over the API — same bar as the UI.
   pipeline :api_admin do
+    plug SchedulingWeb.Plugs.RateLimit
     plug ApiAuth, :require_admin
   end
 

@@ -164,6 +164,34 @@ Conventions:
   `sub` for a user, the client id for a service account. `actor_type` and
   `actor_id` in the request body are ignored.
 
+### Rate limits
+
+`/api/v1` allows **120 requests per minute per bearer token**. Over that you get
+`429` with `Retry-After` in seconds and an error code of `rate_limited`:
+
+```json
+{"error": {"code": "rate_limited",
+           "message": "Too many requests. Retry in 24s.",
+           "details": {"retry_after_seconds": 24}}}
+```
+
+**Honour `Retry-After`.** A client that backs off on it is the difference
+between a limiter that calms a retry storm and one that shapes it into a
+tighter storm.
+
+Two things worth knowing:
+
+- **The quota is per token.** Each of your credentials gets its own allowance,
+  so one runaway process does not spend another's — and nothing you do consumes
+  another integrator's.
+- **Invalid tokens count too.** The limit applies before authentication, because
+  a token that fails validation costs us more than one that succeeds. If you are
+  seeing `429` alongside `401`, the fix is to stop retrying the bad credential,
+  not to ask for a higher limit.
+
+Windows are fixed rather than sliding, so a short burst may briefly exceed 120
+across a window boundary. That is deliberate slack, not a guarantee to build on.
+
 ### Retrying safely
 
 A request that times out leaves you unable to tell whether it happened. For
