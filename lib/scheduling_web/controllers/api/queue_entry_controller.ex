@@ -395,6 +395,7 @@ defmodule SchedulingWeb.Api.QueueEntryController do
     %{
       id: entry.id,
       status: entry.status,
+      scheduled_for: entry.scheduled_for,
       priority: entry.priority,
       patient_id: entry.patient_id,
       assigned_office_id: entry.assigned_office_id,

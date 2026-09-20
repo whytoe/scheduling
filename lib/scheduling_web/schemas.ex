@@ -512,6 +512,14 @@ defmodule SchedulingWeb.Schemas do
           description:
             "Lifecycle status; entries in `assigned` and `in_service` consume office capacity"
         },
+        scheduled_for: %Schema{
+          type: :string,
+          format: :"date-time",
+          nullable: true,
+          description:
+            "When the patient is expected. Null for a walk-in. An entry with a future " <>
+              "value is `scheduled` and is not routable until then."
+        },
         priority: %Schema{type: :integer, minimum: 0, description: "Higher = served sooner"},
         patient: %Schema{nullable: true, allOf: [SchedulingWeb.Schemas.Patient]},
         patient_id: %Schema{type: :integer},
@@ -561,6 +569,16 @@ defmodule SchedulingWeb.Schemas do
           type: :object,
           properties: %{
             patient_id: %Schema{type: :integer, description: "Patient this entry represents"},
+            scheduled_for: %Schema{
+              type: :string,
+              format: :"date-time",
+              description:
+                "Optional. When the patient is expected. A time in the future creates the " <>
+                  "entry as `scheduled` rather than `waiting`, and the matcher cannot place " <>
+                  "it until then — so a patient booked for 10:00 and signed in at 08:30 does " <>
+                  "not occupy a room for ninety minutes. A time already past is treated as a " <>
+                  "walk-in. Omit for walk-ins."
+            },
             service_code: %Schema{
               type: :string,
               nullable: true,

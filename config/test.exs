@@ -32,6 +32,12 @@ config :scheduling, :webhooks_enabled, false
 # and the assertion when the suite is running 20 cases in parallel.
 config :scheduling, :arrival_highlight_ms, 60_000
 
+# The promoter moves scheduled entries into the waiting queue on a timer. Off in
+# test: it is a supervised process with no sandbox connection, so every pass
+# fails noisily and tells you nothing. Tests drive Queue.promote_due_entries/1
+# directly, which is the part worth asserting on.
+config :scheduling, Scheduling.Queue, promoter_enabled: false
+
 # Disable swoosh api client as it is only required for production adapters
 config :swoosh, :api_client, false
 

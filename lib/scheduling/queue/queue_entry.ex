@@ -34,6 +34,11 @@ defmodule Scheduling.Queue.QueueEntry do
 
   schema "queue_entries" do
     field :status, Ecto.Enum, values: @statuses, default: :waiting
+
+    # When the patient is expected. Null for a walk-in, which is most of them.
+    # An entry with a future `scheduled_for` is created `:scheduled` and stays
+    # invisible to the matcher until Scheduling.Queue.Promoter moves it.
+    field :scheduled_for, :utc_datetime
     field :priority, :integer, default: 0
     field :compliance_ref, :string
     field :required_compliance_refs, {:array, :string}, default: []
@@ -71,6 +76,7 @@ defmodule Scheduling.Queue.QueueEntry do
       :visit_id,
       :appointment_id,
       :status,
+      :scheduled_for,
       :priority,
       :compliance_ref,
       :required_compliance_refs
