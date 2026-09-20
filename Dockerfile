@@ -5,9 +5,20 @@
 # CI reads these two ARGs out of this file (.github/workflows/ci.yml, "Resolve
 # toolchain") so that pull requests test the toolchain this image ships. Bumping
 # either one moves CI in the same commit; nothing else needs editing.
-ARG ELIXIR_VERSION=1.18.4
-ARG OTP_VERSION=27.3
-ARG DEBIAN_VERSION=bookworm-20260518-slim
+#
+# OTP_VERSION is the full four-component patch level, not the 27.3 series head.
+# The 27.3 series has 21 patch releases and 56 CVEs behind it, so naming the
+# series rather than the patch is not a pin, it is a decision nobody made. See
+# DEPLOYMENT.md for what was read before choosing this one.
+#
+# The three move together and are not independently choosable: hexpm publishes
+# an image per (elixir, erlang, debian-snapshot) triple and only for the
+# combinations it happened to build. There is no 1.18.4 image for any OTP newer
+# than 27.3.4.16, and none at all for 27.3.4.17 — check
+# hub.docker.com/r/hexpm/elixir/tags before editing any of these.
+ARG ELIXIR_VERSION=1.18.5
+ARG OTP_VERSION=27.3.4.17
+ARG DEBIAN_VERSION=bookworm-20260918-slim
 
 ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
 ARG RUNNER_IMAGE="debian:${DEBIAN_VERSION}"
