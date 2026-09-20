@@ -53,6 +53,34 @@ for a local checkout and catastrophic in production. So `config/runtime.exs`
 refuses to boot a `:prod` release with auth unconfigured unless
 `AUTH_DISABLED=true` says so deliberately, which logs a warning at startup.
 
+### The refusal names the gap
+
+A refused boot prints one line per variable:
+
+```
+Authentication is not configured.
+
+    OIDC_ISSUER         set
+    OIDC_CLIENT_ID      set
+    OIDC_CLIENT_SECRET  SET BUT EMPTY
+```
+
+`SET BUT EMPTY` is deliberately distinct from `MISSING`: a variable that
+arrives carrying nothing is a secret the platform did not deliver, which lives
+in a different system from a line nobody wrote in a manifest.
+
+Values are never printed. One of the three is a client secret and this text
+goes to the container log.
+
+Three `set` lines above the words *"Authentication is not configured"* is a
+message contradicting itself, and means the guard is wrong rather than the
+deployment. That is not hypothetical — an earlier guard read the application
+environment instead of the OS environment and therefore refused every `:prod`
+boot however it was configured, and the session that followed went looking for
+a platform secret-delivery bug because the message said the values were absent
+and they were not. `Scheduling.Auth.configured_from_env?/0` is the fix;
+`env_diagnosis/0` is what makes a repeat of it visible in seconds.
+
 ## Roles
 
 Roles come from the token. There is no local users table and no provisioning
@@ -491,6 +519,28 @@ alike to absent.
 screens and the catalog screens are separate sessions, so a mounted socket
 cannot be carried by live navigation into a route that requires more than it
 mounted under.
+
+**Unconfigured auth is refused at boot, not locked out per request.** The
+alternative was considered and rejected (`sc-kio`): boot anyway, serve
+`/api/health`, and answer every real route `503` until auth is configured. It
+buys observability — a pod that goes ready and a reason you can fetch — and
+pays for it with the only guarantee that does not depend on anyone's diligence.
+
+A release that refuses to start cannot serve patient data, and that is true of
+every route, socket and transport that exists or ever will. A per-request lock
+is only true of the paths it covers, and the paths are not all in one place:
+`plug :socket_dispatch` is injected at the head of the endpoint pipeline by
+`use Phoenix.Endpoint`, ahead of anything written in `endpoint.ex`, so a lock
+plug there cannot see a websocket or longpoll connection to `/live` at all.
+Covering that needs the `on_mount` hooks as well — and those are opt-in per
+`live_session`, which is coverage rather than construction. Both hooks
+currently pass through when `enabled?/0` is false, precisely because that is
+what keeps a local checkout usable.
+
+The trade is therefore a guaranteed refusal for a covered one, and the cost of
+being wrong is patient data served to the public internet. The observability
+the proposal wanted is real, but the boot message is where it belongs — see
+*The refusal names the gap* above.
 
 ## Opaque access tokens
 

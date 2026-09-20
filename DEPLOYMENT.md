@@ -83,6 +83,38 @@ network, or a reverse proxy authenticates in front of it — set
 `AUTH_DISABLED=true`, which allows the boot and logs a warning. See
 `docs/auth.md` for realm setup.
 
+On an orchestrator this shows up as a container that exits at startup and is
+restarted — `CrashLoopBackOff` on Kubernetes. **The diagnosis is in the
+container log, and the log is on the previous attempt**, so reach for it
+directly rather than reading the pod status:
+
+```bash
+kubectl logs <pod> --previous     # or: docker logs <container>
+```
+
+The refusal names each variable:
+
+```
+Authentication is not configured.
+
+    OIDC_ISSUER         set
+    OIDC_CLIENT_ID      set
+    OIDC_CLIENT_SECRET  SET BUT EMPTY
+```
+
+- `MISSING` — nothing supplied the variable. Look at the manifest.
+- `SET BUT EMPTY` — it arrived carrying nothing. The secret did not get
+  delivered; look at the platform's secret store, not the manifest.
+- Three `set` lines under *"Authentication is not configured"* means the guard
+  is wrong, not your deployment. File it.
+
+Note that the image runs migrations before starting the server
+(`bin/scheduling eval ... && bin/scheduling start`), and `eval` evaluates
+`config/runtime.exs` too — so a release configured this way fails at the
+migrate step, before the server is ever reached.
+
+Values are never printed. One of the three is a client secret.
+
 Optional:
 
 | Variable            | Default      | Purpose                                                       |
