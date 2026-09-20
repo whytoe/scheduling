@@ -157,9 +157,55 @@ Conventions:
 - **Every `/api/v1` endpoint requires a bearer token** (`sc-6ea`). Get one
   with the client-credentials grant; see `auth.md`. `GET /api/health`,
   `/api/openapi.json` and `/api/swagger` stay unauthenticated.
+- **Writes accept `Idempotency-Key`.** Send the same key to retry a request
+  safely: the second call returns the **first call's response**, id included,
+  and the write happens once. See "Retrying safely" below.
 - The actor recorded on each `visit_event` comes from the **token** —
   `sub` for a user, the client id for a service account. `actor_type` and
   `actor_id` in the request body are ignored.
+
+### Retrying safely
+
+A request that times out leaves you unable to tell whether it happened. For
+`POST /queue_entries` that is the difference between two queue entries for one
+arrival and none at all. Rather than guess, repeat the request with the same
+`Idempotency-Key`:
+
+```sh
+curl -s -X POST "$SCHEDULING_URL/api/v1/queue_entries" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Idempotency-Key: arrival-9f3c1b" \
+  -H "content-type: application/json" \
+  -d '{"queue_entry": {"patient_id": 42}}'
+```
+
+The second call returns the first call's response — **the same body and status,
+including the id of whatever was created** — and nothing is written twice. A
+replay carries `idempotency-replayed: true` so you can tell it apart without
+diffing.
+
+Use any stable value your side already has. An appointment id or an arrival id
+is better than a fresh UUID, because it stays the same across a process restart
+that loses your in-memory state — which is exactly when you most need it.
+
+| Case | Status | `error.code` |
+|---|---|---|
+| Same key, first request still in flight | 409 | `idempotency_key_in_progress` |
+| Same key, **different** request body | 422 | `idempotency_key_reuse` |
+| Header present but unusable | 422 | `idempotency_key_invalid` |
+
+409 means wait and try again; 422 means retrying will not help.
+
+Three things worth knowing:
+
+- **It is opt-in.** No header, no protection — we do not invent a key for you,
+  because we cannot know which two requests you consider the same.
+- **`5xx` responses are not cached.** A server error is not a decided outcome,
+  and pinning you to a failure you can never retry past is the opposite of the
+  point. Your retry becomes a real attempt.
+- **Keys are scoped to the caller and held for 24 hours.** Two services may use
+  the same key without colliding, and neither can read back the other's
+  response.
 
 ## What we consume: Intake-form system
 

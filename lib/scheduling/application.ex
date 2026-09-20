@@ -28,6 +28,9 @@ defmodule Scheduling.Application do
         # before the endpoint so the first board request reads a cache that is
         # at least being filled.
         Scheduling.Locations.Syncer.child_spec_if_enabled(),
+        # Drops idempotency keys past their retention window, and releases
+        # claims left behind by a request that died mid-flight.
+        Scheduling.Idempotency.Sweeper.child_spec_if_enabled(),
         # Keeps the rolling slot horizon topped up. nil when there are no
         # availability rules — nothing to generate from.
         Scheduling.Booking.HorizonKeeper.child_spec_if_enabled(),

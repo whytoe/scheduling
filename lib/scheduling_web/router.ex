@@ -48,8 +48,13 @@ defmodule SchedulingWeb.Router do
 
   # Writes: operator or service (admin implicitly). This is the pipeline the
   # intake bridge and the check-in app authenticate against.
+  #
+  # Idempotency runs AFTER authentication, because the key is scoped to the
+  # caller the token names — an unauthenticated request has nobody to scope to,
+  # and letting it claim a key would let one caller block another's.
   pipeline :api_write do
     plug ApiAuth, :require_write
+    plug SchedulingWeb.Plugs.Idempotency
   end
 
   # Catalog and subscription management over the API — same bar as the UI.
