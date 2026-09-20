@@ -41,6 +41,16 @@ defmodule Scheduling.Locations.Location do
   schema "locations" do
     field :core_location_id, :string
     field :core_practice_id, :string
+
+    # Resolved by ac-core's own identifier rather than a local FK, so the two
+    # syncs stay independent: a location whose practice has not been synced yet
+    # simply has no practice, rather than a dangling reference.
+    belongs_to :practice, Scheduling.Practices.Practice,
+      foreign_key: :core_practice_id,
+      references: :core_practice_id,
+      type: :string,
+      define_field: false
+
     field :name, :string
     field :address, :string
     field :timezone, :string

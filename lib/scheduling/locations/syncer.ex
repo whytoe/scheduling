@@ -44,6 +44,7 @@ defmodule Scheduling.Locations.Syncer do
 
   alias Scheduling.Core
   alias Scheduling.Locations
+  alias Scheduling.Practices
 
   @default_interval_ms :timer.hours(1)
   @initial_delay_ms :timer.seconds(5)
@@ -123,6 +124,13 @@ defmodule Scheduling.Locations.Syncer do
   end
 
   defp sync do
+    # Practices first: a location's name is not unique — three of this
+    # deployment's five sites are called "Main Office", one per practice — so
+    # the practice is what tells them apart, and it needs to exist before a
+    # location is rendered. A practice failure does not abort the location
+    # sync: stale labels are better than a stale site list.
+    sync_practices()
+
     case Locations.sync_from_core() do
       {:ok, result} ->
         # Logged every pass, not only on change: "the sync ran and found
@@ -130,8 +138,8 @@ defmodule Scheduling.Locations.Syncer do
         # states an operator most needs to tell apart, and silence cannot.
         Logger.info(
           "Location sync: #{result.upserted} upserted, " <>
-            "#{result.deactivated} deactivated, #{withheld_note(result)}" <>
-            "#{result.pages} page(s)"
+            "#{result.deactivated} deactivated, #{result.pages} page(s)" <>
+            withheld_note(result)
         )
 
         :ok
@@ -151,7 +159,27 @@ defmodule Scheduling.Locations.Syncer do
   # `Locations.deactivate_unseen/1` already logs, so the routine "everything is
   # fine" report does not quietly omit the one number that says it is not.
   defp withheld_note(%{withheld: 0}), do: ""
-  defp withheld_note(%{withheld: n}), do: "#{n} deactivation(s) WITHHELD, "
+  defp withheld_note(%{withheld: n}), do: ", #{n} deactivation(s) WITHHELD"
+
+  defp sync_practices do
+    case Practices.sync_from_core() do
+      {:ok, %{upserted: 0, deactivated: 0, withheld: 0}} ->
+        :ok
+
+      {:ok, result} ->
+        Logger.info(
+          "Practice sync: #{result.upserted} upserted, #{result.deactivated} deactivated" <>
+            withheld_note(result)
+        )
+
+      {:error, reason} ->
+        Logger.warning("Practice sync did not complete: #{inspect(reason)}")
+    end
+  rescue
+    error ->
+      Logger.error("Practice sync crashed: #{Exception.message(error)}")
+      :error
+  end
 
   # Cancels any pending timer first: nudge/0 while one is outstanding would
   # otherwise leave both running, and every nudge would add another for the
