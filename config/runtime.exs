@@ -75,6 +75,21 @@ config :scheduling, Scheduling.Auth,
   # round-trip only on tokens that already failed. See
   # Scheduling.Auth.Introspection.
   introspection: System.get_env("OIDC_INTROSPECTION", "true") != "false",
+  # Cache a live introspection answer for this long. This IS the revocation
+  # window: a token revoked at the provider keeps working here until it lapses.
+  #
+  # It exists because ac-core issues opaque tokens, so every /api/v1 request
+  # takes the introspection path, and introspection against ac-core was
+  # measured at 1.3-1.7s per call. Without a cache the API is not slow, it is
+  # unusable.
+  #
+  # Forty-five seconds is short enough to state plainly to an operator and long
+  # enough to remove nearly all the traffic. Capped by the token's own `exp`,
+  # so a token near expiry is never held past its deadline.
+  # OIDC_INTROSPECTION_CACHE=false pays the round-trip instead.
+  introspection_cache: System.get_env("OIDC_INTROSPECTION_CACHE", "true") != "false",
+  introspection_cache_ttl_seconds:
+    String.to_integer(System.get_env("OIDC_INTROSPECTION_CACHE_TTL", "45")),
   # Dotted claim paths searched for roles; every one present is unioned.
   # `<client_id>` is substituted with OIDC_CLIENT_ID.
   role_claims:

@@ -76,6 +76,11 @@ defmodule Scheduling.OidcProvider do
     # first, then introspection — rather than only the first half.
     stub_introspection(%{bypass: bypass}, %{"active" => false})
 
+    # Introspection answers are cached for a short window, and the table is
+    # global. Without this a token validated in one test answers from cache in
+    # the next, and the failure looks like a stub that did not fire.
+    Scheduling.Auth.Introspection.Cache.clear()
+
     ExUnit.Callbacks.on_exit(fn -> Application.delete_env(:scheduling, Scheduling.Auth) end)
 
     %{bypass: bypass, issuer: issuer, jwk: jwk, client_id: @client_id}

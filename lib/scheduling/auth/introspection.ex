@@ -108,6 +108,7 @@ defmodule Scheduling.Auth.Introspection do
   require Logger
 
   alias Scheduling.Auth
+  alias Scheduling.Auth.Introspection.Cache
   alias Scheduling.Auth.Tokens
   alias Scheduling.Core
 
@@ -135,6 +136,13 @@ defmodule Scheduling.Auth.Introspection do
   """
   @spec validate(String.t()) :: {:ok, map()} | {:error, Tokens.error()}
   def validate(token) when is_binary(token) do
+    case Cache.fetch(token) do
+      {:ok, claims} -> {:ok, claims}
+      :miss -> introspect(token)
+    end
+  end
+
+  defp introspect(token) do
     {client_id, client_secret} = credentials()
 
     case Oidcc.introspect_token(
@@ -144,7 +152,7 @@ defmodule Scheduling.Auth.Introspection do
            client_secret,
            %{client_self_only: false}
          ) do
-      {:ok, introspection} -> interpret(introspection)
+      {:ok, introspection} -> interpret(introspection, token)
       {:error, reason} -> unavailable(reason)
     end
   end
@@ -169,7 +177,7 @@ defmodule Scheduling.Auth.Introspection do
     end
   end
 
-  defp interpret(%Oidcc.TokenIntrospection{active: true} = introspection) do
+  defp interpret(%Oidcc.TokenIntrospection{active: true} = introspection, token) do
     claims = claims(introspection)
 
     cond do
@@ -184,11 +192,15 @@ defmodule Scheduling.Auth.Introspection do
         {:error, :invalid_token}
 
       true ->
+        # Only a live answer is cached. A refusal is not — caching one would
+        # let a momentary provider error pin a legitimate caller out for the
+        # rest of the window, with nothing they could do about it.
+        Cache.put(token, claims)
         {:ok, claims}
     end
   end
 
-  defp interpret(%Oidcc.TokenIntrospection{active: _inactive}) do
+  defp interpret(%Oidcc.TokenIntrospection{active: _inactive}, _token) do
     # Expired, revoked, or never issued — RFC 7662 §2.2 deliberately does not
     # distinguish them, and neither should the response we give the caller.
     #

@@ -26,6 +26,9 @@ defmodule Scheduling.Application do
         Scheduling.Auth.SessionRevocation.Sweeper.child_spec_if_enabled(),
         # Caches scheduling's own client-credentials token for calling ac-core.
         # nil unless core credentials are configured.
+        # Short-lived introspection answers. ac-core issues opaque tokens, so
+        # without this every /api/v1 request pays a ~1.4s round-trip.
+        Scheduling.Auth.Introspection.Cache.child_spec_if_enabled(),
         Scheduling.Auth.ServiceToken.child_spec_if_enabled(),
         # Projects ac-core's site list into `locations`. nil without core
         # credentials. Started after the token holder it depends on, and
