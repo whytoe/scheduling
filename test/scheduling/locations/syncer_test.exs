@@ -39,6 +39,20 @@ defmodule Scheduling.Locations.SyncerTest do
 
     start_supervised!({Scheduling.ServiceTokenStub, {:ok, "svc_token"}})
 
+    # The syncer pulls practices before locations — a site's name is not
+    # unique, so the practice is what distinguishes two "Main Office" rows.
+    # These tests are about the location pass, so answer practices emptily
+    # rather than leaving the path unstubbed: an unstubbed call retries for
+    # seconds and the failure surfaces as a timeout on an unrelated assertion.
+    Bypass.stub(bypass, "GET", "/v1/practices", fn conn ->
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.resp(
+        200,
+        Jason.encode!(%{"data" => [], "page" => 1, "pageSize" => 100, "total" => 0})
+      )
+    end)
+
     on_exit(fn ->
       Application.put_env(:scheduling, Scheduling.Core, original_core)
       Application.put_env(:scheduling, Scheduling.Auth, original_auth)

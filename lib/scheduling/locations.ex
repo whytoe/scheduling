@@ -72,11 +72,39 @@ defmodule Scheduling.Locations do
     |> maybe_only_active(Keyword.get(opts, :active))
     |> order_by([l], desc: l.active, asc: l.name, asc: l.id)
     |> Repo.all()
+    |> Repo.preload(:practice)
   end
 
   @doc "Fetches a location by local id. Raises if missing."
   @spec get_location!(term()) :: Location.t()
   def get_location!(id), do: Repo.get!(Location, id)
+
+  @doc """
+  An unambiguous label for a site.
+
+  `"Sunshine Pediatrics — Main Office"`, or just the site name when the
+  practice is unknown.
+
+  Exists because a site name is **not unique**: this deployment holds five and
+  three are called "Main Office", one per practice, and two of those three have
+  no address. Anything that offers a choice between sites — an office/location
+  picker, a board label, an audit line — has to use this rather than `name`,
+  or it presents two identical options.
+
+  Requires `:practice` to be preloaded; an unloaded association is treated as
+  unknown rather than raising, since a missing label is not worth an exception
+  in a render.
+  """
+  @spec label(Location.t()) :: String.t()
+  def label(%Location{} = location) do
+    case location.practice do
+      %{name: practice} when is_binary(practice) and practice != "" ->
+        practice <> " — " <> (location.name || location.core_location_id)
+
+      _unknown ->
+        location.name || location.core_location_id
+    end
+  end
 
   @doc "Fetches by ac-core's id — the identity of record."
   @spec get_by_core_location_id(String.t()) :: Location.t() | nil
