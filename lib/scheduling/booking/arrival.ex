@@ -104,6 +104,94 @@ defmodule Scheduling.Booking.Arrival do
     end
   end
 
+  @doc """
+  Reverses an arrival made by mistake.
+
+  Arrival is a single unconfirmed click that opens a visit, queues the patient,
+  assigns a room (for a committed appointment) and raises a handoff. `cancel`
+  gets a confirm dialog; `arrive` deliberately does not — friction on the
+  busiest control at a real desk is worse. The honest counterweight is an undo.
+
+  Reverses **softly**, matching how nothing operational here is deleted: the
+  pending handoff is withdrawn, the queue entry cancelled, the visit ended, and
+  the appointment returned to `:booked` so it can be arrived again cleanly. The
+  slots it holds are untouched — a committed appointment still owns its room's
+  time.
+
+  Refused once anything downstream has happened — the entry is in service or
+  finished, or a clinician has acknowledged the handoff. At that point the
+  patient is being received, and the way back is a clinical decision, not an
+  undo. `{:error, :not_arrived}` for an appointment that is not `:arrived`;
+  `{:error, :in_progress}` when it is too late.
+  """
+  @spec undo(Appointment.t(), keyword()) ::
+          {:ok, map()} | {:error, :not_arrived | :in_progress | Ecto.Changeset.t()}
+  def undo(appointment, opts \\ [])
+
+  def undo(%Appointment{status: status}, _opts) when status != :arrived,
+    do: {:error, :not_arrived}
+
+  def undo(%Appointment{} = appointment, opts) do
+    with {:ok, entry} <- undoable_entry(appointment) do
+      appointment
+      |> undo_multi(entry, opts)
+      |> Repo.transaction()
+      |> case do
+        {:ok, changes} ->
+          {:ok,
+           %{
+             appointment:
+               Repo.preload(changes.appointment, [:slots, :required_capabilities], force: true),
+             visit: changes.visit,
+             entry: changes.entry
+           }}
+
+        {:error, _step, reason, _changes} ->
+          {:error, reason}
+      end
+    end
+  end
+
+  defp undo_multi(appointment, entry, opts) do
+    Multi.new()
+    |> Multi.run(:handoffs, fn _repo, _ ->
+      Handoffs.withdraw_pending_for_entry(entry.id, opts)
+    end)
+    |> Multi.run(:entry, fn _repo, _ ->
+      Queue.cancel(entry, Keyword.put(opts, :reason, "Arrival undone"))
+    end)
+    |> Multi.run(:visit, fn _repo, _ ->
+      end_entry_visit(entry, opts)
+    end)
+    |> Multi.update(:appointment, Appointment.changeset(appointment, %{status: :booked}))
+  end
+
+  # The entry this arrival produced, if it is still safe to reverse. Refuses
+  # once the entry has left waiting/assigned (in service or finished) and once a
+  # clinician has acknowledged the handoff — both mean the patient is being
+  # received.
+  defp undoable_entry(%Appointment{} = appointment) do
+    entry =
+      QueueEntry
+      |> where([e], e.appointment_id == ^appointment.id)
+      |> order_by([e], asc: e.id)
+      |> limit(1)
+      |> Repo.one()
+
+    cond do
+      is_nil(entry) -> {:error, :not_arrived}
+      entry.status not in [:waiting, :assigned] -> {:error, :in_progress}
+      Handoffs.acknowledged_for_entry?(entry.id) -> {:error, :in_progress}
+      true -> {:ok, entry}
+    end
+  end
+
+  defp end_entry_visit(%QueueEntry{visit_id: nil}, _opts), do: {:ok, nil}
+
+  defp end_entry_visit(%QueueEntry{visit_id: visit_id}, opts) do
+    Visits.end_visit(Visits.get_visit!(visit_id), opts)
+  end
+
   defp arrival_multi(appointment, office, opts) do
     Multi.new()
     |> Multi.run(:visit, fn _repo, _ ->

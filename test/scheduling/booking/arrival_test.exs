@@ -239,4 +239,84 @@ defmodule Scheduling.Booking.ArrivalTest do
       assert Audit.list_events(type: "visit.created") == []
     end
   end
+
+  describe "undoing an arrival" do
+    setup do
+      cap = capability_fixture("CT scanner")
+      office = office_fixture([cap.id])
+      slots_for(office, 4)
+      appointment = book(service_fixture([cap.id]))
+      assert appointment.binding == :committed
+      %{cap: cap, office: office, appointment: appointment}
+    end
+
+    test "reverses a committed arrival back to a bookable appointment", ctx do
+      {:ok, result} = Booking.arrive(ctx.appointment)
+      assert result.entry.status == :assigned
+      assert [_pending] = Handoffs.list_pending_for_office(ctx.office.id)
+
+      assert {:ok, undone} = Booking.undo_arrival(Booking.get_appointment!(ctx.appointment.id))
+
+      assert undone.appointment.status == :booked
+      assert Queue.get_entry!(result.entry.id).status == :cancelled
+      assert Scheduling.Visits.get_visit!(result.visit.id).status == :ended
+      # The handoff is withdrawn, not left as a phantom incoming patient.
+      assert Handoffs.list_pending_for_office(ctx.office.id) == []
+    end
+
+    test "leaves the slots booked — undo does not free the room's time", ctx do
+      [slot] = ctx.appointment.slots
+      {:ok, _} = Booking.arrive(ctx.appointment)
+
+      {:ok, _} = Booking.undo_arrival(Booking.get_appointment!(ctx.appointment.id))
+
+      assert Booking.get_slot!(slot.id).status == :booked
+    end
+
+    test "the appointment can be arrived again cleanly after an undo", ctx do
+      {:ok, first} = Booking.arrive(ctx.appointment)
+      {:ok, _} = Booking.undo_arrival(Booking.get_appointment!(ctx.appointment.id))
+
+      {:ok, second} = Booking.arrive(Booking.get_appointment!(ctx.appointment.id))
+
+      # A genuinely fresh arrival, not the idempotent replay of the first.
+      refute second.entry.id == first.entry.id
+      refute second.visit.id == first.visit.id
+      assert second.entry.status == :assigned
+    end
+
+    test "reverses a provisional arrival that is still waiting for the matcher" do
+      cap = capability_fixture("Consult")
+      a = office_fixture([cap.id])
+      b = office_fixture([cap.id])
+      slots_for(a, 4)
+      slots_for(b, 4)
+      appointment = book(service_fixture([cap.id]))
+      assert appointment.binding == :provisional
+
+      {:ok, result} = Booking.arrive(appointment)
+      assert result.entry.status == :waiting
+
+      assert {:ok, undone} = Booking.undo_arrival(Booking.get_appointment!(appointment.id))
+      assert undone.appointment.status == :booked
+      assert Queue.get_entry!(result.entry.id).status == :cancelled
+    end
+
+    test "refuses once a clinician has the patient — the handoff is acknowledged", ctx do
+      {:ok, result} = Booking.arrive(ctx.appointment)
+      [handoff] = Handoffs.list_pending_for_office(ctx.office.id)
+      {:ok, _} = Handoffs.acknowledge(handoff)
+      assert Queue.get_entry!(result.entry.id).status == :in_service
+
+      assert {:error, :in_progress} =
+               Booking.undo_arrival(Booking.get_appointment!(ctx.appointment.id))
+
+      # Nothing was reversed.
+      assert Booking.get_appointment!(ctx.appointment.id).status == :arrived
+    end
+
+    test "refuses an appointment that has not arrived", ctx do
+      assert {:error, :not_arrived} = Booking.undo_arrival(ctx.appointment)
+    end
+  end
 end

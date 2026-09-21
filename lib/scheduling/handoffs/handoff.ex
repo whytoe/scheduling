@@ -18,7 +18,7 @@ defmodule Scheduling.Handoffs.Handoff do
 
   @type t :: %__MODULE__{}
 
-  @statuses [:pending, :acknowledged]
+  @statuses [:pending, :acknowledged, :withdrawn]
 
   schema "handoffs" do
     field :status, Ecto.Enum, values: @statuses, default: :pending
@@ -76,10 +76,22 @@ defmodule Scheduling.Handoffs.Handoff do
     |> validate_pending()
   end
 
-  defp validate_pending(changeset) do
+  @doc """
+  Transitions a `:pending` handoff to `:withdrawn` — the incoming patient is no
+  longer coming, because an arrival was undone (see `Scheduling.Booking` undo).
+  Only valid from `:pending`: a handoff a clinician has already acknowledged
+  cannot be withdrawn, because the patient is already being received.
+  """
+  def withdraw_changeset(%__MODULE__{} = handoff) do
+    handoff
+    |> change(status: :withdrawn)
+    |> validate_pending("withdraw")
+  end
+
+  defp validate_pending(changeset, action \\ "acknowledge") do
     case changeset.data.status do
       :pending -> changeset
-      other -> add_error(changeset, :status, "must be pending to acknowledge, was #{other}")
+      other -> add_error(changeset, :status, "must be pending to #{action}, was #{other}")
     end
   end
 end
