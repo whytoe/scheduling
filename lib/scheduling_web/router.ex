@@ -254,6 +254,8 @@ defmodule SchedulingWeb.Router do
     put "/webhook_subscriptions/:id", WebhookSubscriptionController, :update
     patch "/webhook_subscriptions/:id", WebhookSubscriptionController, :update
     delete "/webhook_subscriptions/:id", WebhookSubscriptionController, :delete
+
+    get "/webhook_deliveries", WebhookDeliveryController, :index
   end
 
   scope "/api" do

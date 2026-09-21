@@ -753,17 +753,25 @@ is too far in the past (the standard Stripe-style guard against replay
 Elixir receivers; for other languages, the spec above is everything you
 need.
 
-### Delivery semantics (today)
+### Delivery semantics
 
-- Fire-and-forget via `Task.start`: a slow receiver never blocks
+- **Durable.** Each fan-out is enqueued as a delivery row in the same
+  transaction as the event, so no event is recorded without its deliveries
+  queued. A background sweeper sends them, so a slow receiver never blocks
   scheduling.
-- No retries; non-2xx responses are dropped. Tracked under `sc-6ub`
-  (delivery log + retries + DLQ). Until then, design your receiver to
-  be idempotent on delivery duplicates and expect occasional drops on
-  failure.
-- No delivery log. If you need durability today, poll
-  `/api/v1/visit_events?since=<iso8601>` in a reconciliation loop as a
-  fallback.
+- **Retried on a backoff.** A non-2xx response or a transport error is
+  retried — by default 5s, 30s, 5m, then 30m apart — and moved to the
+  **dead-letter queue** after five attempts.
+- **At-least-once.** Dedupe on the event id and keep your handler idempotent:
+  a receiver that processed a delivery but then timed out will be retried.
+- **Observable.** `GET /api/v1/webhook_deliveries` (admin) lists deliveries with
+  their status, attempt count and last response; `?status=dead` is the
+  dead-letter queue and `?subscription_id=` narrows to one subscription.
+- **Auto-disabled endpoints.** A subscription that fails 50 attempts in a row is
+  deactivated, so a permanently-dead endpoint stops being retried against. Its
+  deliveries stay visible as `dead`.
+- Reconciliation by polling `/api/v1/visit_events?since=<iso8601>` still works —
+  the delivery queue does not replace it, it just means you rarely need it.
 - A subscription test-fire endpoint is tracked under `sc-yl8`.
 
 ## Local-dev recipe
