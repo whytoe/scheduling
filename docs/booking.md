@@ -412,10 +412,32 @@ A committed appointment's slots represent the room's time being spent, and the
 patient is now spending it — releasing them would let a second patient be
 booked into an occupied room.
 
-Provisional slots stay booked too, **even when the matcher sends the patient
-somewhere else**. Releasing them mid-session would hand back capacity the
-original room had notionally set aside. Whether that should be reclaimed is a
-scheduling-policy question, not something to decide implicitly — see Open below.
+A provisional appointment's slots stay booked *at arrival* too — the entry is
+left `:waiting` and nothing has placed the patient yet. They are handed back
+later, at the moment the matcher actually reroutes them.
+
+### Reclaiming a rerouted provisional's slots
+
+A provisional appointment reserves a slot in one room, but the matcher routes on
+live capacity when the patient is accepted and may place them in a different
+room. When it does, the original room's slots are **released** — set back to
+`:open` — as part of that placement (`Scheduling.Booking.reclaim_rerouted_slots/2`,
+called from `Scheduling.Queue`'s accept path).
+
+The reservation was protecting no one. The arrival matcher is **slot-blind**: it
+scores an office on live queue load, never on booked slots. So holding the
+original room's slot cannot route this patient back to it, and only blocks
+other people from booking that time. Handing it back is safe for exactly the
+same reason — releasing cannot make the matcher over-fill the room; a freed slot
+that gets re-booked simply becomes live load at that patient's own arrival.
+
+Scoped narrowly, so the honest cases are untouched: a **committed** appointment
+keeps its slots (the patient is in that room), a patient the matcher puts back
+in their *own* room keeps them, and an appointment whose slots were already
+released is a no-op. Only a genuine reroute — placed office ≠ slot-holding
+office — hands anything back. Consistent with `broken_commitments` ignoring
+arrived appointments: once the patient is through the door, the room they were
+booked into no longer matters.
 
 ## Timezones
 
@@ -451,9 +473,8 @@ the service requires.
   overbooking would need a per-rule allowance.
 - **Provider-level booking.** ac-core has a provider directory. Today booking
   is against rooms and equipment, not people.
-- **Rerouted provisional slots are not reclaimed.** When the matcher sends a
-  provisional patient to a different room, the slots in the originally-booked
-  room stay `:booked` for the rest of that window. Reclaiming them would return
-  real capacity, but only if it is certain the patient will not come back to
-  that room — a policy question worth deciding deliberately rather than by
-  default.
+
+Rerouted provisional slots *were* an open question here — whether to reclaim the
+originally-booked room's capacity when the matcher sends the patient elsewhere.
+Decided: reclaim it, at the moment of reroute. See 'Reclaiming a rerouted
+provisional's slots' above.

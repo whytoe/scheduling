@@ -34,11 +34,12 @@ defmodule Scheduling.Booking.Arrival do
   time being spent, and the patient is now spending it. Releasing them would
   let a second patient be booked into a room already occupied.
 
-  Provisional slots stay booked too, even when the matcher sends the patient
-  elsewhere. Releasing them mid-session would hand out capacity that the
-  original room has notionally set aside, and reconciling that is a scheduling
-  policy question rather than something to decide implicitly here. Noted in
-  `docs/booking.md` as open.
+  A provisional appointment's slots also stay `:booked` *here* — arrival only
+  queues the patient `:waiting`, and nothing has placed them yet. They are
+  handed back later, when `Scheduling.Queue`'s accept path runs the matcher and
+  actually reroutes them to a different room (`Booking.reclaim_rerouted_slots/2`).
+  That reclaim is safe because the matcher is slot-blind; see
+  `docs/booking.md` 'Reclaiming a rerouted provisional's slots'.
 
   ## Arriving twice
 

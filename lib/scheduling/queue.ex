@@ -11,6 +11,7 @@ defmodule Scheduling.Queue do
   import Ecto.Query, warn: false
 
   alias Scheduling.Audit
+  alias Scheduling.Booking
   alias Scheduling.Catalog
   alias Scheduling.Catalog.Capability
   alias Scheduling.Compliance
@@ -356,6 +357,7 @@ defmodule Scheduling.Queue do
         |> case do
           {:ok, assigned} ->
             Audit.record_decision(entry, result, opts)
+            hand_back_rerouted_slots(assigned, office)
             Handoffs.create_handoff(assigned, office)
             broadcast_board_change({:accepted, assigned.id})
             {:ok, Repo.preload(assigned, [:patient, :assigned_office]), result}
@@ -364,6 +366,17 @@ defmodule Scheduling.Queue do
             {:error, changeset}
         end
     end
+  end
+
+  # A provisional appointment reserves a slot in one room; the matcher may have
+  # just placed this patient in a different one. When it has, the original room's
+  # slots are handed back — see Scheduling.Booking.reclaim_rerouted_slots/2 and
+  # docs/booking.md. Walk-ins carry no appointment and skip this entirely.
+  defp hand_back_rerouted_slots(%QueueEntry{appointment_id: nil}, _office), do: :ok
+
+  defp hand_back_rerouted_slots(%QueueEntry{appointment_id: appointment_id}, office) do
+    Booking.reclaim_rerouted_slots(appointment_id, office.id)
+    :ok
   end
 
   # The rationale is written to an append-only audit row that also fans out to

@@ -220,6 +220,15 @@ defmodule Scheduling.Booking do
   defdelegate reschedule_appointment(appointment, opts \\ []), to: Engine, as: :reschedule
 
   @doc """
+  Hands back a provisional appointment's slots when the matcher placed the
+  arriving patient in a different room than the one holding them. A no-op
+  otherwise. Called from the queue's accept path; see
+  `Scheduling.Booking.Engine.reclaim_rerouted_slots/2`.
+  """
+  @spec reclaim_rerouted_slots(integer(), integer()) :: {:ok, non_neg_integer()}
+  defdelegate reclaim_rerouted_slots(appointment_id, placed_office_id), to: Engine
+
+  @doc """
   Candidate start times for a service in a window — a preview for a booking
   screen, not a hold. See `Scheduling.Booking.Engine.available_starts/2`.
   """
