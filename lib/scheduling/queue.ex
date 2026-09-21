@@ -59,6 +59,44 @@ defmodule Scheduling.Queue do
     |> Repo.preload([:patient, :required_capabilities])
   end
 
+  @doc """
+  A patient-facing estimate of how much longer an entry has to wait.
+
+  `position` is the entry's 1-based place in the waiting line, in the exact
+  order the matcher dequeues — highest priority first, then oldest, then lowest
+  id (the ordering `list_waiting_entries/1` reads). It counts only the entries
+  genuinely ahead of this one.
+
+  `position` is `nil` for an entry that is not `:waiting`: an assigned,
+  in-service, or finished entry is no longer in line, and reporting a place for
+  it would be a fiction.
+
+  `estimated_minutes` is always `nil` for now — a real estimate needs
+  completion-throughput data this system does not yet record (sc-ckz Phase 2).
+  The field is present so the response shape will not change when it arrives.
+  """
+  @spec wait_estimate(QueueEntry.t()) :: %{
+          position: pos_integer() | nil,
+          estimated_minutes: non_neg_integer() | nil
+        }
+  def wait_estimate(%QueueEntry{status: :waiting} = entry) do
+    ahead =
+      QueueEntry
+      |> where([e], e.status == :waiting)
+      |> where(
+        [e],
+        e.priority > ^entry.priority or
+          (e.priority == ^entry.priority and e.inserted_at < ^entry.inserted_at) or
+          (e.priority == ^entry.priority and e.inserted_at == ^entry.inserted_at and
+             e.id < ^entry.id)
+      )
+      |> Repo.aggregate(:count, :id)
+
+    %{position: ahead + 1, estimated_minutes: nil}
+  end
+
+  def wait_estimate(%QueueEntry{}), do: %{position: nil, estimated_minutes: nil}
+
   @doc "Fetches a queue entry by id with patient and required capabilities preloaded."
   def get_entry!(id) do
     QueueEntry

@@ -129,6 +129,30 @@ defmodule SchedulingWeb.Api.QueueEntryController do
     end
   end
 
+  operation(:wait_estimate,
+    summary: "A patient's place in the queue",
+    description:
+      "`position` is the entry's 1-based place in the waiting line, in the " <>
+        "order the matcher will take them (highest priority first, then " <>
+        "oldest). `null` once the entry is no longer waiting — assigned, in " <>
+        "service, or finished.\n\n" <>
+        "`estimated_minutes` is always `null` for now: a time estimate needs " <>
+        "completion-throughput data scheduling does not yet track. The field " <>
+        "is present so the response shape will not change when it does.\n\n" <>
+        "Built for the queueing service's patient-facing view.",
+    parameters: [id: [in: :path, description: "Queue entry id", type: :integer]],
+    responses: [
+      ok: {"Wait estimate", "application/json", Schemas.WaitEstimate},
+      not_found: {"Not found", "application/json", Schemas.NotFoundError}
+    ]
+  )
+
+  def wait_estimate(conn, %{"id" => id}) do
+    with {:ok, entry} <- fetch(id) do
+      json(conn, Queue.wait_estimate(entry))
+    end
+  end
+
   operation(:create,
     summary: "Create a queue entry",
     description:

@@ -172,6 +172,7 @@ defmodule SchedulingWeb.Router do
 
       get "/queue_entries", QueueEntryController, :index
       get "/queue_entries/:id", QueueEntryController, :show
+      get "/queue_entries/:id/wait_estimate", QueueEntryController, :wait_estimate
 
       get "/handoffs", HandoffController, :index
       get "/handoffs/:id", HandoffController, :show

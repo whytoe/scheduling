@@ -682,6 +682,35 @@ defmodule SchedulingWeb.Schemas do
     })
   end
 
+  defmodule WaitEstimate do
+    @moduledoc "A queue entry's place in line, for a patient-facing view."
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "WaitEstimate",
+      type: :object,
+      properties: %{
+        position: %Schema{
+          type: :integer,
+          nullable: true,
+          description:
+            "1-based place in the waiting line, in the order the matcher " <>
+              "dequeues. Null once the entry is no longer waiting."
+        },
+        estimated_minutes: %Schema{
+          type: :integer,
+          nullable: true,
+          description:
+            "Estimated minutes still to wait. Always null in Phase 1 — " <>
+              "throughput is not yet tracked."
+        }
+      },
+      required: [:position, :estimated_minutes],
+      example: %{"position" => 3, "estimated_minutes" => nil}
+    })
+  end
+
   defmodule ComplianceFailedError do
     @moduledoc """
     Returned when the intake-form system reports the patient has not satisfied
