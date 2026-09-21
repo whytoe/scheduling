@@ -230,6 +230,15 @@ token for a user with no site assignment. Until then the feature is inert for
 identities that carry nothing, which means turning it on is a provider-side
 change rather than a deploy.
 
+That confirmation no longer waits on someone thinking to capture it. Every
+browser login now logs one line from `Scheduling.Auth.LocationClaim` (called in
+the `/auth/callback` path) recording the raw claim before `Identity`
+normalises it — `absent` / `null` / `empty` / a single id / a list — and, for
+any ids present, how many match `locations.core_location_id`. Grep the logs for
+`astrum_location observation` after the first real scoped login: it answers all
+three unknowns at once, the id-space match included. Remove that instrumentation
+once this section stops hedging.
+
 ### Where it is enforced
 
 Filtering the board would only *hide* offices. The load-bearing enforcement is
