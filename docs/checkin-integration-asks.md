@@ -43,6 +43,13 @@ We generate our client from the spec rather than hand-rolling it — a recorded
 decision, precisely so we do not build against guesses that drift. Without
 request schemas we cannot generate anything for the write surface.
 
+**Proposed schemas (to save a round trip):** for the five scheduling write
+endpoints we call, we have drafted concrete request bodies in
+`checkin-scheduling-write-proposal.md`, derived from your own GET response
+vocabulary. They are a starting point to confirm or amend, not a demand —
+adopting them should be close to free since the field names already match what
+your reads return.
+
 ## 2. An arrival signal that identifies the patient — **blocking**
 
 `GET /v1/external/queue` returns:
