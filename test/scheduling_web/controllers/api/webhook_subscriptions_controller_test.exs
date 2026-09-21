@@ -85,4 +85,37 @@ defmodule SchedulingWeb.Api.WebhookSubscriptionControllerTest do
       assert %{"error" => %{"code" => "not_found"}} = json_response(conn, 404)
     end
   end
+
+  describe "POST /api/v1/webhook_subscriptions/:id/test" do
+    test "fires a test delivery and reports the receiver's status", %{conn: conn} do
+      bypass = Bypass.open()
+      Bypass.expect_once(bypass, "POST", "/hook", fn c -> Plug.Conn.resp(c, 200, "ok") end)
+
+      {:ok, sub} =
+        Scheduling.Webhooks.create_subscription(%{url: "http://localhost:#{bypass.port}/hook"})
+
+      body = conn |> post(~p"/api/v1/webhook_subscriptions/#{sub.id}/test") |> json_response(200)
+
+      assert body["delivered"] == true
+      assert body["response_status"] == 200
+    end
+
+    test "reports delivered=false on a non-2xx", %{conn: conn} do
+      bypass = Bypass.open()
+      Bypass.expect_once(bypass, "POST", "/hook", fn c -> Plug.Conn.resp(c, 500, "boom") end)
+
+      {:ok, sub} =
+        Scheduling.Webhooks.create_subscription(%{url: "http://localhost:#{bypass.port}/hook"})
+
+      body = conn |> post(~p"/api/v1/webhook_subscriptions/#{sub.id}/test") |> json_response(200)
+
+      assert body["delivered"] == false
+      assert body["response_status"] == 500
+    end
+
+    test "404 for an unknown subscription", %{conn: conn} do
+      assert %{"error" => %{"code" => "not_found"}} =
+               conn |> post(~p"/api/v1/webhook_subscriptions/99999/test") |> json_response(404)
+    end
+  end
 end

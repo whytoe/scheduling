@@ -94,4 +94,39 @@ defmodule Scheduling.WebhooksDispatchTest do
 
     assert {:error, %Req.TransportError{}} = Webhooks.deliver(sub, event())
   end
+
+  describe "send_test/1" do
+    test "posts a signed webhook.test event and returns the status", %{bypass: bypass} do
+      secret = "test-fire-secret-1234567890abcdef"
+      sub = subscription_at(bypass, secret)
+      parent = self()
+
+      Bypass.expect_once(bypass, "POST", "/hook", fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        send(parent, {:test_fired, body, Map.new(conn.req_headers)})
+        Plug.Conn.resp(conn, 200, "ok")
+      end)
+
+      assert {:ok, 200} = Webhooks.send_test(sub)
+
+      assert_received {:test_fired, body, headers}
+      assert headers["x-scheduling-event-type"] == "webhook.test"
+      assert Jason.decode!(body)["type"] == "webhook.test"
+      # Signs the same way a real delivery does.
+      assert :ok =
+               Webhooks.verify_signature(
+                 headers["x-scheduling-signature"],
+                 headers["x-scheduling-timestamp"],
+                 body,
+                 secret
+               )
+    end
+
+    test "returns a transport error when the receiver is unreachable", %{bypass: bypass} do
+      sub = subscription_at(bypass, "down-secret-1234567890abcdef")
+      Bypass.down(bypass)
+
+      assert {:error, _reason} = Webhooks.send_test(sub)
+    end
+  end
 end

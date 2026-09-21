@@ -1486,6 +1486,35 @@ defmodule SchedulingWeb.Schemas do
     })
   end
 
+  defmodule WebhookTestResult do
+    @moduledoc "Result of a synchronous test-fire against a subscription."
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "WebhookTestResult",
+      type: :object,
+      properties: %{
+        delivered: %Schema{
+          type: :boolean,
+          description: "True when the receiver answered with a 2xx"
+        },
+        response_status: %Schema{
+          type: :integer,
+          nullable: true,
+          description: "The receiver's HTTP status; absent on a transport error"
+        },
+        error: %Schema{
+          type: :string,
+          nullable: true,
+          description: "The transport error, when the request never got a response"
+        }
+      },
+      required: [:delivered],
+      example: %{"delivered" => true, "response_status" => 200}
+    })
+  end
+
   defmodule HealthResponse do
     @moduledoc "Health probe response body."
     require OpenApiSpex
