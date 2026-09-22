@@ -33,6 +33,15 @@ defmodule Scheduling.HandoffsTest do
     office
   end
 
+  defp pending_handoff do
+    xray = capability_fixture("XRay")
+    office = office_fixture("Room A", 2, [xray.id])
+    entry = waiting_entry([xray])
+    {:ok, _assigned, _} = Queue.accept(Queue.get_entry!(entry.id))
+    [handoff] = Handoffs.list_pending_for_office(office.id)
+    {handoff, office, entry}
+  end
+
   defp waiting_entry(required_caps, opts \\ []) do
     patient = patient_fixture(Keyword.get(opts, :patient_name, "Jane Doe"))
 
@@ -162,6 +171,48 @@ defmodule Scheduling.HandoffsTest do
       {:ok, _} = Handoffs.acknowledge(hd(pending))
 
       assert Enum.map(Handoffs.list_pending(), & &1.patient_name) == ["Second"]
+    end
+  end
+
+  describe "withdrawing a handoff" do
+    test "a pending handoff becomes withdrawn and drops off the board" do
+      {handoff, office, _entry} = pending_handoff()
+
+      assert {:ok, withdrawn} = Handoffs.withdraw(handoff)
+      assert withdrawn.status == :withdrawn
+      assert Handoffs.list_pending_for_office(office.id) == []
+    end
+
+    test "records a handoff.withdrawn audit event" do
+      {handoff, _office, entry} = pending_handoff()
+
+      {:ok, _} = Handoffs.withdraw(handoff)
+
+      types =
+        Scheduling.Audit.list_events(%{})
+        |> Enum.filter(&(&1.queue_entry_id == entry.id))
+        |> Enum.map(& &1.type)
+
+      assert "handoff.withdrawn" in types
+    end
+
+    test "an acknowledged handoff cannot be withdrawn — the patient is already received" do
+      {handoff, _office, _entry} = pending_handoff()
+      {:ok, acked} = Handoffs.acknowledge(handoff)
+
+      assert {:error, changeset} = Handoffs.withdraw(acked)
+      assert %{status: ["must be pending to withdraw, was acknowledged"]} = errors_on(changeset)
+    end
+
+    test "withdraw_pending_for_entry clears the entry's handoff, and is empty when there is none" do
+      {_handoff, office, entry} = pending_handoff()
+
+      assert {:ok, [withdrawn]} = Handoffs.withdraw_pending_for_entry(entry.id)
+      assert withdrawn.status == :withdrawn
+      assert Handoffs.list_pending_for_office(office.id) == []
+
+      # Idempotent: a second pass finds nothing pending.
+      assert {:ok, []} = Handoffs.withdraw_pending_for_entry(entry.id)
     end
   end
 end

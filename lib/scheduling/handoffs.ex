@@ -118,6 +118,59 @@ defmodule Scheduling.Handoffs do
     end
   end
 
+  @doc """
+  Withdraws a pending handoff — the incoming patient is no longer coming because
+  an arrival was undone. Records `handoff.withdrawn` and broadcasts so the
+  office board drops the phantom incoming patient. Only valid from `:pending`;
+  an acknowledged handoff means the patient is already being received.
+  """
+  @spec withdraw(Handoff.t(), keyword()) ::
+          {:ok, Handoff.t()} | {:error, Ecto.Changeset.t()}
+  def withdraw(%Handoff{} = handoff, opts \\ []) do
+    handoff = Repo.preload(handoff, queue_entry: :visit)
+    visit_id = handoff.queue_entry && handoff.queue_entry.visit_id
+
+    Ecto.Multi.new()
+    |> Ecto.Multi.update(:handoff, Handoff.withdraw_changeset(handoff))
+    |> Ecto.Multi.run(:event, fn _repo, %{handoff: withdrawn} ->
+      Audit.record_event(%{
+        type: "handoff.withdrawn",
+        visit_id: visit_id,
+        queue_entry_id: withdrawn.queue_entry_id,
+        patient_id: withdrawn.patient_id,
+        handoff_id: withdrawn.id,
+        actor_type: Keyword.get(opts, :actor_type),
+        actor_id: Keyword.get(opts, :actor_id),
+        payload: %{}
+      })
+    end)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{handoff: withdrawn}} -> {:ok, broadcast(withdrawn, :handoff_withdrawn)}
+      {:error, _, changeset, _} -> {:error, changeset}
+    end
+  end
+
+  @doc """
+  Withdraws every pending handoff attached to a queue entry. Returns the list of
+  withdrawn handoffs (empty when the entry never had one — a provisional entry
+  left waiting for the matcher). Stops and returns the error on the first that
+  cannot be withdrawn.
+  """
+  @spec withdraw_pending_for_entry(integer(), keyword()) ::
+          {:ok, [Handoff.t()]} | {:error, Ecto.Changeset.t()}
+  def withdraw_pending_for_entry(queue_entry_id, opts \\ []) do
+    Handoff
+    |> where([h], h.queue_entry_id == ^queue_entry_id and h.status == :pending)
+    |> Repo.all()
+    |> Enum.reduce_while({:ok, []}, fn handoff, {:ok, acc} ->
+      case withdraw(handoff, opts) do
+        {:ok, withdrawn} -> {:cont, {:ok, [withdrawn | acc]}}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+  end
+
   # Acknowledging a handoff is a clinician taking the patient, so the entry is
   # now in service. Nothing used to say so: `:in_service` was declared on the
   # schema, enumerated in the OpenAPI response, given its own badge and made
@@ -159,6 +212,14 @@ defmodule Scheduling.Handoffs do
   # mirrors how the QueueLive board passes acknowledgments today.
   defp actor_type_default(opts) do
     if Keyword.get(opts, :acknowledged_by), do: "user", else: nil
+  end
+
+  @doc "True when the entry has a handoff a clinician has already acknowledged."
+  @spec acknowledged_for_entry?(integer()) :: boolean()
+  def acknowledged_for_entry?(queue_entry_id) do
+    Handoff
+    |> where([h], h.queue_entry_id == ^queue_entry_id and h.status == :acknowledged)
+    |> Repo.exists?()
   end
 
   @doc "Lists every pending (unacknowledged) handoff, oldest first."

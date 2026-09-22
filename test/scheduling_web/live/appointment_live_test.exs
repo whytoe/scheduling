@@ -322,6 +322,24 @@ defmodule SchedulingWeb.AppointmentLiveTest do
     end
   end
 
+  describe "undo arrive" do
+    test "reverses the arrival and returns the appointment to booked", %{conn: conn} do
+      ctx = bookable()
+      appointment = book!(ctx)
+
+      {:ok, live, _html} = live(operator(conn), ~p"/appointments")
+
+      render_click(live, "arrive", %{"id" => appointment.id})
+      assert Booking.get_appointment!(appointment.id).status == :arrived
+
+      html = render_click(live, "undo_arrive", %{"id" => appointment.id})
+
+      assert html =~ "Arrival undone"
+      assert Booking.get_appointment!(appointment.id).status == :booked
+      assert Queue.list_active_entries() == []
+    end
+  end
+
   describe "cancel" do
     test "releases the slots it held", %{conn: conn} do
       ctx = bookable()

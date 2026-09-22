@@ -135,6 +135,32 @@ defmodule SchedulingWeb.AppointmentLive.Index do
     end
   end
 
+  # --- undo arrive -----------------------------------------------------------
+
+  # The counterweight to arrive having no confirm dialog: one honest way back
+  # from a mis-click. Fails clearly once the patient is being seen rather than
+  # pretending it can still be undone.
+  def handle_event("undo_arrive", %{"id" => id}, socket) do
+    appointment = Booking.get_appointment!(id)
+
+    case Booking.undo_arrival(appointment, actor_opts(socket)) do
+      {:ok, _} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Arrival undone. The appointment is booked again.")
+         |> load_appointments()}
+
+      {:error, :in_progress} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Too late to undo — that patient is already being seen.")
+         |> load_appointments()}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Could not undo that arrival: #{reason}.")}
+    end
+  end
+
   # --- reschedule ------------------------------------------------------------
 
   # `appointment_id` rather than `id`: an input named "id" overrides the form
@@ -362,6 +388,11 @@ defmodule SchedulingWeb.AppointmentLive.Index do
   defp cancellable?(%{status: status}), do: status in [:booked]
   defp arrivable?(%{status: status}), do: status == :booked
 
+  # Shown for any arrived appointment. Whether it is *still* undoable (the
+  # patient not yet in service) is decided in the domain when clicked — cheaper
+  # than a per-row lookup here, and the action explains itself if it is too late.
+  defp undoable_arrival?(%{status: status}), do: status == :arrived
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -468,6 +499,15 @@ defmodule SchedulingWeb.AppointmentLive.Index do
                   phx-click={JS.push("arrive", value: %{id: appointment.id})}
                 >
                   <.icon name="hero-check-circle" class="size-[15px]" />Arrived
+                </button>
+                <button
+                  :if={undoable_arrival?(appointment)}
+                  type="button"
+                  class="btn btn-ghost btn-sm"
+                  aria-label={"Undo #{patient_label(appointment)}'s arrival"}
+                  phx-click={JS.push("undo_arrive", value: %{id: appointment.id})}
+                >
+                  <.icon name="hero-arrow-uturn-left" class="size-[15px]" />Undo arrival
                 </button>
                 <button
                   :if={cancellable?(appointment)}

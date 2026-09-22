@@ -1131,7 +1131,7 @@ defmodule SchedulingWeb.Schemas do
       type: :object,
       properties: %{
         id: %Schema{type: :integer},
-        status: %Schema{type: :string, enum: ["pending", "acknowledged"]},
+        status: %Schema{type: :string, enum: ["pending", "acknowledged", "withdrawn"]},
         patient_name: %Schema{
           type: :string,
           nullable: true,

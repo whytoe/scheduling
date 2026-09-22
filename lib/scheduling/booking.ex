@@ -243,6 +243,15 @@ defmodule Scheduling.Booking do
   defdelegate arrive(appointment, opts \\ []), to: Arrival
 
   @doc """
+  Reverses an arrival made by mistake — withdraws the handoff, cancels the queue
+  entry, ends the visit, and returns the appointment to `:booked`. Refused once
+  the patient is being seen. See `Scheduling.Booking.Arrival.undo/2`.
+  """
+  @spec undo_arrival(Appointment.t(), keyword()) ::
+          {:ok, map()} | {:error, :not_arrived | :in_progress | Ecto.Changeset.t()}
+  defdelegate undo_arrival(appointment, opts \\ []), to: Arrival, as: :undo
+
+  @doc """
   Committed appointments whose pinned room can no longer serve them.
 
   A committed appointment is bound to the **only** office that could provide
