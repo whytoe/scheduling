@@ -38,6 +38,13 @@ defmodule Scheduling.Offices do
     |> Repo.preload([:capabilities, :location])
   end
 
+  @doc "Composable, unordered offices query (capabilities + location preloaded) for keyset reads."
+  def offices_query(opts \\ []) do
+    Office
+    |> scope_to_locations(Keyword.get(opts, :location_ids))
+    |> preload([:capabilities, :location])
+  end
+
   @doc """
   Offices a patient may actually be placed in.
 

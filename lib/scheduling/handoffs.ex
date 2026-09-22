@@ -170,6 +170,16 @@ defmodule Scheduling.Handoffs do
     |> Repo.all()
   end
 
+  @doc "Composable, unordered pending-handoffs query for keyset reads; optional :office_id."
+  def pending_query(opts \\ []) do
+    query = where(Handoff, [h], h.status == :pending)
+
+    case Keyword.get(opts, :office_id) do
+      nil -> query
+      office_id -> where(query, [h], h.office_id == ^office_id)
+    end
+  end
+
   @doc "Lists pending handoffs incoming to one office, oldest first."
   @spec list_pending_for_office(integer()) :: [Handoff.t()]
   def list_pending_for_office(office_id) do

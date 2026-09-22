@@ -21,6 +21,9 @@ defmodule Scheduling.Visits do
     |> Repo.preload(:patient)
   end
 
+  @doc "Composable visits query (patient preloaded) for keyset-paginated reads."
+  def visits_query, do: from(v in Visit, preload: :patient)
+
   @doc "Fetches one visit by id, with patient and queue_entries preloaded. Raises if missing."
   def get_visit!(id) do
     Visit

@@ -7,6 +7,7 @@ defmodule SchedulingWeb.Api.PatientController do
   use OpenApiSpex.ControllerSpecs
 
   alias Scheduling.Patients
+  alias SchedulingWeb.Pagination
   alias SchedulingWeb.Schemas
 
   action_fallback SchedulingWeb.Api.FallbackController
@@ -52,7 +53,13 @@ defmodule SchedulingWeb.Api.PatientController do
 
   def index(conn, params) do
     filters = patient_filters(params)
-    json(conn, Enum.map(Patients.list_patients(filters), &serialize/1))
+
+    {page, cursor} =
+      Pagination.keyset(Patients.patients_query(filters), params, [{:name, :asc}, {:id, :asc}])
+
+    conn
+    |> Pagination.put_next_cursor(cursor)
+    |> json(Enum.map(page, &serialize/1))
   end
 
   defp patient_filters(params) do

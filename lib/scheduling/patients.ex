@@ -44,6 +44,11 @@ defmodule Scheduling.Patients do
     |> Repo.all()
   end
 
+  @doc "Composable, unordered patients query with the same id filters as list_patients/1."
+  def patients_query(filters \\ %{}) do
+    Patient |> apply_patient_filters(Map.new(filters))
+  end
+
   defp apply_patient_filters(query, filters) do
     Enum.reduce(filters, query, fn
       {:core_patient_id, id}, q when is_binary(id) -> where(q, [p], p.core_patient_id == ^id)

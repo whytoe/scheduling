@@ -17,6 +17,9 @@ defmodule Scheduling.Catalog do
     |> Repo.all()
   end
 
+  @doc "Composable, unordered capabilities query for keyset-paginated reads."
+  def capabilities_query, do: Capability
+
   @doc "Fetches a capability by id. Raises if missing."
   def get_capability!(id), do: Repo.get!(Capability, id)
 
@@ -133,6 +136,9 @@ defmodule Scheduling.Catalog do
     |> Repo.all()
     |> Repo.preload(:capabilities)
   end
+
+  @doc "Composable diagnoses query (capabilities preloaded) for keyset-paginated reads."
+  def diagnoses_query, do: from(d in Diagnosis, preload: :capabilities)
 
   @doc """
   Loads capabilities by id, ignoring ids that do not exist.

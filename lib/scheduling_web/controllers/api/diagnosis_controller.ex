@@ -7,6 +7,7 @@ defmodule SchedulingWeb.Api.DiagnosisController do
   use OpenApiSpex.ControllerSpecs
 
   alias Scheduling.Catalog
+  alias SchedulingWeb.Pagination
   alias SchedulingWeb.Schemas
 
   action_fallback SchedulingWeb.Api.FallbackController
@@ -18,8 +19,13 @@ defmodule SchedulingWeb.Api.DiagnosisController do
     responses: [ok: {"Diagnoses", "application/json", Schemas.DiagnosisList}]
   )
 
-  def index(conn, _params) do
-    json(conn, Enum.map(Catalog.list_diagnoses(), &serialize/1))
+  def index(conn, params) do
+    {page, cursor} =
+      Pagination.keyset(Catalog.diagnoses_query(), params, [{:name, :asc}, {:id, :asc}])
+
+    conn
+    |> Pagination.put_next_cursor(cursor)
+    |> json(Enum.map(page, &serialize/1))
   end
 
   operation(:show,

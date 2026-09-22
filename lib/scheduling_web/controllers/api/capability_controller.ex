@@ -8,6 +8,7 @@ defmodule SchedulingWeb.Api.CapabilityController do
   use OpenApiSpex.ControllerSpecs
 
   alias Scheduling.Catalog
+  alias SchedulingWeb.Pagination
   alias SchedulingWeb.Schemas
 
   action_fallback SchedulingWeb.Api.FallbackController
@@ -22,9 +23,13 @@ defmodule SchedulingWeb.Api.CapabilityController do
     ]
   )
 
-  def index(conn, _params) do
-    capabilities = Catalog.list_capabilities()
-    json(conn, Enum.map(capabilities, &serialize/1))
+  def index(conn, params) do
+    {page, cursor} =
+      Pagination.keyset(Catalog.capabilities_query(), params, [{:name, :asc}, {:id, :asc}])
+
+    conn
+    |> Pagination.put_next_cursor(cursor)
+    |> json(Enum.map(page, &serialize/1))
   end
 
   operation(:show,
