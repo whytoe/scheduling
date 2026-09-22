@@ -676,9 +676,14 @@ Pagination walks by id desc. For strictly chronological order across
 pages, combine `?since=` for the time window with batched id paging
 inside it.
 
-Other list endpoints (capabilities, diagnoses, patients, offices,
-visits, queue, handoffs) currently return all rows; pagination on those
-is tracked in a follow-up bead.
+The other list endpoints — **capabilities, diagnoses, patients, offices,
+visits, queue_entries, handoffs** — paginate the same way
+(`?limit=N&after=<cursor>`, `X-Next-Cursor` header), with one difference: each
+keeps its own natural ordering (catalogs by name, visits by start time, the
+queue by priority then arrival), so `after` there is an **opaque cursor** rather
+than a bare id. Echo the `X-Next-Cursor` value back verbatim; do not parse it.
+`queue_entries?status=all` walks a single oldest-first order across both status
+groups (the unpaginated version returned waiting-then-active).
 
 Events are written inside `Ecto.Multi.transaction/0` so the row commits
 with the operation — no half-state where an action succeeds but the

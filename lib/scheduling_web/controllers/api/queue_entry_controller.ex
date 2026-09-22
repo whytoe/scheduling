@@ -12,6 +12,7 @@ defmodule SchedulingWeb.Api.QueueEntryController do
   alias Scheduling.Queue
   alias SchedulingWeb.Api.Actor
   alias SchedulingWeb.ErrorEnvelope
+  alias SchedulingWeb.Pagination
   alias SchedulingWeb.Schemas
 
   action_fallback SchedulingWeb.Api.FallbackController
@@ -71,19 +72,23 @@ defmodule SchedulingWeb.Api.QueueEntryController do
   def index(conn, params) do
     filters = queue_filters(params)
 
-    entries =
+    # Each status has its own natural order, which the cursor's keyset must
+    # match. `all` spans two status groups with no shared sort, so it walks a
+    # single coherent order — oldest first — rather than the grouped
+    # waiting-then-active concatenation the unpaginated version returned.
+    {status, order} =
       case Map.get(params, "status", "waiting") do
-        "active" ->
-          Queue.list_active_entries(filters)
-
-        "all" ->
-          Queue.list_waiting_entries(filters) ++ Queue.list_active_entries(filters)
-
-        _ ->
-          Queue.list_waiting_entries(filters)
+        "active" -> {:active, [{:inserted_at, :asc}, {:id, :asc}]}
+        "all" -> {:all, [{:inserted_at, :asc}, {:id, :asc}]}
+        _ -> {:waiting, [{:priority, :desc}, {:inserted_at, :asc}, {:id, :asc}]}
       end
 
-    json(conn, Enum.map(entries, &serialize/1))
+    {page, cursor} =
+      Pagination.keyset(Queue.entries_query(status: status, filters: filters), params, order)
+
+    conn
+    |> Pagination.put_next_cursor(cursor)
+    |> json(Enum.map(page, &serialize/1))
   end
 
   defp queue_filters(params) do

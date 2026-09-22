@@ -122,6 +122,28 @@ defmodule Scheduling.Queue do
     |> Repo.preload([:patient, :assigned_office, :required_capabilities])
   end
 
+  @doc """
+  Composable, unordered queue-entries query for keyset-paginated reads.
+
+  `:status` selects the set — `:waiting` (default), `:active` (assigned /
+  in_service), or `:all` (both) — and `:filters` carries the same patient-id
+  filters as the list functions. Ordering is left to the caller so it can match
+  the cursor's keyset. Preloads the associations `serialize/1` reads.
+  """
+  @spec entries_query(keyword()) :: Ecto.Query.t()
+  def entries_query(opts \\ []) do
+    statuses = entry_status_filter(Keyword.get(opts, :status, :waiting))
+
+    QueueEntry
+    |> where([e], e.status in ^statuses)
+    |> apply_patient_id_filters(Keyword.get(opts, :filters, %{}))
+    |> preload([:patient, :assigned_office, :required_capabilities])
+  end
+
+  defp entry_status_filter(:waiting), do: [:waiting]
+  defp entry_status_filter(:active), do: QueueEntry.active_statuses()
+  defp entry_status_filter(:all), do: [:waiting | QueueEntry.active_statuses()]
+
   defp apply_patient_id_filters(query, filters) do
     filters = Map.new(filters)
 

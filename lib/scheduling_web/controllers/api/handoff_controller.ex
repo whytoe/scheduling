@@ -9,6 +9,7 @@ defmodule SchedulingWeb.Api.HandoffController do
 
   alias Scheduling.Handoffs
   alias SchedulingWeb.Api.Actor
+  alias SchedulingWeb.Pagination
   alias SchedulingWeb.Schemas
 
   action_fallback SchedulingWeb.Api.FallbackController
@@ -30,19 +31,25 @@ defmodule SchedulingWeb.Api.HandoffController do
   )
 
   def index(conn, params) do
-    handoffs =
+    opts =
       case Map.get(params, "office_id") do
         nil ->
-          Handoffs.list_pending()
+          []
 
         id ->
           case Integer.parse(to_string(id)) do
-            {int_id, ""} -> Handoffs.list_pending_for_office(int_id)
-            _ -> []
+            {int_id, ""} -> [office_id: int_id]
+            # An unparseable office_id matches nothing, as it did before.
+            _ -> [office_id: -1]
           end
       end
 
-    json(conn, Enum.map(handoffs, &serialize/1))
+    {page, cursor} =
+      Pagination.keyset(Handoffs.pending_query(opts), params, [{:inserted_at, :asc}, {:id, :asc}])
+
+    conn
+    |> Pagination.put_next_cursor(cursor)
+    |> json(Enum.map(page, &serialize/1))
   end
 
   operation(:show,

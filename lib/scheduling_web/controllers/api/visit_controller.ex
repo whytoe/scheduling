@@ -13,6 +13,7 @@ defmodule SchedulingWeb.Api.VisitController do
 
   alias Scheduling.Visits
   alias SchedulingWeb.Api.Actor
+  alias SchedulingWeb.Pagination
   alias SchedulingWeb.Schemas
 
   action_fallback SchedulingWeb.Api.FallbackController
@@ -25,8 +26,13 @@ defmodule SchedulingWeb.Api.VisitController do
     responses: [ok: {"Visits", "application/json", Schemas.VisitList}]
   )
 
-  def index(conn, _params) do
-    json(conn, Enum.map(Visits.list_visits(), &serialize/1))
+  def index(conn, params) do
+    {page, cursor} =
+      Pagination.keyset(Visits.visits_query(), params, [{:started_at, :desc}, {:id, :desc}])
+
+    conn
+    |> Pagination.put_next_cursor(cursor)
+    |> json(Enum.map(page, &serialize/1))
   end
 
   operation(:show,

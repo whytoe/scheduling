@@ -7,6 +7,7 @@ defmodule SchedulingWeb.Api.OfficeController do
   use OpenApiSpex.ControllerSpecs
 
   alias Scheduling.Offices
+  alias SchedulingWeb.Pagination
   alias SchedulingWeb.Schemas
 
   action_fallback SchedulingWeb.Api.FallbackController
@@ -18,8 +19,13 @@ defmodule SchedulingWeb.Api.OfficeController do
     responses: [ok: {"Offices", "application/json", Schemas.OfficeList}]
   )
 
-  def index(conn, _params) do
-    json(conn, Enum.map(Offices.list_offices(), &serialize/1))
+  def index(conn, params) do
+    {page, cursor} =
+      Pagination.keyset(Offices.offices_query(), params, [{:name, :asc}, {:id, :asc}])
+
+    conn
+    |> Pagination.put_next_cursor(cursor)
+    |> json(Enum.map(page, &serialize/1))
   end
 
   operation(:show,
