@@ -1441,6 +1441,51 @@ defmodule SchedulingWeb.Schemas do
     })
   end
 
+  defmodule WebhookDelivery do
+    @moduledoc "One durable delivery attempt-with-retries for an event."
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "WebhookDelivery",
+      type: :object,
+      properties: %{
+        id: %Schema{type: :integer},
+        subscription_id: %Schema{type: :integer},
+        event_id: %Schema{type: :integer, nullable: true, description: "Source visit_event id"},
+        event_type: %Schema{type: :string},
+        status: %Schema{
+          type: :string,
+          enum: ["pending", "delivered", "dead"],
+          description: "`dead` is the dead-letter queue — every attempt failed"
+        },
+        attempts: %Schema{type: :integer},
+        last_response_status: %Schema{type: :integer, nullable: true},
+        last_error: %Schema{type: :string, nullable: true},
+        next_retry_at: %Schema{
+          type: :string,
+          format: :"date-time",
+          nullable: true,
+          description: "When the next attempt is due; null once terminal"
+        },
+        delivered_at: %Schema{type: :string, format: :"date-time", nullable: true},
+        inserted_at: %Schema{type: :string, format: :"date-time"},
+        updated_at: %Schema{type: :string, format: :"date-time"}
+      },
+      required: [:id, :subscription_id, :event_type, :status, :attempts]
+    })
+  end
+
+  defmodule WebhookDeliveryList do
+    require OpenApiSpex
+
+    OpenApiSpex.schema(%{
+      title: "WebhookDeliveryList",
+      type: :array,
+      items: SchedulingWeb.Schemas.WebhookDelivery
+    })
+  end
+
   defmodule HealthResponse do
     @moduledoc "Health probe response body."
     require OpenApiSpex

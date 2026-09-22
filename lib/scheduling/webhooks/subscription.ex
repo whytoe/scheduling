@@ -21,6 +21,11 @@ defmodule Scheduling.Webhooks.Subscription do
     field :active, :boolean, default: true
     field :description, :string
 
+    # Consecutive failed delivery attempts, reset to 0 on any success. Managed
+    # by Scheduling.Webhooks, not the CRUD changeset — an operator does not set
+    # it. Auto-disable trips when it crosses the configured threshold.
+    field :consecutive_failures, :integer, default: 0
+
     timestamps(type: :utc_datetime)
   end
 

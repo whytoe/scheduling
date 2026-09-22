@@ -27,6 +27,10 @@ config :scheduling, Scheduling.Mailer, adapter: Swoosh.Adapters.Test
 # off background HTTP requests. The webhook tests turn this on per-test.
 config :scheduling, :webhooks_enabled, false
 
+# The delivery sweeper is a background clock; tests drive Webhooks.deliver_due/1
+# directly and leave it off, like the other sweepers.
+config :scheduling, Scheduling.Webhooks, sweeper_enabled: false
+
 # Hold the board's one-shot arrival highlight open for the whole test run. At
 # the 450ms production value the class can clear between the PubSub broadcast
 # and the assertion when the suite is running 20 cases in parallel.

@@ -38,6 +38,9 @@ defmodule Scheduling.Application do
         # Drops idempotency keys past their retention window, and releases
         # claims left behind by a request that died mid-flight.
         Scheduling.Idempotency.Sweeper.child_spec_if_enabled(),
+        # Drains the outbound webhook delivery queue: sends enqueued deliveries,
+        # retries failures on a backoff, dead-letters the ones that never land.
+        Scheduling.Webhooks.Sweeper.child_spec_if_enabled(),
         # Per-token request quota. Runs ahead of authentication, so it also
         # covers the expensive path: an invalid token still costs an
         # introspection round-trip, and refusals are never cached.
