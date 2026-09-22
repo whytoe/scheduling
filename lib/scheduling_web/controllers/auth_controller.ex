@@ -35,6 +35,7 @@ defmodule SchedulingWeb.AuthController do
 
   alias Scheduling.Auth
   alias Scheduling.Auth.Identity
+  alias Scheduling.Auth.LocationClaim
   alias Scheduling.Auth.Tokens
   alias SchedulingWeb.Plugs.BrowserAuth
 
@@ -187,6 +188,9 @@ defmodule SchedulingWeb.AuthController do
            opts
          ) do
       {:ok, token} ->
+        # sc-24q: record what the real token carries in astrum_location. Reads
+        # the raw claim before Identity normalises it away; diagnostic only.
+        LocationClaim.observe(token_id_claims(token))
         sign_in(conn, Tokens.identity_from_login(token))
 
       {:error, reason} ->
@@ -194,6 +198,12 @@ defmodule SchedulingWeb.AuthController do
         denied(conn)
     end
   end
+
+  # The ID-token claims, or an empty map when a token arrives without one. The
+  # browser flow always carries an ID token; this only keeps the observation
+  # above from caring if one somehow does not.
+  defp token_id_claims(%Oidcc.Token{id: %Oidcc.Token.Id{claims: claims}}), do: claims
+  defp token_id_claims(_token), do: %{}
 
   defp sign_in(conn, %Identity{} = identity) do
     cond do
