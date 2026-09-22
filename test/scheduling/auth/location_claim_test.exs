@@ -25,7 +25,9 @@ defmodule Scheduling.Auth.LocationClaimTest do
   defp observe(claims), do: capture_log(fn -> assert LocationClaim.observe(claims) == :ok end)
 
   defp seed_location(core_id) do
-    Repo.insert!(Location.changeset(%Location{}, %{core_location_id: core_id, name: "Site #{core_id}"}))
+    Repo.insert!(
+      Location.changeset(%Location{}, %{core_location_id: core_id, name: "Site #{core_id}"})
+    )
   end
 
   describe "the no-site question (sc-24q #3)" do
