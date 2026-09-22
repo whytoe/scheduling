@@ -344,6 +344,28 @@ defmodule Scheduling.Webhooks do
 
   defp now, do: DateTime.utc_now() |> DateTime.truncate(:second)
 
+  @doc """
+  Fires a synthetic `webhook.test` event at a subscription so an integrator can
+  verify their endpoint and signature handling without waiting for a real event.
+
+  Synchronous and one-off: it POSTs down the same `deliver/2` path a real event
+  takes — same headers, same signature scheme — and returns the receiver's HTTP
+  status (or a transport error) so the result is visible inline. It does not
+  record a delivery or enqueue anything.
+  """
+  @spec send_test(Subscription.t()) :: {:ok, integer()} | {:error, term()}
+  def send_test(%Subscription{} = sub) do
+    deliver(sub, %{
+      type: "webhook.test",
+      payload: %{
+        message:
+          "Test delivery from Scheduling. If your receiver verified this " <>
+            "signature, it is set up correctly."
+      },
+      occurred_at: DateTime.utc_now() |> DateTime.truncate(:second)
+    })
+  end
+
   # --- Signing ---
 
   @doc """

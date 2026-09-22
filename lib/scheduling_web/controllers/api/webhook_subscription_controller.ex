@@ -93,6 +93,33 @@ defmodule SchedulingWeb.Api.WebhookSubscriptionController do
     end
   end
 
+  operation(:test,
+    summary: "Send a test delivery to a subscription",
+    description:
+      "Fires a synthetic `webhook.test` event at the subscription's URL, down " <>
+        "the same signed path a real event takes, so an integrator can verify " <>
+        "their endpoint and signature handling. Synchronous: the receiver's " <>
+        "HTTP status (or the transport error) is returned inline. Records " <>
+        "nothing — this is not a real delivery.",
+    parameters: [id: [in: :path, type: :integer]],
+    responses: [
+      ok: {"Test result", "application/json", Schemas.WebhookTestResult},
+      not_found: {"Not found", "application/json", Schemas.NotFoundError}
+    ]
+  )
+
+  def test(conn, %{"id" => id}) do
+    with {:ok, sub} <- fetch(id) do
+      case Webhooks.send_test(sub) do
+        {:ok, status} ->
+          json(conn, %{delivered: status in 200..299, response_status: status})
+
+        {:error, reason} ->
+          json(conn, %{delivered: false, error: inspect(reason)})
+      end
+    end
+  end
+
   defp fetch(id) do
     case Integer.parse(to_string(id)) do
       {int_id, ""} ->
