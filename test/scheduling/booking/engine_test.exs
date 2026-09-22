@@ -472,4 +472,56 @@ defmodule Scheduling.Booking.EngineTest do
       assert Appointment.starts_at(b) == DateTime.add(@start, 20 * 60, :second)
     end
   end
+
+  describe "reclaim_rerouted_slots/2 on a provisional booking" do
+    setup do
+      cap = capability_fixture("Consult")
+      a = office_fixture([cap.id])
+      b = office_fixture([cap.id])
+      slots_for(a, 4)
+      slots_for(b, 4)
+      service = service_fixture([cap.id], 20)
+      {:ok, appointment} = book(%{patient_id: patient_fixture().id, service_code: service.code})
+      assert appointment.binding == :provisional
+      %{appointment: appointment, office_ids: [a.id, b.id]}
+    end
+
+    test "releases the slots when the patient was placed in a different office", ctx do
+      booked = Appointment.office_id(ctx.appointment)
+      elsewhere = Enum.find(ctx.office_ids, &(&1 != booked))
+      slot_ids = Enum.map(ctx.appointment.slots, & &1.id)
+
+      assert {:ok, released} = Booking.reclaim_rerouted_slots(ctx.appointment.id, elsewhere)
+      assert released == length(slot_ids)
+      assert Enum.all?(slot_ids, &(Booking.get_slot!(&1).status == :open))
+
+      # Idempotent: nothing left to hand back on a second call.
+      assert {:ok, 0} = Booking.reclaim_rerouted_slots(ctx.appointment.id, elsewhere)
+    end
+
+    test "keeps the slots when the patient was placed back in their own room", ctx do
+      booked = Appointment.office_id(ctx.appointment)
+
+      assert {:ok, 0} = Booking.reclaim_rerouted_slots(ctx.appointment.id, booked)
+      assert Enum.all?(ctx.appointment.slots, &(Booking.get_slot!(&1.id).status == :booked))
+    end
+  end
+
+  describe "reclaim_rerouted_slots/2 guards" do
+    test "never touches a committed appointment, whatever office it is asked about" do
+      cap = capability_fixture("CT scanner")
+      office = office_fixture([cap.id])
+      slots_for(office, 4)
+      service = service_fixture([cap.id], 20)
+      {:ok, appt} = book(%{patient_id: patient_fixture().id, service_code: service.code})
+      assert appt.binding == :committed
+
+      assert {:ok, 0} = Booking.reclaim_rerouted_slots(appt.id, office.id + 1)
+      assert Enum.all?(appt.slots, &(Booking.get_slot!(&1.id).status == :booked))
+    end
+
+    test "is a no-op for an appointment that does not exist" do
+      assert {:ok, 0} = Booking.reclaim_rerouted_slots(-1, 1)
+    end
+  end
 end

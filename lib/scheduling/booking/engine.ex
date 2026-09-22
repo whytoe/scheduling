@@ -188,6 +188,47 @@ defmodule Scheduling.Booking.Engine do
     end
   end
 
+  @doc """
+  Hands back the slots a provisional appointment set aside, once the arriving
+  patient has been placed in a *different* office than the one holding them.
+
+  A provisional booking reserves a concrete slot in one room, but the matcher
+  routes on live capacity at arrival and may send the patient elsewhere. When it
+  does, the original room's slots would otherwise stay `:booked` for the whole
+  window, reserving capacity for a patient who is not there. That reservation
+  protects no one: the arrival matcher is slot-blind — `Scheduling.Matching`
+  scores an office on live queue load, never on booked slots — so holding the
+  slot cannot route this patient back to that room, and only blocks others from
+  booking it. Handing it back is safe for the same reason: releasing cannot make
+  the matcher over-fill the room.
+
+  A no-op returning `{:ok, 0}` unless the appointment is provisional, still holds
+  slots, and those slots are in an office other than `placed_office_id`. So a
+  committed appointment, a patient the matcher put back in their own room, and an
+  appointment whose slots were already released all pass through untouched — the
+  same shape that makes `cancel/1` idempotent.
+
+  See docs/booking.md 'Reclaiming a rerouted provisional's slots'.
+  """
+  @spec reclaim_rerouted_slots(integer(), integer()) :: {:ok, non_neg_integer()}
+  def reclaim_rerouted_slots(appointment_id, placed_office_id)
+      when is_integer(appointment_id) and is_integer(placed_office_id) do
+    case Repo.get(Appointment, appointment_id) do
+      nil ->
+        {:ok, 0}
+
+      appointment ->
+        appointment = Repo.preload(appointment, :slots)
+
+        if appointment.binding == :provisional and
+             Appointment.office_id(appointment) not in [nil, placed_office_id] do
+          {:ok, release_slots(Repo, appointment.id)}
+        else
+          {:ok, 0}
+        end
+    end
+  end
+
   # Not a compare-and-swap: nobody else holds these. Zero rows means the
   # release already happened, which is what makes cancel/1 idempotent.
   defp release_slots(repo, appointment_id) do

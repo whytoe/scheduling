@@ -197,6 +197,55 @@ defmodule Scheduling.Booking.ArrivalTest do
       # A is full, so the only room left is B — decided now, not at booking.
       assert assigned.assigned_office_id == ctx.b.id
     end
+
+    test "reroutes hand the originally-booked room's slots back (sc-arg)", ctx do
+      # Whichever room the booking reserved, and the other one.
+      booked_office_id = hd(ctx.appointment.slots).office_id
+      reserved_slot_ids = Enum.map(ctx.appointment.slots, & &1.id)
+      booked_office = Enum.find([ctx.a, ctx.b], &(&1.id == booked_office_id))
+      other = Enum.find([ctx.a, ctx.b], &(&1.id != booked_office_id))
+
+      # Fill the booked room so the matcher must place the patient elsewhere.
+      fill_office(booked_office, ctx.cap)
+
+      {:ok, result} = Booking.arrive(ctx.appointment)
+      {:ok, assigned, _} = Queue.accept(Queue.get_entry!(result.entry.id))
+
+      assert assigned.assigned_office_id == other.id
+      # The reservation the patient walked away from is capacity again.
+      assert Enum.all?(reserved_slot_ids, &(Booking.get_slot!(&1).status == :open))
+    end
+
+    test "no reroute keeps the slots booked — the patient is in that room", ctx do
+      booked_office_id = hd(ctx.appointment.slots).office_id
+      reserved_slot_ids = Enum.map(ctx.appointment.slots, & &1.id)
+      other = Enum.find([ctx.a, ctx.b], &(&1.id != booked_office_id))
+
+      # Fill the *other* room so the matcher lands the patient in their own.
+      fill_office(other, ctx.cap)
+
+      {:ok, result} = Booking.arrive(ctx.appointment)
+      {:ok, assigned, _} = Queue.accept(Queue.get_entry!(result.entry.id))
+
+      assert assigned.assigned_office_id == booked_office_id
+      assert Enum.all?(reserved_slot_ids, &(Booking.get_slot!(&1).status == :booked))
+    end
+  end
+
+  # Occupy every intake slot in an office by assigning fresh entries directly —
+  # deterministic, unlike routing fillers through accept/2.
+  defp fill_office(office, cap) do
+    for _ <- 1..office.intake_capacity do
+      {:ok, entry} =
+        Queue.create_entry(%{
+          "patient_id" => patient_fixture().id,
+          "required_capability_ids" => [cap.id]
+        })
+
+      entry
+      |> Scheduling.Queue.QueueEntry.assignment_changeset(office)
+      |> Repo.update!()
+    end
   end
 
   describe "arriving twice" do
