@@ -116,6 +116,26 @@ defmodule SchedulingWeb.BoardLiveTest do
       assert has_element?(live, "#board-waiting-count", "1")
     end
 
+    test "survives a withdrawn-handoff broadcast (undo-arrive) without crashing", %{conn: conn} do
+      xray = capability_fixture("XRay")
+      office = office_fixture("Room A", 1, [xray.id])
+      entry = waiting_entry("Jane Doe", [xray])
+      {:ok, _assigned, _} = Queue.accept(Queue.get_entry!(entry.id))
+      [handoff] = Scheduling.Handoffs.list_pending_for_office(office.id)
+
+      {:ok, live, _html} = live(conn, ~p"/board")
+
+      # Undo-arrive withdraws the pending handoff, broadcasting :handoff_withdrawn
+      # to the board. Before the handle_info clause existed this crashed the LV.
+      {:ok, _} = Scheduling.Handoffs.withdraw(handoff)
+
+      # The LiveView survived the broadcast and re-rendered (before the fix it
+      # crashed here). The entry itself is untouched by a handoff withdrawal, so
+      # it is still assigned.
+      assert has_element?(live, "#board-active-count", "1")
+      assert render(live) =~ "Board"
+    end
+
     # The arrival-animation test lives in board_arrival_test.exs — it cannot run
     # async. See the moduledoc there.
   end
