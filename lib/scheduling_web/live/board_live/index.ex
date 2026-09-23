@@ -54,6 +54,13 @@ defmodule SchedulingWeb.BoardLive.Index do
     {:noreply, load_board(socket, true)}
   end
 
+  # An undone arrival withdraws its pending handoff (Scheduling.Handoffs.withdraw/2).
+  # The incoming patient is no longer coming, so refresh — without this clause the
+  # board LiveView crashes on the broadcast.
+  def handle_info({:handoff_withdrawn, _handoff}, socket) do
+    {:noreply, load_board(socket, true)}
+  end
+
   # Clears the one-shot arrival highlight once the animation has played.
   def handle_info(:clear_arrived, socket) do
     {:noreply,
