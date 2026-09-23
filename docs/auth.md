@@ -571,10 +571,20 @@ disables it.
 Two things are worth knowing about how it trusts the answer. oidcc's
 `client_self_only` is deliberately **off** — every token this API sees was
 issued to another client, so the default would reject exactly the traffic the
-API exists for. In its place `active`, `exp` and `aud` are checked here. And
-because RFC 7662 does not require `aud` in the response, a provider that omits
-it reduces that check to "any live token from this realm carrying a role we
-recognise"; the absence is logged. See `Scheduling.Auth.Introspection`.
+API exists for. In its place `active`, `exp` and `aud` are checked here.
+
+But **ac-core does not send `aud` on introspection responses** — confirmed
+against a real machine token, and RFC 7662 does not require it. Requiring it
+anyway would refuse every service token and reproduce the outage the
+introspection fallback exists to prevent, so an absent `aud` is **accepted, and
+that is a deliberate decision, not a gap**: where it is missing the effective
+rule is "any live token from this realm carrying a role this app recognises."
+The blast radius is bounded — `SchedulingWeb.Plugs.ApiAuth` still enforces
+one-tenant tenancy and per-endpoint roles — but it is wider than an audience
+check would draw. The intended tightening is therefore **not** to require `aud`
+(ac-core will not send it) but to require a scheduling-namespace **scope** as
+the substitute, once ac-core issues one — see `docs/ac-core-asks.md` asks 2 and
+3. Each acceptance is logged. See `Scheduling.Auth.Introspection`.
 
 Introspection authenticates as the **machine** client (`CORE_CLIENT_ID`) where
 one is configured, falling back to the browser client otherwise. It used to use
