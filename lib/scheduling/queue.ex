@@ -476,6 +476,45 @@ defmodule Scheduling.Queue do
   end
 
   @doc """
+  Retries `accept/2` on entries stuck in `:waiting` after a **transient**
+  failure — intake was unreachable (`compliance_unavailable`) or no office had
+  capacity (`no_eligible_office`). This is the automatic half of "when intake
+  recovers, clinicians shouldn't have to re-accept each one" (sc-ais). Pacing
+  lives in `Scheduling.Queue.ReplayScanner`, which calls this on an interval;
+  `:limit` caps one pass.
+
+  Only entries whose *latest* routing decision was transient are touched
+  (`Scheduling.Audit.stuck_entry_ids/1`), so a genuine `compliance_failed` — the
+  patient has not completed a form — is never auto-retried. Returns a summary of
+  how many were attempted, how many are now assigned, and how many are still
+  waiting (a retry that failed again, left for the next pass).
+  """
+  @spec replay_pending(keyword()) :: %{
+          attempted: non_neg_integer(),
+          assigned: non_neg_integer(),
+          still_waiting: non_neg_integer()
+        }
+  def replay_pending(opts \\ []) do
+    {accept_opts, query_opts} = Keyword.split(opts, [:location_ids, :accepted_by])
+
+    outcomes =
+      query_opts
+      |> Audit.stuck_entry_ids()
+      |> Enum.map(fn id ->
+        case accept(get_entry!(id), accept_opts) do
+          {:ok, _assigned, _result} -> :assigned
+          _ -> :still_waiting
+        end
+      end)
+
+    %{
+      attempted: length(outcomes),
+      assigned: Enum.count(outcomes, &(&1 == :assigned)),
+      still_waiting: Enum.count(outcomes, &(&1 == :still_waiting))
+    }
+  end
+
+  @doc """
   Completes service for an in-progress entry: transitions it to `:completed`
   and thereby frees the assigned office's intake capacity (a completed entry no
   longer counts toward load). Broadcasts the capacity change on the board topic

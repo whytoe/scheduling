@@ -83,6 +83,48 @@ defmodule Scheduling.Audit do
     |> Repo.preload([:patient, :chosen_office, :queue_entry])
   end
 
+  # Rationale prefixes for a **transient** accept failure — one a later retry
+  # could clear. Compliance *unavailable* is intake being down; *no eligible
+  # office* is a full or missing office. Deliberately NOT "Compliance check
+  # failed", which means the patient genuinely has not completed a form —
+  # retrying that changes nothing until they do.
+  @transient_failures ["Compliance check unavailable%", "No eligible office%"]
+
+  @doc """
+  Ids of still-`:waiting` queue entries whose **most recent** routing decision
+  was a transient failure — the ones that piled up while intake was down or no
+  office had capacity, and that a retry could now clear. Oldest first, capped at
+  `:limit` (default 50). Backs `Scheduling.Queue.replay_pending/1`.
+  """
+  @spec stuck_entry_ids(keyword()) :: [integer()]
+  def stuck_entry_ids(opts \\ []) do
+    limit = Keyword.get(opts, :limit, 50)
+
+    latest =
+      from(d in RoutingDecision,
+        distinct: d.queue_entry_id,
+        order_by: [asc: d.queue_entry_id, desc: d.inserted_at, desc: d.id],
+        select: %{queue_entry_id: d.queue_entry_id, rationale: d.rationale}
+      )
+
+    from(e in QueueEntry,
+      join: l in subquery(latest),
+      on: l.queue_entry_id == e.id,
+      where: e.status == :waiting,
+      where: ^transient_rationale_dynamic(),
+      order_by: [asc: e.inserted_at, asc: e.id],
+      limit: ^limit,
+      select: e.id
+    )
+    |> Repo.all()
+  end
+
+  defp transient_rationale_dynamic do
+    Enum.reduce(@transient_failures, dynamic(false), fn pattern, acc ->
+      dynamic([_e, l], ^acc or like(l.rationale, ^pattern))
+    end)
+  end
+
   # --- VisitEvent ---
 
   @doc """

@@ -41,6 +41,9 @@ defmodule Scheduling.Application do
         # Drains the outbound webhook delivery queue: sends enqueued deliveries,
         # retries failures on a backoff, dead-letters the ones that never land.
         Scheduling.Webhooks.Sweeper.child_spec_if_enabled(),
+        # Retries queue entries stuck :waiting after a transient accept failure
+        # (intake down, or every office momentarily full) once the cause clears.
+        Scheduling.Queue.ReplayScanner.child_spec_if_enabled(),
         # Per-token request quota. Runs ahead of authentication, so it also
         # covers the expensive path: an invalid token still costs an
         # introspection round-trip, and refusals are never cached.
