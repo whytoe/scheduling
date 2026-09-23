@@ -263,10 +263,26 @@ defmodule SchedulingWeb.Api.QueueEntryController do
   end
 
   operation(:complete,
-    summary: "Complete an in-service entry",
+    summary: "Complete an in-service entry (optionally with a follow-up disposition)",
     description:
-      "Transitions the entry to `:completed` and frees the assigned office's intake capacity.",
+      "Transitions the entry to `:completed` and frees the assigned office's " <>
+        "intake capacity.\n\n" <>
+        "**With a disposition** — pass `next_entry` and the patient is not simply " <>
+        "done: the entry becomes `:discharged_with_followup` and a new queue " <>
+        "entry is created within the **same visit** for the follow-up. " <>
+        "`next_entry` accepts `diagnosis_id` **or** `required_capability_ids` " <>
+        "(explicit wins), `required_compliance_refs`, and an optional " <>
+        "`scheduled_for` (a future time makes the follow-up `:scheduled`, " <>
+        "invisible to the matcher until due; otherwise `:waiting`). The " <>
+        "follow-up's patient and visit come from the completing entry and " <>
+        "cannot be overridden.\n\n" <>
+        "The response is the completing entry (base shape unchanged); when a " <>
+        "disposition was given it additionally carries a `followup` object (a " <>
+        "queue entry).",
     parameters: [id: [in: :path, description: "Queue entry id", type: :integer]],
+    request_body:
+      {"Disposition (optional)", "application/json", Schemas.QueueEntryCompleteRequest,
+       required: false},
     responses: [
       ok: {"Completed", "application/json", Schemas.QueueEntry},
       not_found: {"Not found", "application/json", Schemas.NotFoundError},
@@ -275,9 +291,22 @@ defmodule SchedulingWeb.Api.QueueEntryController do
   )
 
   def complete(conn, %{"id" => id} = body) do
-    with {:ok, entry} <- fetch(id),
-         {:ok, completed} <- Queue.complete(entry, Actor.opts(conn, body)) do
-      json(conn, serialize(reload(completed)))
+    with {:ok, entry} <- fetch(id) do
+      case body["next_entry"] do
+        next when is_map(next) ->
+          with {:ok, discharged, followup} <-
+                 Queue.discharge_with_followup(entry, next, Actor.opts(conn, body)) do
+            response =
+              serialize(reload(discharged)) |> Map.put(:followup, serialize(reload(followup)))
+
+            json(conn, response)
+          end
+
+        _ ->
+          with {:ok, completed} <- Queue.complete(entry, Actor.opts(conn, body)) do
+            json(conn, serialize(reload(completed)))
+          end
+      end
     end
   end
 
