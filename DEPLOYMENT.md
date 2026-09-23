@@ -274,3 +274,19 @@ The image is generic. Pick whichever platform you prefer:
 The image has no platform-specific assumptions. If your platform can run a
 container, give it a `DATABASE_URL`, and route HTTP to port 4000, the app
 will boot, migrate, and serve.
+
+### lmfarm: don't deploy during registry garbage collection
+
+On the lmfarm deployment, do **not** trigger a build between **03:00 and ~03:15
+UTC**. The registry's nightly garbage collection runs in that window, and a
+build whose image is pushed while GC is computing what to keep can have its
+manifest deleted moments after the build reports "succeeded" — leaving a build
+marked green whose image cannot be pulled. Every rollout and redeploy then hits
+`ErrImagePull` / `ImagePullBackOff`; production is unaffected because the prior
+revision keeps serving.
+
+Recovery: a plain `lmfarm services redeploy` does **not** help — it reuses the
+deleted digest. Trigger a **fresh build** (push a new commit to `main`) so a new,
+resolvable digest is pushed. Recorded as platform incident `cabd05f1`
+(2026-09-23); the platform is separately fixing GC so it no longer runs
+concurrently with image pushes.
