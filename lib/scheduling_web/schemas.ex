@@ -682,6 +682,57 @@ defmodule SchedulingWeb.Schemas do
     })
   end
 
+  defmodule QueueEntryCompleteRequest do
+    @moduledoc "Optional disposition body for POST /queue_entries/:id/complete."
+    require OpenApiSpex
+    alias OpenApiSpex.Schema
+
+    OpenApiSpex.schema(%{
+      title: "QueueEntryCompleteRequest",
+      type: :object,
+      properties: %{
+        next_entry: %Schema{
+          type: :object,
+          nullable: true,
+          description:
+            "When present, the entry is discharged with a follow-up: a new queue " <>
+              "entry is created in the same visit. Omit for a plain completion.",
+          properties: %{
+            diagnosis_id: %Schema{
+              type: :integer,
+              nullable: true,
+              description:
+                "Transient: expanded to the diagnosis's default capabilities, then discarded. " <>
+                  "Ignored if required_capability_ids is given."
+            },
+            required_capability_ids: %Schema{
+              type: :array,
+              items: %Schema{type: :integer},
+              description: "Explicit capabilities for the follow-up; wins over diagnosis_id."
+            },
+            required_compliance_refs: %Schema{
+              type: :array,
+              items: %Schema{type: :string},
+              description: "Opaque intake references the follow-up must satisfy."
+            },
+            scheduled_for: %Schema{
+              type: :string,
+              format: :"date-time",
+              nullable: true,
+              description: "Future time → follow-up is :scheduled until due; else :waiting."
+            }
+          }
+        }
+      },
+      example: %{
+        "next_entry" => %{
+          "required_capability_ids" => [3],
+          "scheduled_for" => "2026-09-24T09:00:00Z"
+        }
+      }
+    })
+  end
+
   defmodule WaitEstimate do
     @moduledoc "A queue entry's place in line, for a patient-facing view."
     require OpenApiSpex

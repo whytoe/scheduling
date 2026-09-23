@@ -551,6 +551,86 @@ defmodule Scheduling.Queue do
   end
 
   @doc """
+  Completes an entry **with a disposition**: the patient is done here, but a
+  follow-up is needed within the same visit.
+
+  In one transaction the completing entry moves to `:discharged_with_followup`
+  and a new queue entry is created for the follow-up, inheriting the same
+  `visit_id` (so the `Visit` stays one coherent thread) and this patient. The
+  follow-up's requirements come from `next_attrs` — `diagnosis_id` or an
+  explicit `required_capability_ids`, and `required_compliance_refs` — exactly
+  as `create_entry/2` resolves them; an explicit capability list wins over a
+  diagnosis. A `scheduled_for` in the future makes the follow-up `:scheduled`
+  (invisible to the matcher until due); otherwise it is `:waiting`.
+
+  `patient_id` and `visit_id` are forced from the completing entry, so a caller
+  cannot redirect the follow-up to another patient or visit.
+
+  Emits `followup.scheduled` alongside the usual creation/transition events —
+  the signal a patient-notifications service consumes to tell the patient about
+  the follow-up (sc-nm5). Scheduling only announces it; delivery is external
+  (see docs/data-boundary.md), so the payload carries when and what-status,
+  never a clinical reason.
+
+  Returns `{:ok, discharged_entry, followup_entry}`, or `{:error, reason}` with
+  nothing changed. `complete/2` (no disposition) is unchanged.
+  """
+  @spec discharge_with_followup(QueueEntry.t(), map(), keyword()) ::
+          {:ok, QueueEntry.t(), QueueEntry.t()} | {:error, term()}
+  def discharge_with_followup(%QueueEntry{} = entry, next_attrs, opts \\ []) do
+    followup_attrs =
+      next_attrs
+      |> stringify_keys()
+      |> Map.put("patient_id", entry.patient_id)
+      |> Map.put("visit_id", entry.visit_id)
+
+    Ecto.Multi.new()
+    |> Ecto.Multi.update(
+      :discharged,
+      QueueEntry.transition_changeset(entry, :discharged_with_followup)
+    )
+    |> Ecto.Multi.run(:discharge_event, fn _repo, %{discharged: discharged} ->
+      Audit.record_event(%{
+        type: "queue_entry.discharged_with_followup",
+        visit_id: discharged.visit_id,
+        queue_entry_id: discharged.id,
+        patient_id: discharged.patient_id,
+        actor_type: Keyword.get(opts, :actor_type),
+        actor_id: Keyword.get(opts, :actor_id),
+        payload: %{assigned_office_id: discharged.assigned_office_id}
+      })
+    end)
+    |> Ecto.Multi.run(:followup, fn _repo, _changes ->
+      create_entry(followup_attrs, opts)
+    end)
+    |> Ecto.Multi.run(:followup_event, fn _repo, %{followup: followup} ->
+      Audit.record_event(%{
+        type: "followup.scheduled",
+        visit_id: followup.visit_id,
+        queue_entry_id: followup.id,
+        patient_id: followup.patient_id,
+        actor_type: Keyword.get(opts, :actor_type),
+        actor_id: Keyword.get(opts, :actor_id),
+        # When and what-status only. Serialised into every outbound webhook, so
+        # nothing clinical may enter it.
+        payload: %{
+          status: Atom.to_string(followup.status),
+          scheduled_for: followup.scheduled_for && DateTime.to_iso8601(followup.scheduled_for)
+        }
+      })
+    end)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{discharged: discharged, followup: followup}} ->
+        broadcast_board_change({:completed, discharged.id})
+        {:ok, Repo.preload(discharged, [:patient, :assigned_office]), followup}
+
+      {:error, _step, reason, _changes} ->
+        {:error, reason}
+    end
+  end
+
+  @doc """
   Moves every `:scheduled` entry whose time has arrived to `:waiting`.
 
   Driven by `Scheduling.Queue.Promoter`; see there for why this is a real
