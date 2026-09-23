@@ -31,6 +31,10 @@ config :scheduling, :webhooks_enabled, false
 # directly and leave it off, like the other sweepers.
 config :scheduling, Scheduling.Webhooks, sweeper_enabled: false
 
+# The replay scanner is a background clock; tests drive Queue.replay_pending/1
+# directly and leave it off.
+config :scheduling, Scheduling.Queue.ReplayScanner, enabled: false
+
 # Hold the board's one-shot arrival highlight open for the whole test run. At
 # the 450ms production value the class can clear between the PubSub broadcast
 # and the assertion when the suite is running 20 cases in parallel.
