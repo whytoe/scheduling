@@ -291,8 +291,12 @@ defmodule Scheduling.Auth.Identity do
   # Union of every configured role-claim path that is present, so a deployment
   # can grant roles whichever way its provider models them.
   defp roles(claims, client_id) do
-    Auth.role_claims()
-    |> Enum.flat_map(&read_claim_path(claims, &1, client_id))
+    claim_roles = Enum.flat_map(Auth.role_claims(), &read_claim_path(claims, &1, client_id))
+
+    # A machine client carries no `astrum_roles`; its authority comes from a
+    # scheduling-namespace scope instead. Union the two so a token can be
+    # authorised by either — see `Scheduling.Auth.scope_roles/1`.
+    (claim_roles ++ Auth.scope_roles(claims))
     # is_binary/1 also drops any `:null` the provider put in the list.
     |> Enum.filter(&is_binary/1)
     |> Enum.map(&String.downcase/1)

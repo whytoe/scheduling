@@ -91,6 +91,52 @@ defmodule Scheduling.Auth.IdentityTest do
     end
   end
 
+  describe "from_claims/2 — scheduling scope grants roles to a machine token" do
+    # A client-credentials token carries no astrum_roles (those describe a
+    # human); its authority is a scheduling-namespace scope. See
+    # Scheduling.Auth.scope_roles/1 and docs/ac-core-asks.md ask 2.
+    test "scheduling:read + scheduling:write map to viewer + service" do
+      identity =
+        Identity.from_claims(%{
+          "sub" => "svc-checkin",
+          "azp" => "checkin-bridge",
+          "scope" => "openid scheduling:read scheduling:write"
+        })
+
+      assert identity.type == :service
+      assert Enum.sort(identity.roles) == ["service", "viewer"]
+      assert Identity.can_read?(identity)
+      assert Identity.has_any_role?(identity, ["operator", "service", "admin"])
+    end
+
+    test "scheduling:read alone grants read but not write" do
+      identity = Identity.from_claims(%{"sub" => "svc", "scope" => "scheduling:read"})
+
+      assert identity.roles == ["viewer"]
+      assert Identity.can_read?(identity)
+      refute Identity.has_any_role?(identity, ["operator", "service", "admin"])
+    end
+
+    test "scope roles union with claim roles rather than replacing them" do
+      identity =
+        Identity.from_claims(%{
+          "sub" => "u1",
+          "email" => "a@b.c",
+          "astrum_roles" => ["operator"],
+          "scope" => "scheduling:read"
+        })
+
+      assert Enum.sort(identity.roles) == ["operator", "viewer"]
+    end
+
+    test "a non-scheduling scope grants nothing" do
+      identity = Identity.from_claims(%{"sub" => "svc", "scope" => "openid billing:read"})
+
+      assert identity.roles == []
+      refute Identity.can_read?(identity)
+    end
+  end
+
   describe "from_claims/2" do
     test "reads realm roles and this client's roles as one set" do
       claims = %{

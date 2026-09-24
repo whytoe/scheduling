@@ -118,6 +118,30 @@ A token that authenticates but carries no recognised role is **rejected with
 403**, not silently shown an empty board. In the UI that lands on a page saying
 to ask an administrator for access.
 
+### A machine token's roles come from its scope
+
+A client-credentials token — one service calling another, no human — carries no
+`astrum_roles`. Those name a person's grants in the realm, and a machine grant
+has none; ac-core returns `astrum_roles: null` on such a token. Its authority
+is an OAuth **scope** in the scheduling namespace instead, and each maps to a
+role the table above already defines:
+
+```
+scheduling:read   ->  viewer    (read the board, queue, visits)
+scheduling:write  ->  service   (create/accept entries, end visits)
+```
+
+The mapping is unioned with the claim-path roles, not a replacement, so a token
+that somehow carried both is the sum of the two. This is the sole way a machine
+client is authorised — there is no client-id allowlist and no second source of
+truth here. A scope outside the `scheduling:` namespace grants nothing.
+
+The same scope also stands in for the **audience** (see [Opaque access
+tokens](#opaque-access-tokens)): ac-core sets a token's `aud` to its own issuer
+rather than to this resource server, so `aud` cannot tell a token minted *for*
+scheduling from any other token the realm issued. A scheduling-namespace scope
+can, and is accepted as that signal.
+
 ### Why the catalog is admin-only
 
 Offices, capabilities and diagnoses are not per-patient records — they are the
@@ -571,10 +595,15 @@ disables it.
 Two things are worth knowing about how it trusts the answer. oidcc's
 `client_self_only` is deliberately **off** — every token this API sees was
 issued to another client, so the default would reject exactly the traffic the
-API exists for. In its place `active`, `exp` and `aud` are checked here. And
-because RFC 7662 does not require `aud` in the response, a provider that omits
-it reduces that check to "any live token from this realm carrying a role we
-recognise"; the absence is logged. See `Scheduling.Auth.Introspection`.
+API exists for. In its place `active`, `exp` and the "meant for us" question
+are checked here. That last question is answered, in order, by: a
+scheduling-namespace **scope** (see [A machine token's roles come from its
+scope](#a-machine-tokens-roles-come-from-its-scope) — ac-core sets `aud` to its
+own issuer, so scope is what names a token minted for scheduling); then, absent
+that, a recognised `aud`; and because RFC 7662 does not require `aud` in the
+response, a token with neither reduces the check to "any live token from this
+realm carrying a role we recognise", and that acceptance is logged. See
+`Scheduling.Auth.Introspection`.
 
 Introspection authenticates as the **machine** client (`CORE_CLIENT_ID`) where
 one is configured, falling back to the browser client otherwise. It used to use

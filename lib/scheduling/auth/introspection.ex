@@ -187,7 +187,7 @@ defmodule Scheduling.Auth.Introspection do
         Logger.warning("Introspection reported an active token whose exp has passed")
         {:error, :token_expired}
 
-      not audience_permitted?(claims["aud"]) ->
+      not audience_permitted?(claims) ->
         Logger.info("Rejected introspected token: audience #{inspect(claims["aud"])}")
         {:error, :invalid_token}
 
@@ -241,20 +241,31 @@ defmodule Scheduling.Auth.Introspection do
   defp expired?(exp) when is_integer(exp), do: exp <= System.system_time(:second)
   defp expired?(_exp), do: false
 
-  # Absent audience is permitted — see the known gap in the moduledoc. Logged
-  # rather than silent, because this is the one path where a token is accepted
-  # without anything having confirmed it was meant for this deployment.
-  defp audience_permitted?(nil) do
-    Logger.info("Introspection response carried no audience; accepting on roles alone")
-    true
-  end
+  # Whether the token was meant for this deployment. In order:
+  #
+  #   * a scheduling-namespace **scope** names us directly, so it stands in for
+  #     the audience — ac-core sets `aud` to its own issuer rather than to a
+  #     resource server, and a scope is how a token minted *for* scheduling is
+  #     recognised (docs/ac-core-asks.md ask 3);
+  #   * an absent `aud` is permitted on roles alone (the known gap), logged
+  #     because it is the one path accepting a token without confirming intent;
+  #   * otherwise `aud` must be in the trusted list.
+  defp audience_permitted?(claims) do
+    cond do
+      Auth.scheduling_scoped?(claims) ->
+        true
 
-  defp audience_permitted?(aud) do
-    trusted = Auth.trusted_audiences()
+      is_nil(claims["aud"]) ->
+        Logger.info("Introspection response carried no audience; accepting on roles alone")
+        true
 
-    aud
-    |> List.wrap()
-    |> Enum.any?(&(&1 in trusted))
+      true ->
+        trusted = Auth.trusted_audiences()
+
+        claims["aud"]
+        |> List.wrap()
+        |> Enum.any?(&(&1 in trusted))
+    end
   end
 
   defp unavailable(reason) do

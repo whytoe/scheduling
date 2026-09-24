@@ -215,6 +215,50 @@ defmodule Scheduling.Auth do
       ["astrum_roles", "roles", "realm_access.roles", "resource_access.<client_id>.roles"]
   end
 
+  @scope_roles %{"scheduling:read" => "viewer", "scheduling:write" => "service"}
+
+  @doc """
+  Roles granted by a token's scheduling-namespace OAuth scopes.
+
+  ac-core grants a machine client `scheduling:read` / `scheduling:write`
+  (docs/ac-core-asks.md ask 2); a client-credentials token then carries them in
+  its space-delimited `scope` claim, and carries **no** `astrum_roles` — those
+  describe a human, and a client-credentials grant has none. This maps the scope
+  onto the roles the rest of the app already understands, so a scoped service
+  token authorises without a client-id allowlist or any second source of truth
+  here:
+
+      scheduling:read  -> viewer   (read the board, queue, visits)
+      scheduling:write -> service  (create/accept entries, end visits)
+
+  Returns `[]` when the token carries no recognised scheduling scope.
+  """
+  @spec scope_roles(map()) :: [String.t()]
+  def scope_roles(claims) when is_map(claims) do
+    claims
+    |> Map.get("scope")
+    |> scope_list()
+    |> Enum.flat_map(&List.wrap(Map.get(@scope_roles, &1)))
+  end
+
+  # A JWT carries `scope` as the RFC 6749 space-delimited string; oidcc's
+  # introspection has already parsed its `scope` field into a list of binaries
+  # (`oidcc_scope:parse/1`). Accept both so the same mapping serves both paths.
+  defp scope_list(scope) when is_binary(scope), do: String.split(scope)
+  defp scope_list(scope) when is_list(scope), do: Enum.filter(scope, &is_binary/1)
+  defp scope_list(_), do: []
+
+  @doc """
+  True when the token carries a recognised scheduling scope.
+
+  Used as the audience substitute in `Scheduling.Auth.Introspection`: ac-core
+  sets `aud` to its own issuer rather than to this resource server, so a token
+  minted *for* scheduling is recognised by its scope instead — the substitute
+  ask 3 anticipated for exactly the case where `aud` cannot do the job.
+  """
+  @spec scheduling_scoped?(map()) :: boolean()
+  def scheduling_scoped?(claims) when is_map(claims), do: scope_roles(claims) != []
+
   @doc """
   Claim naming the identity's organisation. Display only — the enforced value
   is the id from `org_id_claim/0`, since names change and ids do not.
