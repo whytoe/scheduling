@@ -213,6 +213,46 @@ defmodule Scheduling.Auth.IntrospectionTest do
     end
   end
 
+  describe "a machine token authorised by its scheduling scope" do
+    # The real ac-core client-credentials token: `aud` is ac-core's own issuer
+    # (not this resource server), there are no `astrum_roles` — those describe a
+    # human — and the only thing naming scheduling is the scope. See
+    # docs/ac-core-asks.md ask 2/3.
+    defp machine_token(scope) do
+      active_response(%{
+        "aud" => "https://ac-core.example",
+        "astrum_roles" => nil,
+        "scope" => scope
+      })
+    end
+
+    test "is accepted despite an issuer audience, because the scope names us", ctx do
+      # Without the scope substitute this is exactly the "issued to another
+      # client" case and would be refused. The scope is what makes it ours.
+      stub_introspection(ctx, machine_token("scheduling:read scheduling:write"))
+
+      assert {:ok, identity} = Tokens.validate(@opaque_token)
+      assert "viewer" in identity.roles
+      assert "service" in identity.roles
+    end
+
+    test "read-only scope grants read but not write", ctx do
+      stub_introspection(ctx, machine_token("scheduling:read"))
+
+      assert {:ok, identity} = Tokens.validate(@opaque_token)
+      assert "viewer" in identity.roles
+      refute "service" in identity.roles
+    end
+
+    test "an unrelated scope over an issuer audience is still refused", ctx do
+      # A scope that names some other resource server must not smuggle a token
+      # in; only the scheduling namespace stands in for the audience.
+      stub_introspection(ctx, machine_token("openid billing:read"))
+
+      assert {:error, :invalid_token} = Tokens.validate(@opaque_token)
+    end
+  end
+
   describe "the JWT fast path" do
     test "a valid JWT never reaches the introspection endpoint", ctx do
       # The property that keeps an IdP round-trip off every API request.
